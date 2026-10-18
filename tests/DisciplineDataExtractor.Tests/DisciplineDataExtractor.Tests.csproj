@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" PrivateAssets="all" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\DisciplineDataExtractor\DisciplineDataExtractor.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Реальные файлы этапа 2 (должности — обезличенная копия), см. tests/fixtures/README.md. -->
+    <None Include="..\fixtures\*.xlsx;..\fixtures\*.docx" LinkBase="fixtures" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>
