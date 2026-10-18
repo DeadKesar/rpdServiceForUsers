@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using RpdFos.Core.Data;
 using RpdFos.Core.Data.Entities;
+using RpdFos.Core.Directory;
 using Parsed = DisciplineDataExtractor;
 
 namespace RpdFos.Core.Import;
@@ -103,7 +104,7 @@ public sealed class ReferenceImporter(AppDbContext db, TimeProvider clock)
             var direction = await UpsertDirectionAsync(p, ct);
             var profile = await UpsertProfileAsync(direction, p.Profile!, ct);
             if (await UpsertFgosAsync(direction, p.Fgos, ct) is { } fgos)
-                await UpsertCompetencesAsync(fgos, r.Competences, ct);
+                await UpsertCompetencesAsync(fgos, profile, r.Competences, ct);
             else if (r.Competences.Count > 0)
                 Error(files.CompetenceList, "ФГОС учебного плана не определён: компетенции и матрица не загружены");
             await UpsertEmployeesAsync(r.Employees, ct);
@@ -262,18 +263,26 @@ public sealed class ReferenceImporter(AppDbContext db, TimeProvider clock)
             return fgos;
         }
 
-        private async Task UpsertCompetencesAsync(Fgos fgos, IReadOnlyList<Parsed.Competence> parsed, CancellationToken ct)
+        private async Task UpsertCompetencesAsync(
+            Fgos fgos, StudyProfile profile, IReadOnlyList<Parsed.Competence> parsed, CancellationToken ct)
         {
-            var existing = await db.Competences.Include(c => c.Indicators)
-                .Where(c => c.FgosId == fgos.Id).ToDictionaryAsync(c => c.Code, ct);
+            // УК и ОПК — общие для ФГОС, ПК — свои у профиля: ключи (fgos, код) и (профиль, код).
+            var existing = (await db.Competences.Include(c => c.Indicators)
+                    .Where(c => (c.FgosId == fgos.Id && c.ProfileId == null) || c.ProfileId == profile.Id)
+                    .ToListAsync(ct))
+                .GroupBy(c => c.Code)
+                .ToDictionary(g => g.Key, g => g.OrderByDescending(c => c.ProfileId == profile.Id).First());
 
             foreach (var c in parsed)
             {
-                if (!existing.TryGetValue(c.Code, out var competence))
+                var professional = c.Category == Parsed.CompetenceCategory.Professional;
+                if (!existing.TryGetValue(c.Code, out var competence) || professional != (competence.ProfileId is not null))
                 {
-                    competence = new Competence { FgosId = fgos.Id, Code = c.Code };
+                    competence = new Competence { Code = c.Code };
                     db.Competences.Add(competence);
                 }
+                competence.FgosId = fgos.Id;
+                competence.ProfileId = professional ? profile.Id : null;
                 competence.Category = c.Category switch
                 {
                     Parsed.CompetenceCategory.Universal => CompetenceCategories.Universal,
@@ -315,10 +324,28 @@ public sealed class ReferenceImporter(AppDbContext db, TimeProvider clock)
         {
             if (parsed.Count == 0) return;
             var designations = parsed.Select(e => e.OfficialName).ToList();
-            var existing = await db.Employees.Where(e => e.OfficialDesignation != null && designations.Contains(e.OfficialDesignation))
+            // Ключ — официальное название (должность) среди активных записей.
+            var existing = await db.Employees
+                .Where(e => e.IsActive && e.OfficialDesignation != null && designations.Contains(e.OfficialDesignation))
                 .ToDictionaryAsync(e => e.OfficialDesignation!, ct);
+
+            // На должности другой человек: прежняя запись становится неактивной, а не переписывается —
+            // на неё ссылаются прошлые согласования (document_signatures.resolved_user_id).
+            var replaced = false;
+            foreach (var e in parsed)
+            {
+                if (!existing.TryGetValue(e.OfficialName, out var previous) || previous.ShortName == e.FullName) continue;
+                previous.IsActive = false;
+                previous.UpdatedAt = now;
+                existing.Remove(e.OfficialName);
+                replaced = true;
+                Warning(files.Employees, $"«{e.OfficialName}»: на должности новый сотрудник — прежняя запись «{previous.ShortName}» неактивна");
+            }
+            // Частичные уникальные индексы смотрят только на активные записи: прежнюю — отключить до вставки новой.
+            if (replaced) await db.SaveChangesAsync(ct);
+
             // Занятые места подписантов: заведующий — один на кафедру, директор — один на институт.
-            var taken = (await db.Employees.Where(e => e.SignatoryRole != null)
+            var taken = (await db.Employees.Where(e => e.IsActive && e.SignatoryRole != null)
                     .Select(e => new { e.OfficialDesignation, e.SignatoryRole, e.DepartmentId, e.InstituteId }).ToListAsync(ct))
                 .Where(x => x.OfficialDesignation is null || !designations.Contains(x.OfficialDesignation))
                 .Select(x => SeatOf(x.SignatoryRole, x.DepartmentId, x.InstituteId))
@@ -349,7 +376,7 @@ public sealed class ReferenceImporter(AppDbContext db, TimeProvider clock)
                     role = null;
                 }
 
-                var nameForDocument = EmployeeRules.NameForDocument(e.FullName);
+                var nameForDocument = PersonNames.NameForDocument(e.FullName);
                 if (nameForDocument is null)
                     Warning(files.Employees, $"«{e.OfficialName}»: ФИО «{e.FullName}» не в формате «Фамилия И. О.» — подпись не переставлена");
 

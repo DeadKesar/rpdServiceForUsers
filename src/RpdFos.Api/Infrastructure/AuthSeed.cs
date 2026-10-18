@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Identity;
 using OpenIddict.Abstractions;
 using RpdFos.Core.Data.Entities;
+using RpdFos.Core.Directory;
 using static OpenIddict.Abstractions.OpenIddictConstants;
 
 namespace RpdFos.Api.Infrastructure;
@@ -81,9 +82,10 @@ public static class AuthSeed
         }
 
         var users = services.GetRequiredService<UserManager<AppUser>>();
-        if (await users.FindByEmailAsync(email) is null)
+        var admin = await users.FindByEmailAsync(email);
+        if (admin is null)
         {
-            var admin = new AppUser { UserName = email, Email = email, EmailConfirmed = true, FullName = "Администратор" };
+            admin = new AppUser { UserName = email, Email = email, EmailConfirmed = true, FullName = "Администратор" };
             var created = await users.CreateAsync(admin, password);
             if (!created.Succeeded)
                 throw new InvalidOperationException("Не удалось создать администратора: "
@@ -99,5 +101,10 @@ public static class AuthSeed
                     + string.Join("; ", assigned.Errors.Select(e => e.Description)));
             }
         }
+
+        // 4. Запись администратора в справочнике сотрудников — и для созданного на этапе 1, у которого её нет.
+        var (_, problem) = await services.GetRequiredService<DirectoryAccounts>().LinkAsync(admin);
+        if (problem is not null)
+            logger.LogWarning("Администратор не связан со справочником сотрудников: {Problem}", problem);
     }
 }

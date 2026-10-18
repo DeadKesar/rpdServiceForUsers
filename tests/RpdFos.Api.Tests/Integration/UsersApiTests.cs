@@ -1,0 +1,100 @@
+using System.Net;
+using System.Net.Http.Json;
+using System.Security.Claims;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using RpdFos.Api.Features.Users;
+using RpdFos.Core.Data.Entities;
+using RpdFos.Core.Directory;
+using Xunit;
+
+namespace RpdFos.Api.Tests.Integration;
+
+/// <summary>Учётная запись ↔ справочник сотрудников: создание записи справочника или привязка к существующей.</summary>
+[Collection(DatabaseCollection.Name)]
+public class UsersApiTests(DatabaseFixture app)
+{
+    private const string Password = "Test-Passw0rd";
+
+    private static string NewEmail() => $"user-{Guid.NewGuid():N}@test.local";
+
+    private Task<HttpResponseMessage> CreateAsync(CreateUserRequest rq) =>
+        app.CreateClientFor(AppRoles.Admin).PostAsJsonAsync("/api/admin/users", rq);
+
+    [Fact]
+    public async Task New_account_gets_its_own_directory_record()
+    {
+        var email = NewEmail();
+        var response = await CreateAsync(new CreateUserRequest(email, "Петров Пётр Петрович", Password, AppRoles.Teacher));
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var item = (await response.Content.ReadFromJsonAsync<UserItem>())!;
+        await app.WithDbAsync(async db =>
+        {
+            var e = await db.Employees.SingleAsync(x => x.Id == item.DirectoryUserId);
+            Assert.Equal((item.Id.ToString(), true, true, email), (e.IdentitySubject, e.CanLogin, e.IsActive, e.Email));
+            Assert.Equal(("Петров Пётр Петрович", "Петров П. П.", "П. П. Петров"), (e.FullName, e.ShortName, e.NameForDocument));
+        });
+    }
+
+    [Fact]
+    public async Task Account_can_be_linked_to_existing_directory_record()
+    {
+        // Запись справочника из файла должностей: без входа, только «Фамилия И. О.».
+        var record = new Employee
+        {
+            ShortName = "Сидоров С. С.", NameForDocument = "С. С. Сидоров", OfficialDesignation = $"Кафедра {Guid.NewGuid():N}",
+            Position = "Заведующий кафедрой", CanLogin = false, CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow
+        };
+        await app.WithDbAsync(async db =>
+        {
+            db.Employees.Add(record);
+            await db.SaveChangesAsync();
+        });
+
+        var email = NewEmail();
+        var response = await CreateAsync(new CreateUserRequest(email, "Сидоров Семён Семёнович", Password, AppRoles.Teacher, record.Id));
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var item = (await response.Content.ReadFromJsonAsync<UserItem>())!;
+        Assert.Equal(record.Id, item.DirectoryUserId);
+        await app.WithDbAsync(async db =>
+        {
+            var e = await db.Employees.SingleAsync(x => x.Id == record.Id);
+            Assert.Equal((item.Id.ToString(), true, email), (e.IdentitySubject, e.CanLogin, e.Email));
+            // ФИО полностью — из учётной записи; подпись и должность — как в справочнике.
+            Assert.Equal(("Сидоров Семён Семёнович", "Сидоров С. С.", "Заведующий кафедрой"), (e.FullName, e.ShortName, e.Position));
+            Assert.Equal(1, await db.Employees.CountAsync(x => x.Email == email));
+        });
+
+        // Вторую учётную запись к той же записи не привязать — и сама учётная запись не остаётся.
+        var otherEmail = NewEmail();
+        var again = await CreateAsync(new CreateUserRequest(otherEmail, "Сидоров Семён Семёнович", Password, AppRoles.Teacher, record.Id));
+        Assert.Equal(HttpStatusCode.Conflict, again.StatusCode);
+        await app.WithDbAsync(async db => Assert.False(await db.Users.AnyAsync(u => u.Email == otherEmail)));
+    }
+
+    [Fact]
+    public async Task Unknown_directory_record_is_404_and_account_is_not_created()
+    {
+        var email = NewEmail();
+        var response = await CreateAsync(new CreateUserRequest(email, "Иванов Иван Иванович", Password, AppRoles.Teacher, Guid.NewGuid()));
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        await app.WithDbAsync(async db => Assert.False(await db.Users.AnyAsync(u => u.Email == email)));
+    }
+
+    [Fact]
+    public async Task Directory_record_of_current_user_is_found_by_sub()
+    {
+        var response = await CreateAsync(new CreateUserRequest(NewEmail(), "Кузнецов Кирилл Кириллович", Password, AppRoles.Methodist));
+        var item = (await response.Content.ReadFromJsonAsync<UserItem>())!;
+
+        await using var scope = app.Services.CreateAsyncScope();
+        var directory = scope.ServiceProvider.GetRequiredService<DirectoryAccounts>();
+        ClaimsPrincipal User(string sub) => new(new ClaimsIdentity([new Claim(DirectoryAccounts.SubjectClaim, sub)], "test"));
+
+        Assert.Equal(item.DirectoryUserId, await directory.FindIdAsync(User(item.Id.ToString())));
+        Assert.Null(await directory.FindIdAsync(User(Guid.NewGuid().ToString())));
+    }
+}

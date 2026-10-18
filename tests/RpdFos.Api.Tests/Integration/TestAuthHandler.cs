@@ -17,6 +17,7 @@ public sealed class TestAuthHandler(
 {
     public const string SchemeName = "Test";
     public const string RoleHeader = "X-Test-Role";
+    public const string SubjectHeader = "X-Test-Subject";
 
     protected override Task<AuthenticateResult> HandleAuthenticateAsync()
     {
@@ -24,10 +25,14 @@ public sealed class TestAuthHandler(
         if (!Request.Headers.TryGetValue(RoleHeader, out var role) || string.IsNullOrEmpty(role))
             return Task.FromResult(AuthenticateResult.NoResult());
 
-        // Утверждения — как в токене доступа OpenIddict: sub, name, role.
+        // Утверждения — как в токене доступа OpenIddict: sub, name, role. sub можно задать заголовком —
+        // чтобы связать запрос с записью справочника сотрудников.
+        var subject = Request.Headers.TryGetValue(SubjectHeader, out var s) && !string.IsNullOrEmpty(s)
+            ? s.ToString()
+            : Guid.NewGuid().ToString();
         var identity = new ClaimsIdentity(
             [
-                new Claim(Claims.Subject, Guid.NewGuid().ToString()),
+                new Claim(Claims.Subject, subject),
                 new Claim(Claims.Name, $"Тестовый {role}"),
                 new Claim(Claims.Role, role.ToString())
             ],

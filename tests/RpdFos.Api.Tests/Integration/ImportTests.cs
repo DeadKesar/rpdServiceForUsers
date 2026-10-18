@@ -82,6 +82,27 @@ public class ImportTests(DatabaseFixture app, ITestOutputHelper output)
             Assert.Equal(2, plans.Count);
             Assert.Equal(plans[0] + 1, plans[1]);
         });
+
+        // Смена человека на должности: в файле должностей у заведующего ИТиВС другое ФИО.
+        const string itvsHead = "Информационные технологии и вычислительные системы";
+        var third = await ImportAsync(methodist, ReadFixtures(), r => r with
+        {
+            Employees = r.Employees.Select(e => e.OfficialName == itvsHead ? e with { FullName = "Преемников П. П." } : e).ToList()
+        });
+        var afterThird = await CountsAsync();
+
+        Assert.Equal(ParserRunStatuses.Partial, third.Status);
+        Assert.Equal(1, afterThird["users"] - afterSecond["users"]);
+        await WithDbAsync(async db =>
+        {
+            var rows = await db.Employees.Where(e => e.OfficialDesignation == itvsHead).OrderBy(e => e.CreatedAt).ToListAsync();
+            Assert.Equal(2, rows.Count);
+            // Прежняя запись не переписана — на неё могут ссылаться прошлые согласования.
+            Assert.Equal(("Сотрудник18 И. О.", false), (rows[0].ShortName, rows[0].IsActive));
+            Assert.Equal(("Преемников П. П.", "П. П. Преемников", SignatoryRoles.DepartmentHead, true),
+                (rows[1].ShortName, rows[1].NameForDocument, rows[1].SignatoryRole, rows[1].IsActive));
+            Assert.Equal(rows[0].DepartmentId, rows[1].DepartmentId);
+        });
     }
 
     // Проверки строк после первого импорта: кафедры, направление, ФГОС, дисциплины, матрица, подписанты.
@@ -113,6 +134,12 @@ public class ImportTests(DatabaseFixture app, ITestOutputHelper output)
             var competences = await db.CompetenceMatrix.Where(m => m.DisciplineId == modelling.Id)
                 .Join(db.Competences, m => m.CompetenceId, c => c.Id, (m, c) => c.Code).OrderBy(c => c).ToListAsync();
             Assert.Equal(["ОПК-1", "ОПК-4", "УК-1"], competences);
+
+            // ПК — у профиля плана, УК и ОПК — общие для ФГОС.
+            var profileId = await db.CurriculumPlans.Where(p => p.Id == run.CreatedCurriculumPlanId).Select(p => p.ProfileId).SingleAsync();
+            var all = await db.Competences.Where(c => c.FgosId == fgos.Id).ToListAsync();
+            Assert.Equal(3, all.Count(c => c.Category == CompetenceCategories.Professional && c.ProfileId == profileId));
+            Assert.Equal(14, all.Count(c => c.Category != CompetenceCategories.Professional && c.ProfileId == null));
 
             // Подписанты: категория согласована с оргструктурой, подпись — «И. О. Фамилия».
             var head = await db.Employees.SingleAsync(e => e.OfficialDesignation == "Информационные технологии и вычислительные системы");
@@ -181,7 +208,8 @@ public class ImportTests(DatabaseFixture app, ITestOutputHelper output)
     }
 
     /// <summary>Как фоновая задача импорта: файлы — в uploaded_files, запуск — в parser_runs, разбор — из базы.</summary>
-    private async Task<ParserRun> ImportAsync(Guid methodist, IReadOnlyList<(string Name, byte[] Content)> files)
+    private async Task<ParserRun> ImportAsync(
+        Guid methodist, IReadOnlyList<(string Name, byte[] Content)> files, Func<ExtractionResult, ExtractionResult>? change = null)
     {
         await using var scope = app.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -203,6 +231,7 @@ public class ImportTests(DatabaseFixture app, ITestOutputHelper output)
 
         SourceFile Source(int i) => new(uploaded[i].OriginalName, uploaded[i].Content!);
         var result = new DataExtractor().Extract(new ExtractionInput(Source(0), Source(1), Source(2), Source(3)));
+        if (change is not null) result = change(result); // как если бы в файле были другие данные
         return await scope.ServiceProvider.GetRequiredService<ReferenceImporter>().ImportAsync(run.Id, result);
     }
 

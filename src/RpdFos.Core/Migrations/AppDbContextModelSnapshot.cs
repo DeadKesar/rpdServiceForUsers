@@ -569,6 +569,10 @@ namespace RpdFos.Core.Migrations
                         .HasColumnType("text")
                         .HasColumnName("formulation");
 
+                    b.Property<Guid?>("ProfileId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("profile_id");
+
                     b.HasKey("Id")
                         .HasName("pk_competences");
 
@@ -577,7 +581,13 @@ namespace RpdFos.Core.Migrations
 
                     b.HasIndex("FgosId", "Code")
                         .IsUnique()
-                        .HasDatabaseName("ix_competences_fgos_id_code");
+                        .HasDatabaseName("ix_competences_fgos_id_code")
+                        .HasFilter("profile_id IS NULL");
+
+                    b.HasIndex("ProfileId", "Code")
+                        .IsUnique()
+                        .HasDatabaseName("ix_competences_profile_id_code")
+                        .HasFilter("profile_id IS NOT NULL");
 
                     b.ToTable("competences", (string)null);
                 });
@@ -1068,7 +1078,7 @@ namespace RpdFos.Core.Migrations
                     b.HasIndex("OfficialDesignation")
                         .IsUnique()
                         .HasDatabaseName("ix_users_official_designation")
-                        .HasFilter("official_designation IS NOT NULL");
+                        .HasFilter("official_designation IS NOT NULL AND is_active");
 
                     b.HasIndex("CanLogin", "IsActive")
                         .HasDatabaseName("ix_users_can_login_is_active");
@@ -1076,12 +1086,12 @@ namespace RpdFos.Core.Migrations
                     b.HasIndex(new[] { "SignatoryRole", "DepartmentId" }, "ux_users_department_signatory")
                         .IsUnique()
                         .HasDatabaseName("ix_users_signatory_role_department_id")
-                        .HasFilter("signatory_role IN ('department_head', 'department_head_acting') AND department_id IS NOT NULL");
+                        .HasFilter("signatory_role IN ('department_head', 'department_head_acting') AND department_id IS NOT NULL AND is_active");
 
                     b.HasIndex(new[] { "SignatoryRole", "InstituteId" }, "ux_users_institute_signatory")
                         .IsUnique()
                         .HasDatabaseName("ix_users_signatory_role_institute_id")
-                        .HasFilter("signatory_role = 'institute_director'");
+                        .HasFilter("signatory_role = 'institute_director' AND is_active");
 
                     b.ToTable("users", null, t =>
                         {
@@ -1501,6 +1511,12 @@ namespace RpdFos.Core.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_competences_fgos_fgos_id");
+
+                    b.HasOne("RpdFos.Core.Data.Entities.StudyProfile", null)
+                        .WithMany()
+                        .HasForeignKey("ProfileId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_competences_study_profiles_profile_id");
                 });
 
             modelBuilder.Entity("RpdFos.Core.Data.Entities.CompetenceIndicator", b =>

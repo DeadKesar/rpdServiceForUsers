@@ -85,9 +85,12 @@ internal sealed class CompetenceConfiguration : IEntityTypeConfiguration<Compete
         e.Property(x => x.Code).HasMaxLength(20);
         e.Property(x => x.Category).HasMaxLength(10);
         e.Property(x => x.CategoryName).HasMaxLength(255);
-        e.HasIndex(x => new { x.FgosId, x.Code }).IsUnique();
+        // УК и ОПК уникальны в ФГОС, ПК — в профиле: у разных профилей одного направления свои ПК-1…ПК-N.
+        e.HasIndex(x => new { x.FgosId, x.Code }).IsUnique().HasFilter("profile_id IS NULL");
+        e.HasIndex(x => new { x.ProfileId, x.Code }).IsUnique().HasFilter("profile_id IS NOT NULL");
         e.HasIndex(x => x.Category);
         e.HasOne<Fgos>().WithMany().HasForeignKey(x => x.FgosId).OnDelete(DeleteBehavior.Restrict);
+        e.HasOne<StudyProfile>().WithMany().HasForeignKey(x => x.ProfileId).OnDelete(DeleteBehavior.Restrict);
         e.HasMany(x => x.Indicators).WithOne().HasForeignKey(x => x.CompetenceId).OnDelete(DeleteBehavior.Cascade);
     }
 }

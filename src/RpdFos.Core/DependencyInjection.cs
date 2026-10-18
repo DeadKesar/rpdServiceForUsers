@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using RpdFos.Core.Data;
 using RpdFos.Core.Data.Interceptors;
+using RpdFos.Core.Directory;
 using RpdFos.Core.Import;
 
 namespace RpdFos.Core;
@@ -22,6 +23,7 @@ public static class DependencyInjection
             .UseOpenIddict()
             .AddInterceptors(sp.GetRequiredService<VersioningInterceptor>()));
         services.AddScoped<ReferenceImporter>();
+        services.AddScoped<DirectoryAccounts>();
         return services;
     }
 }

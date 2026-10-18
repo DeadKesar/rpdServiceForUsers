@@ -1,12 +1,14 @@
 using System.Net.Http.Headers;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using OpenIddict.Validation.AspNetCore;
 using RpdFos.Core.Data;
+using RpdFos.Core.Data.Entities;
 using Testcontainers.PostgreSql;
 using Xunit;
 
@@ -38,14 +40,19 @@ public sealed class DatabaseFixture : WebApplicationFactory<Program>, IAsyncLife
         });
     }
 
-    /// <summary>Клиент API от имени пользователя с ролью; без роли — анонимный.</summary>
-    public HttpClient CreateClientFor(string? role)
+    /// <summary>
+    /// Клиент API от имени пользователя с ролью; без роли — анонимный. <paramref name="subject"/> — утверждение sub
+    /// (id учётной записи), чтобы запрос связался с записью справочника сотрудников.
+    /// </summary>
+    public HttpClient CreateClientFor(string? role, string? subject = null)
     {
         // OpenIddict принимает только HTTPS, поэтому и тестовый клиент ходит по https.
         var client = CreateClient(new WebApplicationFactoryClientOptions { BaseAddress = new Uri("https://localhost") });
         client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
         if (role is not null)
             client.DefaultRequestHeaders.Add(TestAuthHandler.RoleHeader, role);
+        if (subject is not null)
+            client.DefaultRequestHeaders.Add(TestAuthHandler.SubjectHeader, subject);
         return client;
     }
 
@@ -67,6 +74,12 @@ public sealed class DatabaseFixture : WebApplicationFactory<Program>, IAsyncLife
 
             await db.Database.MigrateAsync();
         });
+
+        // Роли — как засев в Development (в окружении Testing засев не запускается).
+        await using var scope = Services.CreateAsyncScope();
+        var roles = scope.ServiceProvider.GetRequiredService<RoleManager<IdentityRole<Guid>>>();
+        foreach (var role in AppRoles.All)
+            await roles.CreateAsync(new IdentityRole<Guid>(role));
     }
 
     async Task IAsyncLifetime.DisposeAsync()

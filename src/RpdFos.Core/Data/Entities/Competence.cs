@@ -1,10 +1,17 @@
 namespace RpdFos.Core.Data.Entities;
 
-/// <summary>Компетенция по ФГОС (таблица competences). <see cref="CategoryName"/> — группа, только у УК.</summary>
+/// <summary>
+/// Компетенция (таблица competences). УК и ОПК задаёт ФГОС — <see cref="ProfileId"/> пуст;
+/// ПК задаёт образовательная программа — <see cref="ProfileId"/> указывает профиль.
+/// <see cref="CategoryName"/> — группа, только у УК.
+/// </summary>
 public class Competence
 {
     public Guid Id { get; set; } = Guid.NewGuid();
     public Guid FgosId { get; set; }
+
+    /// <summary>Профиль — только у ПК (ограничение прототипа: ПК на профиль, а не на год набора).</summary>
+    public Guid? ProfileId { get; set; }
 
     /// <summary>Код — «УК-1», «ОПК-3», «ПК-5».</summary>
     public string Code { get; set; } = "";

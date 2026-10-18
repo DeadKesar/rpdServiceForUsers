@@ -42,12 +42,14 @@ internal sealed class EmployeeConfiguration : IEntityTypeConfiguration<Employee>
         e.Property(x => x.IsActive).HasDefaultValue(true).HasSentinel(true);
 
         e.HasIndex(x => x.Email).IsUnique().HasFilter("email IS NOT NULL");
-        e.HasIndex(x => x.OfficialDesignation).IsUnique().HasFilter("official_designation IS NOT NULL");
         e.HasIndex(x => x.IdentitySubject).IsUnique();
+        // Должность и место подписанта уникальны только среди активных записей: при смене человека
+        // старая запись остаётся неактивной — на неё ссылаются прошлые согласования.
+        e.HasIndex(x => x.OfficialDesignation).IsUnique().HasFilter("official_designation IS NOT NULL AND is_active");
         e.HasIndex(x => new { x.SignatoryRole, x.DepartmentId }, "ux_users_department_signatory").IsUnique()
-            .HasFilter($"signatory_role IN ({heads}) AND department_id IS NOT NULL");
+            .HasFilter($"signatory_role IN ({heads}) AND department_id IS NOT NULL AND is_active");
         e.HasIndex(x => new { x.SignatoryRole, x.InstituteId }, "ux_users_institute_signatory").IsUnique()
-            .HasFilter($"signatory_role = '{SignatoryRoles.InstituteDirector}'");
+            .HasFilter($"signatory_role = '{SignatoryRoles.InstituteDirector}' AND is_active");
         e.HasIndex(x => x.DepartmentId);
         e.HasIndex(x => x.InstituteId);
         e.HasIndex(x => new { x.CanLogin, x.IsActive });
