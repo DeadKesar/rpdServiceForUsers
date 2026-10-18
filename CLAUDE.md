@@ -56,7 +56,7 @@ dotnet ef migrations add <Имя> -p src/RpdFos.Core -s src/RpdFos.Api
 
 ## Git
 
-Ветка `main`. Коммиты мелкие, в стиле Conventional Commits: `feat:`, `fix:`, `chore:`, `test:`, `docs:`, `refactor:`. Перед коммитом `dotnet build` и `dotnet test` — зелёные. Веха этапа — аннотированный тег: `git tag -a v0.N -m "…"`.
+Ветка `main`. Коммиты мелкие, в стиле Conventional Commits: `feat:`, `fix:`, `chore:`, `test:`, `docs:`, `refactor:`. Перед коммитом `dotnet build` и `dotnet test` — зелёные. После каждого коммита — `git push` (разрешено автором; отдельного подтверждения не нужно). Веха этапа — аннотированный тег: `git tag -a v0.N -m "…"`, push вместе с тегами (`git push --follow-tags`).
 
 ## Чего не делать
 
