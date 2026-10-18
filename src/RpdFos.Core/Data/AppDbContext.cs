@@ -10,10 +10,31 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
 {
     public DbSet<DocumentTemplate> DocumentTemplates => Set<DocumentTemplate>();
 
+    // Справочники (контекст Reference) и справочник сотрудников.
+    public DbSet<Institute> Institutes => Set<Institute>();
+    public DbSet<Department> Departments => Set<Department>();
+    public DbSet<StudyDirection> StudyDirections => Set<StudyDirection>();
+    public DbSet<StudyProfile> StudyProfiles => Set<StudyProfile>();
+    public DbSet<Fgos> Fgos => Set<Fgos>();
+    public DbSet<Competence> Competences => Set<Competence>();
+    public DbSet<CompetenceIndicator> CompetenceIndicators => Set<CompetenceIndicator>();
+    public DbSet<CurriculumPlan> CurriculumPlans => Set<CurriculumPlan>();
+    public DbSet<Discipline> Disciplines => Set<Discipline>();
+    public DbSet<DisciplineSemesterDetails> DisciplineSemesterDetails => Set<DisciplineSemesterDetails>();
+    public DbSet<CompetenceMatrixEntry> CompetenceMatrix => Set<CompetenceMatrixEntry>();
+    public DbSet<Employee> Employees => Set<Employee>();
+
+    // Импорт исходных файлов (контекст Infrastructure).
+    public DbSet<UploadedFile> UploadedFiles => Set<UploadedFile>();
+    public DbSet<ParserRun> ParserRuns => Set<ParserRun>();
+
     protected override void OnModelCreating(ModelBuilder b)
     {
         // Таблицы Identity: учётные записи, роли, связи. Таблицы OpenIddict добавляет UseOpenIddict().
         base.OnModelCreating(b);
+
+        // Справочники и импорт — конфигурации в Data/Configurations.
+        b.ApplyConfigurationsFromAssembly(typeof(AppDbContext).Assembly);
 
         b.Entity<DocumentTemplate>(e =>
         {
