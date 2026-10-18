@@ -40,8 +40,12 @@ dotnet run --project src/RpdFos.Api
 
 ```
 dotnet build                            # без ошибок и предупреждений
-dotnet test                             # база данных не нужна
+dotnet test                             # нужен запущенный Docker
 ```
+
+Интеграционные тесты (`tests/RpdFos.Api.Tests/Integration`) поднимают чистую PostgreSQL 17 в контейнере
+(Testcontainers) и применяют к ней миграции; база разработки не используется. Аутентификация в них —
+тестовая схема (роль из заголовка `X-Test-Role`), политики доступа — рабочие.
 
 ## Миграции
 
