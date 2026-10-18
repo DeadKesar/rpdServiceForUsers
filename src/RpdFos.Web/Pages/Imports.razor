@@ -1,0 +1,263 @@
+@page "/imports"
+@attribute [Authorize(Roles = "methodist,admin")]
+@implements IDisposable
+@using System.Net
+@using System.Net.Http.Headers
+@using System.Net.Http.Json
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.WebAssembly.Authentication
+@inject HttpClient Http
+
+<PageTitle>Импорт данных</PageTitle>
+
+<h1>Импорт данных</h1>
+
+<p>
+    Исходные данные загружаются в справочники: учебный план, список и матрица компетенций, должности сотрудников.
+    Разбор идёт в фоне; повторная загрузка того же плана создаёт его новую версию.
+</p>
+
+<div class="row g-3 mb-3" style="max-width: 720px">
+    @foreach (var slot in slots)
+    {
+        <div class="col-12">
+            <label class="form-label">@slot.Title @(slot.Required ? "" : "(необязательно)") — <code>@slot.Extension</code></label>
+            <InputFile class="form-control" accept="@slot.Extension" OnChange="e => slot.File = e.File" disabled="@busy" />
+        </div>
+    }
+</div>
+
+<button class="btn btn-primary mb-3" @onclick="UploadAsync" disabled="@(busy || slots.Any(s => s.Required && s.File is null))">
+    Загрузить
+</button>
+
+@if (message is not null)
+{
+    <div class="alert @(messageIsError ? "alert-danger" : "alert-info")" role="status">@message</div>
+}
+@if (rejected.Count > 0)
+{
+    <ul class="text-danger">
+        @foreach (var error in rejected)
+        {
+            <li>@error</li>
+        }
+    </ul>
+}
+
+@if (current is not null)
+{
+    <h2 class="h4 mt-4">Запуск от @current.StartedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</h2>
+    <p>
+        Статус: <strong>@StatusTitle(current.Status)</strong>
+        @if (current.Status == "running")
+        {
+            <span class="spinner-border spinner-border-sm ms-2" aria-hidden="true"></span>
+        }
+    </p>
+    <p>
+        Дисциплин: @current.Counts.Disciplines, компетенций: @current.Counts.Competences, сотрудников: @current.Counts.Employees.
+        Ошибок: @current.Issues.Count(i => i.Severity == "error"), предупреждений: @current.Issues.Count(i => i.Severity == "warning").
+    </p>
+
+    @if (current.Issues.Count > 0)
+    {
+        <table class="table table-sm">
+            <thead>
+                <tr><th>Тип</th><th>Файл</th><th>Лист / таблица</th><th>Строка</th><th>Сообщение</th></tr>
+            </thead>
+            <tbody>
+                @foreach (var i in current.Issues.OrderBy(i => i.Severity == "error" ? 0 : 1))
+                {
+                    <tr class="@(i.Severity == "error" ? "table-danger" : "")">
+                        <td>@(i.Severity == "error" ? "Ошибка" : "Предупреждение")</td>
+                        <td>@i.File</td>
+                        <td>@i.Sheet</td>
+                        <td>@i.Row</td>
+                        <td>@i.Message</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+}
+
+<h2 class="h4 mt-4">Последние запуски</h2>
+@if (runs is null)
+{
+    <p>Загрузка…</p>
+}
+else if (runs.Count == 0)
+{
+    <p>Импортов пока не было.</p>
+}
+else
+{
+    <table class="table table-sm table-hover">
+        <thead>
+            <tr><th>Начат</th><th>Статус</th><th>Дисциплин</th><th>Компетенций</th><th>Сотрудников</th><th>Ошибок</th><th>Предупреждений</th></tr>
+        </thead>
+        <tbody>
+            @foreach (var r in runs)
+            {
+                <tr role="button" @onclick="() => ShowAsync(r.Id)">
+                    <td>@r.StartedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</td>
+                    <td>@StatusTitle(r.Status)</td>
+                    <td>@r.Counts.Disciplines</td>
+                    <td>@r.Counts.Competences</td>
+                    <td>@r.Counts.Employees</td>
+                    <td>@r.Errors</td>
+                    <td>@r.Warnings</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    private const long MaxFileBytes = 10 * 1024 * 1024;
+
+    private sealed class Slot(string field, string title, string extension, bool required)
+    {
+        public string Field { get; } = field;
+        public string Title { get; } = title;
+        public string Extension { get; } = extension;
+        public bool Required { get; } = required;
+        public IBrowserFile? File { get; set; }
+    }
+
+    private readonly Slot[] slots =
+    [
+        new("plan", "Учебный план", ".xlsx", true),
+        new("competences", "Список компетенций", ".docx", true),
+        new("matrix", "Матрица компетенций", ".docx", true),
+        new("positions", "Должности сотрудников", ".xlsx", false)
+    ];
+
+    private readonly CancellationTokenSource polling = new();
+    private List<RunItem>? runs;
+    private RunDetails? current;
+    private List<string> rejected = [];
+    private string? message;
+    private bool messageIsError;
+    private bool busy;
+
+    protected override async Task OnInitializedAsync() => await LoadRunsAsync();
+
+    private async Task UploadAsync()
+    {
+        busy = true;
+        message = null;
+        rejected = [];
+        try
+        {
+            using var form = new MultipartFormDataContent();
+            foreach (var slot in slots.Where(s => s.File is not null))
+            {
+                var content = new StreamContent(slot.File!.OpenReadStream(MaxFileBytes));
+                content.Headers.ContentType = new MediaTypeHeaderValue(
+                    string.IsNullOrEmpty(slot.File.ContentType) ? "application/octet-stream" : slot.File.ContentType);
+                form.Add(content, slot.Field, slot.File.Name);
+            }
+
+            var response = await Http.PostAsync("api/imports", form);
+            if (response.StatusCode == HttpStatusCode.Accepted)
+            {
+                var accepted = await response.Content.ReadFromJsonAsync<Accepted>();
+                await PollAsync(accepted!.Id);
+                return;
+            }
+
+            messageIsError = true;
+            if (response.StatusCode == HttpStatusCode.UnprocessableEntity &&
+                await response.Content.ReadFromJsonAsync<Problem>() is { Errors: { } errors })
+            {
+                message = "Файлы не приняты:";
+                rejected = errors.SelectMany(e => e.Value).ToList();
+            }
+            else
+                message = response.StatusCode switch
+                {
+                    HttpStatusCode.Forbidden => "Недостаточно прав или учётная запись не связана со справочником сотрудников (403).",
+                    _ => $"Ответ сервера: {(int)response.StatusCode}"
+                };
+        }
+        catch (AccessTokenNotAvailableException e)
+        {
+            e.Redirect();
+        }
+        catch (IOException e)
+        {
+            messageIsError = true;
+            message = $"Файл не прочитан: {e.Message}";
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    // Статус запуска — пока идёт разбор, раз в две секунды.
+    private async Task PollAsync(Guid id)
+    {
+        messageIsError = false;
+        message = "Файлы приняты, идёт разбор…";
+        while (!polling.IsCancellationRequested)
+        {
+            current = await Http.GetFromJsonAsync<RunDetails>($"api/imports/{id}", polling.Token);
+            StateHasChanged();
+            if (current is null || current.Status != "running") break;
+            await Task.Delay(TimeSpan.FromSeconds(2), polling.Token);
+        }
+        message = current is null ? null : $"Импорт завершён: {StatusTitle(current.Status).ToLowerInvariant()}.";
+        messageIsError = current?.Status == "failed";
+        await LoadRunsAsync();
+    }
+
+    private async Task ShowAsync(Guid id)
+    {
+        try
+        {
+            current = await Http.GetFromJsonAsync<RunDetails>($"api/imports/{id}");
+            if (current?.Status == "running") await PollAsync(id);
+        }
+        catch (AccessTokenNotAvailableException e)
+        {
+            e.Redirect();
+        }
+    }
+
+    private async Task LoadRunsAsync()
+    {
+        try
+        {
+            runs = await Http.GetFromJsonAsync<List<RunItem>>("api/imports");
+        }
+        catch (AccessTokenNotAvailableException e)
+        {
+            e.Redirect();
+        }
+    }
+
+    private static string StatusTitle(string status) => status switch
+    {
+        "running" => "Выполняется",
+        "succeeded" => "Успешно",
+        "partial" => "Загружено с ошибками",
+        "failed" => "Не выполнено",
+        _ => status
+    };
+
+    public void Dispose()
+    {
+        polling.Cancel();
+        polling.Dispose();
+    }
+
+    private sealed record Accepted(Guid Id);
+    private sealed record Counts(int Disciplines, int Competences, int Employees);
+    private sealed record Issue(string Severity, string File, string? Sheet, int? Row, string Message);
+    private sealed record RunDetails(Guid Id, string Status, DateTimeOffset StartedAt, DateTimeOffset? CompletedAt, Counts Counts, List<Issue> Issues);
+    private sealed record RunItem(Guid Id, string Status, DateTimeOffset StartedAt, DateTimeOffset? CompletedAt, Counts Counts, int Errors, int Warnings);
+    private sealed record Problem(Dictionary<string, string[]>? Errors);
+}
