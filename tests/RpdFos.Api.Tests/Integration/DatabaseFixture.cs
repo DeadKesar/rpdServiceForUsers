@@ -19,8 +19,14 @@ namespace RpdFos.Api.Tests.Integration;
 /// Хост API на чистой PostgreSQL 17 в контейнере (Testcontainers): миграции применяются при старте,
 /// аутентификация — тестовая схема. Один контейнер на все тесты коллекции <see cref="DatabaseCollection"/>.
 /// </summary>
-public sealed class DatabaseFixture : WebApplicationFactory<Program>, IAsyncLifetime
+public class DatabaseFixture : WebApplicationFactory<Program>, IAsyncLifetime
 {
+    /// <summary>
+    /// Сервер фоновых задач. У Hangfire много статического состояния (конфигурация, фильтры), поэтому
+    /// в процессе тестов сервер задач — только в одном хосте; хостам без задач он не нужен.
+    /// </summary>
+    protected virtual bool JobsEnabled => true;
+
     private readonly PostgreSqlContainer _db = new PostgreSqlBuilder("postgres:17-alpine").Build();
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -29,7 +35,7 @@ public sealed class DatabaseFixture : WebApplicationFactory<Program>, IAsyncLife
         builder.UseEnvironment("Testing");
         builder.UseSetting("ConnectionStrings:Default", _db.GetConnectionString());
         // Фоновые задачи — на той же базе в контейнере; очередь опрашивается раз в секунду, чтобы тесты не ждали.
-        builder.UseSetting("Jobs:Enabled", "true");
+        builder.UseSetting("Jobs:Enabled", JobsEnabled ? "true" : "false");
         builder.UseSetting("Jobs:QueuePollSeconds", "1");
 
         builder.ConfigureTestServices(services =>
@@ -105,7 +111,13 @@ public sealed class DatabaseCollection : ICollectionFixture<DatabaseFixture>
 
 /// <summary>Импорт — в отдельной базе: его проверки считают строки справочников.</summary>
 [CollectionDefinition(Name)]
-public sealed class ImportCollection : ICollectionFixture<DatabaseFixture>
+public sealed class ImportCollection : ICollectionFixture<ImportDatabaseFixture>
 {
     public const string Name = "import";
+}
+
+/// <summary>База для тестов конвейера импорта: конвейер вызывается напрямую, сервер задач не нужен.</summary>
+public sealed class ImportDatabaseFixture : DatabaseFixture
+{
+    protected override bool JobsEnabled => false;
 }

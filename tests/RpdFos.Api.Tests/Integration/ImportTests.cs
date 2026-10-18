@@ -15,7 +15,7 @@ namespace RpdFos.Api.Tests.Integration;
 /// с ошибкой справочники не трогает, поэтому порядок тестов не важен. Проверяются приросты строк.
 /// </summary>
 [Collection(ImportCollection.Name)]
-public class ImportTests(DatabaseFixture app, ITestOutputHelper output)
+public class ImportTests(ImportDatabaseFixture app, ITestOutputHelper output)
 {
     // Строк после импорта реальных файлов: справочники и данные плана.
     private static readonly Dictionary<string, int> FirstImport = new()

@@ -40,9 +40,15 @@ public class JobsTests(DatabaseFixture app)
             .Enqueue<ImportJob>(JobQueues.Parsing, job => job.RunAsync(runId, CancellationToken.None));
 
         var run = await WaitForCompletionAsync(runId);
-        var history = app.Services.GetRequiredService<JobStorage>().GetMonitoringApi().JobDetails(jobId)?.History
+        var monitoring = app.Services.GetRequiredService<JobStorage>().GetMonitoringApi();
+        var details = monitoring.JobDetails(jobId);
+        var history = details?.History
             .Select(h => $"{h.StateName}: {h.Reason} {string.Join("; ", h.Data.Select(d => $"{d.Key}={d.Value}"))}");
-        Assert.True(run.Status != ParserRunStatuses.Running, "Задача не выполнена: " + string.Join(" | ", history ?? []));
+        Assert.True(run.Status != ParserRunStatuses.Running,
+            "Задача не выполнена: " + string.Join(" | ", history ?? []) +
+            $" || job.Queue={details?.Job?.Queue}" +
+            " || queues: " + string.Join(", ", monitoring.Queues().Select(q => $"{q.Name}={q.Length}")) +
+            " || servers: " + string.Join(", ", monitoring.Servers().Select(s => $"{s.Name} [{string.Join("/", s.Queues)}] hb={s.Heartbeat:O}")));
         Assert.Equal(ParserRunStatuses.Partial, run.Status);
         Assert.Equal(46, run.ExtractedDisciplinesCount);
         Assert.NotNull(run.CreatedCurriculumPlanId);

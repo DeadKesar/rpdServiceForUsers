@@ -102,8 +102,11 @@ builder.Services.AddHangfire(c => c
 // Хранилище — обычный синглтон DI, а не UsePostgreSqlStorage: тот пишет его в статический JobStorage.Current,
 // и два хоста в одном процессе (тесты) перезаписывали бы хранилище друг друга. Создаётся при первом
 // обращении (сервер задач, панель, постановка задачи) — без них база при старте не нужна.
-builder.Services.AddSingleton<JobStorage>(_ =>
+// Сначала — IGlobalConfiguration: только при его создании применяются настройки выше (уровень совместимости 1.8
+// нужен, чтобы сохранялась очередь задачи; без него задача уходит в очередь default, которую никто не слушает).
+builder.Services.AddSingleton<JobStorage>(sp =>
 {
+    sp.GetRequiredService<IGlobalConfiguration>();
     var options = new PostgreSqlStorageOptions
     {
         SchemaName = "hangfire",
@@ -114,7 +117,10 @@ builder.Services.AddSingleton<JobStorage>(_ =>
 // По той же причине — свой активатор: по умолчанию сервер берёт статический JobActivator.Current
 // и создавал бы задачи из контейнера зависимостей чужого хоста.
 builder.Services.AddSingleton<JobActivator>(sp =>
-    new Hangfire.AspNetCore.AspNetCoreJobActivator(sp.GetRequiredService<IServiceScopeFactory>()));
+{
+    sp.GetRequiredService<IGlobalConfiguration>();
+    return new Hangfire.AspNetCore.AspNetCoreJobActivator(sp.GetRequiredService<IServiceScopeFactory>());
+});
 if (jobsEnabled)
     builder.Services.AddHangfireServer(o =>
     {
