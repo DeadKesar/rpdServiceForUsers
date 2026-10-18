@@ -17,4 +17,8 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\RpdFos.Api\RpdFos.Api.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <!-- Реальные файлы этапа 2 для тестов импорта, см. tests/fixtures/README.md. -->
+    <None Include="..\fixtures\*.xlsx;..\fixtures\*.docx" LinkBase="fixtures" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>

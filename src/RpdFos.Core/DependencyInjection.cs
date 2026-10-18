@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using RpdFos.Core.Data;
 using RpdFos.Core.Data.Interceptors;
+using RpdFos.Core.Import;
 
 namespace RpdFos.Core;
 
@@ -20,6 +21,7 @@ public static class DependencyInjection
             .UseSnakeCaseNamingConvention()
             .UseOpenIddict()
             .AddInterceptors(sp.GetRequiredService<VersioningInterceptor>()));
+        services.AddScoped<ReferenceImporter>();
         return services;
     }
 }

@@ -81,3 +81,10 @@ public sealed class DatabaseCollection : ICollectionFixture<DatabaseFixture>
 {
     public const string Name = "database";
 }
+
+/// <summary>Импорт — в отдельной базе: его проверки считают строки справочников.</summary>
+[CollectionDefinition(Name)]
+public sealed class ImportCollection : ICollectionFixture<DatabaseFixture>
+{
+    public const string Name = "import";
+}
