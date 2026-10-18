@@ -2,11 +2,11 @@
   <!-- Хост API: модули Carter (вертикальные срезы), OpenAPI, Swagger UI.
        Версии пакетов ориентировочные: актуализировать по runbook, шаг 4. -->
   <ItemGroup>
-    <PackageReference Include="Carter" Version="9.0.0" />
-    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.0" />
-    <PackageReference Include="Swashbuckle.AspNetCore.SwaggerUI" Version="10.0.0" />
+    <PackageReference Include="Carter" Version="10.0.0" />
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.13" />
+    <PackageReference Include="Swashbuckle.AspNetCore.SwaggerUI" Version="10.3.0" />
     <!-- Нужен только инструменту dotnet-ef для миграций; в сборку приложения не попадает. -->
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.0">
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.13">
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
   </ItemGroup>
