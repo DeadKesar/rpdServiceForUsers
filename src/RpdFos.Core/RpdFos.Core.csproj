@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Прикладное ядро: доменная модель, доступ к данным, сквозные механизмы.
+       Общее для API и (с этапа 2) фонового обработчика.
+       Версии пакетов ориентировочные: актуализировать по runbook, шаг 4. -->
+  <ItemGroup>
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.0" />
+    <PackageReference Include="EFCore.NamingConventions" Version="10.0.0" />
+  </ItemGroup>
+</Project>

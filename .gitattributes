@@ -1,0 +1,2 @@
+# Git сам нормализует окончания строк: в репозитории LF, на Windows при checkout — CRLF.
+* text=auto

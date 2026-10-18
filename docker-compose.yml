@@ -1,0 +1,21 @@
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: rpdfos
+      POSTGRES_PASSWORD: rpdfos
+      POSTGRES_DB: rpdfos
+    ports:
+      - "5432:5432"   # если локальный порт занят — поменяй на "5433:5432" и в строке подключения
+    volumes:
+      - dbdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rpdfos"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Этап 5: здесь появится конвертер DOCX -> PDF (LibreOffice в режиме headless).
+
+volumes:
+  dbdata:
