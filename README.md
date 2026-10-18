@@ -1,26 +1,73 @@
 # RpdFos — АС создания РПД и ФОС (прототип)
 
-Скелет v2: ASP.NET Core (Carter, вертикальные срезы) + прикладное ядро + PostgreSQL + EF Core.
-Аутентификация и Blazor-клиент добавляются на этапе 1, фоновый обработчик и парсер — на этапе 2.
+Прототип к магистерской ВКР: автоматизированная система формирования рабочих программ дисциплин (РПД)
+и фондов оценочных средств (ФОС).
+
+Стек: .NET 10, ASP.NET Core (Carter, вертикальные срезы), EF Core + PostgreSQL 17,
+ASP.NET Core Identity + OpenIddict (OpenID Connect, authorization code + PKCE), Blazor WebAssembly.
+
+## Структура
 
 ```
-src/RpdFos.Core   прикладное ядро: сущности, AppDbContext, миграции, перехватчик версий
-src/RpdFos.Api    хост: модули Carter, OpenAPI + Swagger UI, обработка ошибок
-tests/            smoke-тест и тесты правил
+src/RpdFos.Core         прикладное ядро: сущности, AppDbContext, миграции, перехватчик версий
+src/RpdFos.Api          хост: модули Carter, сервер авторизации OpenIddict, страница входа,
+                        OpenAPI + Swagger UI; раздаёт веб-клиент
+src/RpdFos.Web          веб-клиент Blazor WebAssembly — отдельно не запускается
+tests/RpdFos.Api.Tests  тесты API и правил домена
+docs/                   проект, задания этапов, runbook-и, журнал разработки
 ```
 
-Быстрый старт (подробно — runbook этапа 0, `ВКР_Прототип_Спринт0.md`):
+## Запуск
+
+Нужны .NET SDK 10 (версия — в `global.json`) и Docker.
 
 ```
-dotnet new sln -n RpdFos
-dotnet sln add src/RpdFos.Core src/RpdFos.Api tests/RpdFos.Api.Tests
+dotnet dev-certs https --trust          # один раз: OpenIddict принимает только HTTPS
 docker compose up -d db
-dotnet restore
-dotnet tool install --global dotnet-ef
-dotnet ef migrations add Initial -p src/RpdFos.Core -s src/RpdFos.Api
-dotnet run --project src/RpdFos.Api        # http://localhost:5080/swagger
-dotnet test
+dotnet user-secrets set "Seed:AdminEmail" "admin@rpdfos.local" --project src/RpdFos.Api
+dotnet user-secrets set "Seed:AdminPassword" '<пароль>' --project src/RpdFos.Api
+dotnet run --project src/RpdFos.Api
 ```
 
-Строка подключения для разработки лежит в `appsettings.json`; на сервере её задаёт
-переменная окружения `ConnectionStrings__Default`.
+- https://localhost:5081 — веб-клиент, https://localhost:5081/swagger — Swagger UI, `/health` — проверка.
+- Профиль `https` из `Properties/launchSettings.json` включает окружение Development: при старте
+  применяются миграции и создаются роли, клиент OIDC `rpdfos-web` и первый администратор.
+- Пароль администратора хранится в user-secrets и в репозиторий не попадает. Требования: не короче
+  8 символов, заглавная и строчная буквы, цифра и спецсимвол. Остальные учётные записи создаёт
+  администратор на странице «Пользователи».
+
+## Сборка и тесты
+
+```
+dotnet build                            # без ошибок и предупреждений
+dotnet test                             # база данных не нужна
+```
+
+## Миграции
+
+Миграции живут в ядре (`-p`), конфигурацию берут из хоста (`-s`):
+
+```
+dotnet tool install --global dotnet-ef
+dotnet ef migrations add <Имя> -p src/RpdFos.Core -s src/RpdFos.Api
+```
+
+В Development миграции применяются при запуске. Схема меняется только новыми миграциями,
+существующие не правятся.
+
+## Конфигурация
+
+| Ключ | Назначение |
+| --- | --- |
+| `ConnectionStrings:Default` | Строка подключения. Для разработки — в `appsettings.json`, на сервере — переменная окружения `ConnectionStrings__Default` |
+| `Database:AutoMigrate` | Миграции и начальные данные при запуске (включено в Development) |
+| `Auth:PublicUrl` | Публичный адрес хоста. По нему при запуске сверяются адреса возврата клиента OIDC |
+| `Seed:AdminEmail`, `Seed:AdminPassword` | Первый администратор — только в user-secrets |
+
+## Документация
+
+- [CLAUDE.md](CLAUDE.md) — соглашения проекта.
+- [docs/design](docs/design) — проект системы (глава 2 ВКР).
+- [docs/tasks](docs/tasks) — задания этапов.
+- [docs/runbooks](docs/runbooks) — пошаговые инструкции этапов.
+- [docs/journal.md](docs/journal.md) — журнал разработки (основа главы 4 ВКР).

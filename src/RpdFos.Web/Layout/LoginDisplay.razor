@@ -3,11 +3,12 @@
 
 <AuthorizeView>
     <Authorized>
-        Hello, @context.User.Identity?.Name!
-        <button class="nav-link btn btn-link" @onclick="BeginLogOut">Log out</button>
+        @* Утверждение name сервер заполняет ФИО из учётной записи. *@
+        @context.User.Identity?.Name
+        <button class="nav-link btn btn-link" @onclick="BeginLogOut">Выйти</button>
     </Authorized>
     <NotAuthorized>
-        <a href="authentication/login">Log in</a>
+        <a href="authentication/login">Войти</a>
     </NotAuthorized>
 </AuthorizeView>
 

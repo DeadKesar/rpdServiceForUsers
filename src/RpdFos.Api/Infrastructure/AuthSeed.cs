@@ -23,17 +23,38 @@ public static class AuthSeed
 
         // 2. Клиент OIDC — веб-приложение: публичный клиент, authorization code + PKCE, без экрана согласия.
         var apps = services.GetRequiredService<IOpenIddictApplicationManager>();
-        if (await apps.FindByClientIdAsync(WebClientId) is null)
+        var publicUrl = (config["Auth:PublicUrl"] ?? "https://localhost:5081").TrimEnd('/');
+        var loginCallback = new Uri($"{publicUrl}/authentication/login-callback");
+        var logoutCallback = new Uri($"{publicUrl}/authentication/logout-callback");
+
+        var client = await apps.FindByClientIdAsync(WebClientId);
+        if (client is not null)
         {
-            var publicUrl = (config["Auth:PublicUrl"] ?? "https://localhost:5081").TrimEnd('/');
+            // Клиент создаётся один раз, а адрес хоста может смениться: без синхронизации
+            // вход падает с ошибкой redirect_uri. Остальные настройки клиента не трогаем.
+            var current = new OpenIddictApplicationDescriptor();
+            await apps.PopulateAsync(current, client);
+            if (!current.RedirectUris.SetEquals([loginCallback]) ||
+                !current.PostLogoutRedirectUris.SetEquals([logoutCallback]))
+            {
+                current.RedirectUris.Clear();
+                current.RedirectUris.Add(loginCallback);
+                current.PostLogoutRedirectUris.Clear();
+                current.PostLogoutRedirectUris.Add(logoutCallback);
+                await apps.UpdateAsync(client, current);
+                logger.LogInformation("Адреса возврата клиента {ClientId} обновлены под {PublicUrl}", WebClientId, publicUrl);
+            }
+        }
+        else
+        {
             await apps.CreateAsync(new OpenIddictApplicationDescriptor
             {
                 ClientId = WebClientId,
                 ClientType = ClientTypes.Public,
                 ConsentType = ConsentTypes.Implicit,
                 DisplayName = "АС создания РПД и ФОС",
-                RedirectUris = { new Uri($"{publicUrl}/authentication/login-callback") },
-                PostLogoutRedirectUris = { new Uri($"{publicUrl}/authentication/logout-callback") },
+                RedirectUris = { loginCallback },
+                PostLogoutRedirectUris = { logoutCallback },
                 Permissions =
                 {
                     Permissions.Endpoints.Authorization,

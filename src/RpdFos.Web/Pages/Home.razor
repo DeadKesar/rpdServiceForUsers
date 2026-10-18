@@ -1,11 +1,24 @@
 ﻿@page "/"
 
-<PageTitle>Home</PageTitle>
+<PageTitle>АС создания РПД и ФОС</PageTitle>
 
-<h1>Hello, world!</h1>
+<h1>АС создания РПД и ФОС</h1>
 
-<div class="alert alert-warning" role="alert">
-    Before authentication will function correctly, you must configure your provider details in <code>Program.cs</code>
-</div>
+<p>
+    Система подготовки рабочих программ дисциплин (РПД) и фондов оценочных средств (ФОС):
+    шаблоны документов, заполнение, проверка и согласование.
+</p>
 
-Welcome to your new app.
+<AuthorizeView>
+    <NotAuthorized>
+        <p><a href="authentication/login">Войдите</a>, чтобы начать работу. Учётную запись выдаёт администратор.</p>
+    </NotAuthorized>
+</AuthorizeView>
+
+<h2 class="h5 mt-4">С чего начать</h2>
+<ul>
+    <li><b>Методист</b> — раздел <a href="templates">«Шаблоны»</a>: создание и публикация шаблонов РПД и ФОС.</li>
+    <li><b>Преподаватель</b> — раздел <a href="templates">«Шаблоны»</a>: шаблоны, по которым создаются документы. Раздел «Мои документы» появится вместе с документами.</li>
+    <li><b>Утверждающий</b> — документы на согласовании: раздел появится вместе с документами.</li>
+    <li><b>Администратор</b> — раздел <a href="users">«Пользователи»</a>: учётные записи и роли.</li>
+</ul>
