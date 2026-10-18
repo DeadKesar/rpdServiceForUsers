@@ -1,5 +1,6 @@
 using Carter;
 using Microsoft.EntityFrameworkCore;
+using RpdFos.Api.Infrastructure;
 using RpdFos.Core.Data;
 using RpdFos.Core.Data.Entities;
 
@@ -10,7 +11,8 @@ public class TemplatesModule : ICarterModule
 {
     public void AddRoutes(IEndpointRouteBuilder app)
     {
-        var g = app.MapGroup("/api/templates").WithTags("Templates");
+        // Читать шаблоны может любой вошедший пользователь, изменять — методист и администратор.
+        var g = app.MapGroup("/api/templates").WithTags("Templates").RequireAuthorization();
 
         g.MapGet("/", async (AppDbContext db, CancellationToken ct) =>
             await db.DocumentTemplates
@@ -31,7 +33,7 @@ public class TemplatesModule : ICarterModule
             await db.SaveChangesAsync(ct);
 
             return Results.Created($"/api/templates/{t.Id}", TemplateListItem.From(t));
-        });
+        }).RequireAuthorization(Policies.MethodistOrAdmin);
 
         // Образец среза «смена статуса + проверка версии»: загрузить -> 404 -> правило перехода (409)
         // -> изменить -> сохранить. Конфликт версий превращает в 409 ConcurrencyExceptionHandler.
@@ -56,7 +58,7 @@ public class TemplatesModule : ICarterModule
             await db.SaveChangesAsync(ct);
 
             return Results.Ok(TemplateListItem.From(t));
-        });
+        }).RequireAuthorization(Policies.MethodistOrAdmin);
     }
 }
 

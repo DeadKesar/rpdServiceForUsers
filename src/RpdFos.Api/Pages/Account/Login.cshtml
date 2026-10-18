@@ -1,0 +1,41 @@
+@page
+@model RpdFos.Api.Pages.Account.LoginModel
+@{
+    Layout = null;
+}
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Вход — АС создания РПД и ФОС</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 360px; margin: 80px auto; padding: 0 16px; }
+        label { display: block; margin-top: 12px; }
+        input { width: 100%; padding: 8px; box-sizing: border-box; }
+        button { margin-top: 16px; padding: 8px 16px; }
+        .err { color: #b00020; }
+    </style>
+</head>
+<body>
+    <h1>Вход</h1>
+    <form method="post">
+        <input type="hidden" asp-for="ReturnUrl" />
+
+        <label asp-for="Email">Email</label>
+        <input asp-for="Email" autocomplete="username" />
+        <span class="err" asp-validation-for="Email"></span>
+
+        <label asp-for="Password">Пароль</label>
+        <input asp-for="Password" autocomplete="current-password" />
+        <span class="err" asp-validation-for="Password"></span>
+
+        @if (Model.Error is not null)
+        {
+            <p class="err">@Model.Error</p>
+        }
+
+        <button type="submit">Войти</button>
+    </form>
+</body>
+</html>

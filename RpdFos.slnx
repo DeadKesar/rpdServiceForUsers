@@ -2,6 +2,7 @@
   <Folder Name="/src/">
     <Project Path="src/RpdFos.Api/RpdFos.Api.csproj" />
     <Project Path="src/RpdFos.Core/RpdFos.Core.csproj" />
+    <Project Path="src/RpdFos.Web/RpdFos.Web.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/RpdFos.Api.Tests/RpdFos.Api.Tests.csproj" />

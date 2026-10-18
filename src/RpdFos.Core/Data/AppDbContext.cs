@@ -1,14 +1,20 @@
+using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using RpdFos.Core.Data.Entities;
 
 namespace RpdFos.Core.Data;
 
-public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(options)
+public class AppDbContext(DbContextOptions<AppDbContext> options)
+    : IdentityDbContext<AppUser, IdentityRole<Guid>, Guid>(options)
 {
     public DbSet<DocumentTemplate> DocumentTemplates => Set<DocumentTemplate>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
+        // Таблицы Identity: учётные записи, роли, связи. Таблицы OpenIddict добавляет UseOpenIddict().
+        base.OnModelCreating(b);
+
         b.Entity<DocumentTemplate>(e =>
         {
             e.HasKey(x => x.Id);

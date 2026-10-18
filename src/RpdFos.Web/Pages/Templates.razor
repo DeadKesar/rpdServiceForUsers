@@ -1,0 +1,77 @@
+@page "/templates"
+@attribute [Authorize]
+@using System.Net
+@using System.Net.Http.Json
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.WebAssembly.Authentication
+@inject HttpClient Http
+
+<PageTitle>Шаблоны</PageTitle>
+
+<h1>Шаблоны</h1>
+
+<button class="btn btn-primary mb-3" @onclick="CreateTestTemplateAsync">Создать тестовый шаблон</button>
+
+@if (message is not null)
+{
+    <p>@message</p>
+}
+
+@if (items is null)
+{
+    <p>Загрузка…</p>
+}
+else if (items.Count == 0)
+{
+    <p>Шаблонов пока нет.</p>
+}
+else
+{
+    <table class="table">
+        <thead>
+            <tr><th>Название</th><th>Тип</th><th>Статус</th><th>Версия</th></tr>
+        </thead>
+        <tbody>
+            @foreach (var t in items)
+            {
+                <tr><td>@t.Name</td><td>@t.Type</td><td>@t.Status</td><td>@t.Version</td></tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    private List<TemplateItem>? items;
+    private string? message;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            items = await Http.GetFromJsonAsync<List<TemplateItem>>("api/templates");
+        }
+        catch (AccessTokenNotAvailableException e)
+        {
+            e.Redirect();
+        }
+    }
+
+    // Проверка ролей: методист и администратор получат 201, преподаватель — 403.
+    private async Task CreateTestTemplateAsync()
+    {
+        var response = await Http.PostAsJsonAsync("api/templates",
+            new { type = "rpd", name = $"Тестовый {DateTime.Now:HH:mm:ss}", year = 2026 });
+
+        message = response.StatusCode switch
+        {
+            HttpStatusCode.Created => "Шаблон создан.",
+            HttpStatusCode.Forbidden => "Недостаточно прав: создавать шаблоны могут методист и администратор (403).",
+            _ => $"Ответ сервера: {(int)response.StatusCode}"
+        };
+        await LoadAsync();
+    }
+
+    private sealed record TemplateItem(Guid Id, string Type, string Name, string Status, int Version, int Year);
+}

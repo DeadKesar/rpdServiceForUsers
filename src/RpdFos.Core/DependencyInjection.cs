@@ -8,8 +8,8 @@ namespace RpdFos.Core;
 public static class DependencyInjection
 {
     /// <summary>
-    /// Регистрирует прикладное ядро: EF Core (PostgreSQL, snake_case) и сквозные механизмы.
-    /// Вызывается из API, а с этапа 2 — и из фонового обработчика.
+    /// Регистрирует прикладное ядро: EF Core (PostgreSQL, snake_case), сквозные механизмы
+    /// и таблицы OpenIddict. Вызывается из API, а с этапа 2 — и из фонового обработчика.
     /// </summary>
     public static IServiceCollection AddCore(this IServiceCollection services, string connectionString)
     {
@@ -18,6 +18,7 @@ public static class DependencyInjection
         services.AddDbContext<AppDbContext>((sp, options) => options
             .UseNpgsql(connectionString)
             .UseSnakeCaseNamingConvention()
+            .UseOpenIddict()
             .AddInterceptors(sp.GetRequiredService<VersioningInterceptor>()));
         return services;
     }
