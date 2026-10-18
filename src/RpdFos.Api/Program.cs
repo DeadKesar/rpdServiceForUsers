@@ -1,4 +1,7 @@
 using Carter;
+using Hangfire;
+using Hangfire.PostgreSql;
+using Hangfire.PostgreSql.Factories;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -72,6 +75,9 @@ builder.Services.AddAuthorizationBuilder()
         .RequireRole(AppRoles.Methodist, AppRoles.Admin))
     .AddPolicy(Policies.Admin, p => p
         .AddAuthenticationSchemes(OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme)
+        .RequireRole(AppRoles.Admin))
+    .AddPolicy(Policies.JobsDashboard, p => p
+        .AddAuthenticationSchemes(IdentityConstants.ApplicationScheme)
         .RequireRole(AppRoles.Admin));
 
 builder.Services.AddRazorPages(); // страница входа /Account/Login
@@ -82,6 +88,41 @@ builder.Services.AddExceptionHandler<ConcurrencyExceptionHandler>();
 
 builder.Services.AddCarter();
 builder.Services.AddOpenApi();
+
+// Фоновые задачи — Hangfire: хранилище в той же PostgreSQL, отдельная схема hangfire.
+// Jobs:Enabled = false (окружение Testing) — без сервера задач и панели: база при старте не нужна.
+var jobs = builder.Configuration.GetSection("Jobs");
+var jobsEnabled = jobs.GetValue("Enabled", true);
+builder.Services.AddHangfire(c => c
+    .SetDataCompatibilityLevel(CompatibilityLevel.Version_180)
+    .UseSimpleAssemblyNameTypeSerializer()
+    .UseRecommendedSerializerSettings()
+    // Импорт сам пишет итог в parser_runs (в том числе failed): автоматический повтор не нужен.
+    .UseFilter(new AutomaticRetryAttribute { Attempts = 0 }));
+// Хранилище — обычный синглтон DI, а не UsePostgreSqlStorage: тот пишет его в статический JobStorage.Current,
+// и два хоста в одном процессе (тесты) перезаписывали бы хранилище друг друга. Создаётся при первом
+// обращении (сервер задач, панель, постановка задачи) — без них база при старте не нужна.
+builder.Services.AddSingleton<JobStorage>(_ =>
+{
+    var options = new PostgreSqlStorageOptions
+    {
+        SchemaName = "hangfire",
+        QueuePollInterval = TimeSpan.FromSeconds(jobs.GetValue("QueuePollSeconds", 15))
+    };
+    return new PostgreSqlStorage(new NpgsqlConnectionFactory(connectionString, options), options);
+});
+// По той же причине — свой активатор: по умолчанию сервер берёт статический JobActivator.Current
+// и создавал бы задачи из контейнера зависимостей чужого хоста.
+builder.Services.AddSingleton<JobActivator>(sp =>
+    new Hangfire.AspNetCore.AspNetCoreJobActivator(sp.GetRequiredService<IServiceScopeFactory>()));
+if (jobsEnabled)
+    builder.Services.AddHangfireServer(o =>
+    {
+        // Отдельная очередь разбора с одним исполнителем: импорты выполняются по одному.
+        o.ServerName = $"{Environment.MachineName}:{JobQueues.Parsing}";
+        o.Queues = [JobQueues.Parsing];
+        o.WorkerCount = 1;
+    });
 
 var app = builder.Build();
 
@@ -112,6 +153,10 @@ app.UseSwaggerUI(o => o.SwaggerEndpoint("/openapi/v1.json", "RpdFos API v1")); /
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 app.MapRazorPages();
 app.MapCarter();
+if (jobsEnabled)
+    // Проверку доступа делает политика конечной точки; фильтры самой панели отключены.
+    app.MapHangfireDashboard("/hangfire", new DashboardOptions { Authorization = [], DashboardTitle = "Фоновые задачи" })
+       .RequireAuthorization(Policies.JobsDashboard);
 app.MapFallbackToFile("index.html");
 
 await app.RunAsync();

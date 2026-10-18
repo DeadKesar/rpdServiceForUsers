@@ -1,4 +1,3 @@
-using System.Security.Cryptography;
 using DisciplineDataExtractor;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -7,7 +6,6 @@ using RpdFos.Core.Data.Entities;
 using RpdFos.Core.Import;
 using Xunit;
 using Xunit.Abstractions;
-using Employee = RpdFos.Core.Data.Entities.Employee;
 
 namespace RpdFos.Api.Tests.Integration;
 
@@ -19,17 +17,6 @@ namespace RpdFos.Api.Tests.Integration;
 [Collection(ImportCollection.Name)]
 public class ImportTests(DatabaseFixture app, ITestOutputHelper output)
 {
-    private const string Xlsx = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
-    private const string Docx = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-
-    private static readonly (string Name, string Type, string Mime)[] Files =
-    [
-        ("plan-09.04.04-2023.xlsx", UploadedFileTypes.CurriculumPlan, Xlsx),
-        ("competences-09.04.04.docx", UploadedFileTypes.CompetenceReference, Docx),
-        ("matrix-09.04.04.docx", UploadedFileTypes.CompetenceMatrix, Docx),
-        ("positions-anonymized.xlsx", UploadedFileTypes.Employees, Xlsx)
-    ];
-
     // Строк после импорта реальных файлов: справочники и данные плана.
     private static readonly Dictionary<string, int> FirstImport = new()
     {
@@ -181,8 +168,7 @@ public class ImportTests(DatabaseFixture app, ITestOutputHelper output)
 
     // ---------- Помощники ----------
 
-    private static List<(string Name, byte[] Content)> ReadFixtures() =>
-        Files.Select(f => (f.Name, File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "fixtures", f.Name)))).ToList();
+    private static List<(string Name, byte[] Content)> ReadFixtures() => ImportFiles.Read();
 
     private async Task WithDbAsync(Func<AppDbContext, Task> action)
     {
@@ -190,21 +176,11 @@ public class ImportTests(DatabaseFixture app, ITestOutputHelper output)
         await action(scope.ServiceProvider.GetRequiredService<AppDbContext>());
     }
 
-    /// <summary>Методист, от имени которого идёт загрузка: запись справочника, связанная с учётной записью.</summary>
     private async Task<Guid> AddMethodistAsync()
     {
-        var subject = Guid.NewGuid().ToString();
-        var methodist = new Employee
-        {
-            ShortName = "Методист М. М.", NameForDocument = "М. М. Методист", Email = $"methodist-{subject}@test.local",
-            IdentitySubject = subject, CanLogin = true, CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow
-        };
-        await WithDbAsync(async db =>
-        {
-            db.Employees.Add(methodist);
-            await db.SaveChangesAsync();
-        });
-        return methodist.Id;
+        var id = Guid.Empty;
+        await WithDbAsync(async db => id = (await ImportFiles.AddMethodistAsync(db)).Id);
+        return id;
     }
 
     /// <summary>Как фоновая задача импорта: файлы — в uploaded_files, запуск — в parser_runs, разбор — из базы.</summary>
@@ -213,21 +189,7 @@ public class ImportTests(DatabaseFixture app, ITestOutputHelper output)
     {
         await using var scope = app.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-
-        var uploaded = files.Select((f, i) => new UploadedFile
-        {
-            UploadedBy = methodist, FileType = Files[i].Type, OriginalName = f.Name, Content = f.Content,
-            MimeType = Files[i].Mime, SizeBytes = f.Content.Length,
-            Checksum = Convert.ToHexStringLower(SHA256.HashData(f.Content)), UploadedAt = DateTimeOffset.UtcNow
-        }).ToList();
-        db.UploadedFiles.AddRange(uploaded);
-        var run = new ParserRun
-        {
-            StartedBy = methodist, PlanFileId = uploaded[0].Id, CompListFileId = uploaded[1].Id,
-            CompMatrixFileId = uploaded[2].Id, EmployeesFileId = uploaded[3].Id, StartedAt = DateTimeOffset.UtcNow
-        };
-        db.ParserRuns.Add(run);
-        await db.SaveChangesAsync();
+        var (run, uploaded) = await ImportFiles.AddRunAsync(db, methodist, files);
 
         SourceFile Source(int i) => new(uploaded[i].OriginalName, uploaded[i].Content!);
         var result = new DataExtractor().Extract(new ExtractionInput(Source(0), Source(1), Source(2), Source(3)));

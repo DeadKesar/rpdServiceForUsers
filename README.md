@@ -67,6 +67,11 @@ dotnet ef migrations add <Имя> -p src/RpdFos.Core -s src/RpdFos.Api
 | `Database:AutoMigrate` | Миграции и начальные данные при запуске (включено в Development) |
 | `Auth:PublicUrl` | Публичный адрес хоста. По нему при запуске сверяются адреса возврата клиента OIDC |
 | `Seed:AdminEmail`, `Seed:AdminPassword` | Первый администратор — только в user-secrets |
+| `Jobs:Enabled` | Сервер фоновых задач Hangfire и панель `/hangfire` (выключено в окружении Testing) |
+| `Jobs:QueuePollSeconds` | Как часто сервер задач опрашивает очередь (по умолчанию 15 с) |
+
+Фоновые задачи (импорт исходных файлов) — Hangfire, хранилище в той же базе, схема `hangfire`.
+Панель задач — https://localhost:5081/hangfire, только для администратора: вход — через страницу входа системы.
 
 ## Документация
 

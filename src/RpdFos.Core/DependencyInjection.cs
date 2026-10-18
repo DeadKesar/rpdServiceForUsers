@@ -24,6 +24,7 @@ public static class DependencyInjection
             .AddInterceptors(sp.GetRequiredService<VersioningInterceptor>()));
         services.AddScoped<ReferenceImporter>();
         services.AddScoped<DirectoryAccounts>();
+        services.AddScoped<ImportJob>();
         return services;
     }
 }

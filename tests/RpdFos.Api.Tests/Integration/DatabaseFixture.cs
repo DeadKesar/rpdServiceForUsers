@@ -1,5 +1,6 @@
 using System.Net.Http.Headers;
 using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -27,15 +28,22 @@ public sealed class DatabaseFixture : WebApplicationFactory<Program>, IAsyncLife
         // Testing: appsettings.Development.json не загружается, автомиграций и засева нет.
         builder.UseEnvironment("Testing");
         builder.UseSetting("ConnectionStrings:Default", _db.GetConnectionString());
+        // Фоновые задачи — на той же базе в контейнере; очередь опрашивается раз в секунду, чтобы тесты не ждали.
+        builder.UseSetting("Jobs:Enabled", "true");
+        builder.UseSetting("Jobs:QueuePollSeconds", "1");
 
         builder.ConfigureTestServices(services =>
         {
             services.AddAuthentication()
                 .AddScheme<AuthenticationSchemeOptions, TestAuthHandler>(TestAuthHandler.SchemeName, null);
 
-            // Политики требуют схему OpenIddict; она остаётся, но передаёт проверку тестовой схеме.
+            // Политики требуют схему OpenIddict (API) и cookie входа (панель задач); они остаются,
+            // но передают проверку тестовой схеме.
             services.PostConfigure<OpenIddictValidationAspNetCoreOptions>(
                 OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme,
+                o => o.ForwardDefault = TestAuthHandler.SchemeName);
+            services.PostConfigure<CookieAuthenticationOptions>(
+                IdentityConstants.ApplicationScheme,
                 o => o.ForwardDefault = TestAuthHandler.SchemeName);
         });
     }

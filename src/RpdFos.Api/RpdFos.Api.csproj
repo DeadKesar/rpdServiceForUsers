@@ -4,6 +4,8 @@
        Версии пакетов ориентировочные: актуализировать по runbook, шаг 4. -->
   <ItemGroup>
     <PackageReference Include="Carter" Version="10.0.0" />
+    <PackageReference Include="Hangfire.AspNetCore" Version="1.8.25" />
+    <PackageReference Include="Hangfire.PostgreSql" Version="1.21.1" />
     <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.Server" Version="10.0.13" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.13" />
     <PackageReference Include="OpenIddict.AspNetCore" Version="7.7.2" />
