@@ -88,7 +88,16 @@ public static class AuthSeed
             if (!created.Succeeded)
                 throw new InvalidOperationException("Не удалось создать администратора: "
                     + string.Join("; ", created.Errors.Select(e => e.Description)));
-            await users.AddToRoleAsync(admin, AppRoles.Admin);
+
+            // Без роли администратор бесполезен, а при следующем запуске засев его пропустит
+            // (учётная запись уже есть) — поэтому запись удаляется и запуск останавливается.
+            var assigned = await users.AddToRoleAsync(admin, AppRoles.Admin);
+            if (!assigned.Succeeded)
+            {
+                await users.DeleteAsync(admin);
+                throw new InvalidOperationException("Не удалось назначить роль администратору: "
+                    + string.Join("; ", assigned.Errors.Select(e => e.Description)));
+            }
         }
     }
 }

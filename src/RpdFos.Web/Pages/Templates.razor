@@ -61,8 +61,18 @@ else
     // Проверка ролей: методист и администратор получат 201, преподаватель — 403.
     private async Task CreateTestTemplateAsync()
     {
-        var response = await Http.PostAsJsonAsync("api/templates",
-            new { type = "rpd", name = $"Тестовый {DateTime.Now:HH:mm:ss}", year = 2026 });
+        HttpResponseMessage response;
+        try
+        {
+            response = await Http.PostAsJsonAsync("api/templates",
+                new { type = "rpd", name = $"Тестовый {DateTime.Now:HH:mm:ss}", year = 2026 });
+        }
+        catch (AccessTokenNotAvailableException e)
+        {
+            // Токен истёк и не обновился — на вход, а не падение страницы.
+            e.Redirect();
+            return;
+        }
 
         message = response.StatusCode switch
         {

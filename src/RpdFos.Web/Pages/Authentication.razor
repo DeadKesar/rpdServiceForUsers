@@ -1,6 +1,18 @@
 ﻿@page "/authentication/{action}"
 @using Microsoft.AspNetCore.Components.WebAssembly.Authentication
-<RemoteAuthenticatorView Action="@Action" />
+
+@* Стандартные тексты состояний библиотеки — английские; интерфейс системы — на русском. *@
+<RemoteAuthenticatorView Action="@Action">
+    <LoggingIn><p>Проверка входа…</p></LoggingIn>
+    <CompletingLoggingIn><p>Завершение входа…</p></CompletingLoggingIn>
+    <LogInFailed><p role="alert">Не удалось войти: @context</p></LogInFailed>
+    <LogOut><p>Выход…</p></LogOut>
+    <CompletingLogOut><p>Завершение выхода…</p></CompletingLogOut>
+    <LogOutFailed><p role="alert">Не удалось выйти: @context</p></LogOutFailed>
+    <LogOutSucceeded><p>Вы вышли из системы. <a href="authentication/login">Войти снова</a></p></LogOutSucceeded>
+    <UserProfile><p>Загрузка профиля…</p></UserProfile>
+    <Registering><p>Регистрация…</p></Registering>
+</RemoteAuthenticatorView>
 
 @code{
     [Parameter] public string? Action { get; set; }
