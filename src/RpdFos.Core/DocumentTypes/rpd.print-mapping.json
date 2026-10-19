@@ -1,0 +1,46 @@
+{
+  "AutofillDiscipline": { "kind": "field", "target": "/title_page/discipline_name" },
+  "AutofillWayCode": { "kind": "field", "target": "/title_page/direction_code" },
+  "AutofillWayName": { "kind": "field", "target": "/title_page/direction_name" },
+  "AutofillWaySection": { "kind": "field", "target": "/title_page/profile_name" },
+  "AutofillEducationLevel": { "kind": "field", "target": "/title_page/education_level" },
+  "AutofillEducationForm": { "kind": "field", "target": "/title_page/study_form" },
+  "AutofillDepartment": { "kind": "field", "target": "/title_page/department_name" },
+  "AutofillPartType": {
+    "kind": "source", "target": "parser.discipline.part_type",
+    "note": "В шаблоне «Блок 1» — текстом, закладка — только часть плана. Одно значение в двух падежах: «Обязательная часть» (титул) и «относится к обязательной части» (раздел 2)."
+  },
+  "AutofillYear": { "kind": "source", "target": "document.year" },
+  "AutofillSemester": { "kind": "source", "target": "parser.discipline.semesters" },
+  "AutofillKurs": {
+    "kind": "field", "target": "/course_work",
+    "note": "По контексту шаблона — раздел «3.5 Курсовой проект (курсовая работа)»: «По дисциплине … AutofillKurs». В каталоге закладок — «курс, производное из семестров»; не подтверждается шаблоном."
+  },
+  "AutofillZeAtAll": { "kind": "field", "target": "/hours_distribution/total_credits" },
+  "AutofillByPlan": { "kind": "source", "target": "parser.discipline.hours_total" },
+  "AutofillCompetencies": { "kind": "field", "target": "/competences" },
+  "AutofillCompetenciesTable": { "kind": "table", "target": "competences" },
+  "AutofillLaboriousnessTable": { "kind": "table", "target": "laboriousness" },
+  "AutofillDisciplinePartitionTable": { "kind": "table", "target": "discipline_partition" },
+  "AutofillLaboratiesClassTable": { "kind": "table", "target": "lab_works" },
+  "AutofillPracticleClassTable": { "kind": "table", "target": "practical_classes" },
+  "AutofillRequirementsLast": { "kind": "field", "target": "/place_in_structure/prerequisites" },
+  "AutofillRequirementsNext": { "kind": "field", "target": "/place_in_structure/postrequisites" },
+  "AutofillPredWay": { "kind": "signature", "target": "umk_chair", "part": "name" },
+  "AutofillPositionOdimp": { "kind": "signature", "target": "vice_rector_edu", "part": "position" },
+  "AutofillPositionOdimpName": { "kind": "signature", "target": "vice_rector_edu", "part": "name" },
+  "AutofillPositionKaf": { "kind": "signature", "target": "department_head", "part": "position" },
+  "AutofillPositionKafName": { "kind": "signature", "target": "department_head", "part": "name" },
+  "AutofillPositionKafForDoc": {
+    "kind": "signature", "target": "department_head", "part": "document_title",
+    "note": "Под строкой подписи — «наименование кафедры»: сокращение кафедры («ИТиВС»), колонка «То что вносится в документ» файла должностей. В справочнике users этой колонки нет — для заведующего берётся departments.short_name."
+  },
+  "AutofillPositionInst": { "kind": "signature", "target": "institute_director", "part": "position" },
+  "AutofillPositionInstName": { "kind": "signature", "target": "institute_director", "part": "name" },
+  "AutofillPositionUmu": { "kind": "signature", "target": "umu_head", "part": "position" },
+  "AutofillPositionUmuName": { "kind": "signature", "target": "umu_head", "part": "name" },
+  "AutofillPositionBib": { "kind": "signature", "target": "library_director", "part": "position" },
+  "AutofillPositionBibName": { "kind": "signature", "target": "library_director", "part": "name" },
+  "AutofillPositionUitp": { "kind": "signature", "target": "it_directorate_head", "part": "position" },
+  "AutofillPositionUitpName": { "kind": "signature", "target": "it_directorate_head", "part": "name" }
+}

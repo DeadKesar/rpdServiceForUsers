@@ -1,0 +1,50 @@
+{
+  "AutofillDiscipline": { "kind": "field", "target": "/title_page/discipline_name" },
+  "AutofillWayCode": { "kind": "field", "target": "/title_page/direction_code" },
+  "AutofillWayName": { "kind": "field", "target": "/title_page/direction_name" },
+  "AutofillWaySection": { "kind": "field", "target": "/title_page/profile_name" },
+  "AutofillEducationForm": {
+    "kind": "field", "target": "/title_page/study_form",
+    "note": "В шаблоне — «Для обучающихся AutofillEducationForm формы обучения»: нужен родительный падеж («очной»)."
+  },
+  "AutofillEducationLevel": {
+    "kind": "source", "target": "reference.direction.qualification",
+    "note": "В ФОС закладка стоит после «Квалификация» — квалификация («магистр»), а не уровень образования, как в РПД."
+  },
+  "AutofillEducationLvl": {
+    "kind": "field", "target": "/title_page/education_level",
+    "note": "Шапка экзаменационного билета: «Для обучающихся N курса AutofillEducationLvl <код> <направление>» — вероятно, уровень в родительном падеже («магистратуры»)."
+  },
+  "AutofillCurs": { "kind": "source", "target": "parser.discipline.course" },
+  "AutofillYear": { "kind": "source", "target": "document.year" },
+  "AutofillDepartment": { "kind": "field", "target": "/title_page/department_name" },
+  "AutofillPassDestination": {
+    "kind": "text", "target": "фонда оценочных средств по дисциплине «{parser.discipline.name}»",
+    "note": "Стоит сразу после заголовка «Паспорт» — продолжение заголовка. Формулировка — предложение, нужна сверка с реальными ФОС."
+  },
+  "AutofillMonitoringU": {
+    "kind": "field", "target": "/current_control/forms",
+    "note": "«Вопросы для подготовки к AutofillMonitoringU по дисциплине …» — форма текущего контроля в дательном падеже."
+  },
+  "AutofillMonitoring": {
+    "kind": "field", "target": "/current_control/forms",
+    "note": "«Комплект практических заданий, используемых при проведении AutofillMonitoring по дисциплине …» — форма текущего контроля в родительном падеже."
+  },
+  "AutofillExaming": {
+    "kind": "source", "target": "parser.discipline.attestation",
+    "note": "Каталог: вид промежуточной аттестации в заголовке приложения с билетами. В шаблоне закладка стоит в строке «Приложение № 6» перед образцом теста — место неочевидно."
+  },
+  "AutofillCompetenciesTable": {
+    "kind": "table", "target": "fos_passport",
+    "note": "В ФОС эта таблица — паспорт ФОС (разделы, компетенции, индикаторы, задания), а не таблица компетенций РПД: отдельный построитель."
+  },
+  "AutofillProOD": { "kind": "signature", "target": "vice_rector_edu", "part": "position" },
+  "AutofillProODName": { "kind": "signature", "target": "vice_rector_edu", "part": "name" },
+  "AutofillPositionKaf": { "kind": "signature", "target": "department_head", "part": "position" },
+  "AutofillPositionKafName": { "kind": "signature", "target": "department_head", "part": "name" },
+  "AutofillPositionKafForDoc": { "kind": "signature", "target": "department_head", "part": "document_title" },
+  "AutofillPositionInst": { "kind": "signature", "target": "institute_director", "part": "position" },
+  "AutofillPositionInstName": { "kind": "signature", "target": "institute_director", "part": "name" },
+  "AutofillPositionUmu": { "kind": "signature", "target": "umu_head", "part": "position" },
+  "AutofillPositionUmuName": { "kind": "signature", "target": "umu_head", "part": "name" }
+}

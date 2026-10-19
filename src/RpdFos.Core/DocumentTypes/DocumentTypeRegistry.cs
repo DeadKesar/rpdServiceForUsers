@@ -3,10 +3,14 @@ using System.Text.Json;
 namespace RpdFos.Core.DocumentTypes;
 
 /// <summary>
-/// Тип документа: JSON Schema содержимого (2020-12 с x-расширениями). Текст схемы — то, что копируется
-/// в шаблон при создании (снимок); <see cref="Schema"/> — разобранный, только для чтения.
+/// Тип документа: JSON Schema содержимого (2020-12 с x-расширениями), сопоставление закладок DOCX и лист
+/// согласования по умолчанию. Тексты JSON — то, что копируется в шаблон при создании (снимок);
+/// разобранные значения — только для чтения.
 /// </summary>
-public sealed record DocumentTypeDefinition(string Code, string Title, string SchemaJson, JsonElement Schema, string SchemaId);
+public sealed record DocumentTypeDefinition(
+    string Code, string Title, string SchemaJson, JsonElement Schema, string SchemaId,
+    string PrintMappingJson, IReadOnlyDictionary<string, BookmarkTarget> PrintMapping,
+    string SignaturesJson, IReadOnlyList<SignatureSeat> Signatures);
 
 /// <summary>
 /// Реестр типов документов. Структуры типов — файлы JSON во встроенных ресурсах ядра (DocumentTypes/*.json):
@@ -41,9 +45,14 @@ public sealed class DocumentTypeRegistry
 
     private static DocumentTypeDefinition Load(string code, string title)
     {
-        var json = ReadResource($"{code}.schema.json");
-        var schema = JsonDocument.Parse(json).RootElement.Clone();
-        return new DocumentTypeDefinition(code, title, json, schema, schema.GetProperty("$id").GetString()!);
+        var schemaJson = ReadResource($"{code}.schema.json");
+        var schema = JsonDocument.Parse(schemaJson).RootElement.Clone();
+        var mappingJson = ReadResource($"{code}.print-mapping.json");
+        var mapping = JsonSerializer.Deserialize<Dictionary<string, BookmarkTarget>>(mappingJson, PrintMappingValidator.Json)!;
+        var signaturesJson = ReadResource($"{code}.signatures.json");
+        var signatures = JsonSerializer.Deserialize<List<SignatureSeat>>(signaturesJson, PrintMappingValidator.Json)!;
+        return new DocumentTypeDefinition(code, title, schemaJson, schema, schema.GetProperty("$id").GetString()!,
+            mappingJson, mapping, signaturesJson, signatures);
     }
 
     internal static string ReadResource(string name)

@@ -1,0 +1,30 @@
+[
+  {
+    "id": "vice_rector_edu", "title": "Проректор по образовательной деятельности и молодёжной политике",
+    "role": "vice_rector_edu", "resolver": "lookup.role:vice_rector_edu", "electronic": false, "placement": "title"
+  },
+  {
+    "id": "department_head", "title": "Заведующий кафедрой",
+    "role": "department_head", "resolver": "discipline.department.head", "electronic": true, "placement": "approval_sheet"
+  },
+  {
+    "id": "institute_director", "title": "Директор института",
+    "role": "institute_director", "resolver": "discipline.department.institute.director", "electronic": false, "placement": "approval_sheet"
+  },
+  {
+    "id": "umu_head", "title": "Начальник учебно-методического управления",
+    "role": "umu_head", "resolver": "lookup.role:umu_head", "electronic": true, "placement": "approval_sheet"
+  },
+  {
+    "id": "library_director", "title": "Директор научно-технической библиотеки",
+    "role": "library_director", "resolver": "lookup.role:library_director", "electronic": false, "placement": "approval_sheet"
+  },
+  {
+    "id": "it_directorate_head", "title": "Начальник управления информационно-технической поддержки",
+    "role": "it_directorate_head", "resolver": "lookup.role:it_directorate_head", "electronic": false, "placement": "approval_sheet"
+  },
+  {
+    "id": "umk_chair", "title": "Председатель учебно-методической комиссии по направлению подготовки",
+    "role": "umk_chair", "resolver": "lookup.role:umk_chair", "electronic": false, "placement": "approval_sheet"
+  }
+]
