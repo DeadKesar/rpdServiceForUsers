@@ -329,19 +329,24 @@ public sealed class ReferenceImporter(AppDbContext db, TimeProvider clock)
                 .Where(e => e.IsActive && e.OfficialDesignation != null && designations.Contains(e.OfficialDesignation))
                 .ToDictionaryAsync(e => e.OfficialDesignation!, ct);
 
-            // На должности другой человек: прежняя запись становится неактивной, а не переписывается —
-            // на неё ссылаются прошлые согласования (document_signatures.resolved_user_id).
+            // На должности другой человек: с прежней записи снимается место (должность и категория подписанта),
+            // а не переписывается человек — на запись ссылаются прошлые согласования (document_signatures.resolved_user_id).
+            // Справочная запись без учётной записи больше не нужна — неактивна; с учётной записью остаётся
+            // активной: бывший заведующий, оставшийся преподавателем, не должен потерять доступ.
             var replaced = false;
             foreach (var e in parsed)
             {
                 if (!existing.TryGetValue(e.OfficialName, out var previous) || previous.ShortName == e.FullName) continue;
-                previous.IsActive = false;
+                previous.OfficialDesignation = null;
+                previous.SignatoryRole = null;
+                if (previous.IdentitySubject is null) previous.IsActive = false;
                 previous.UpdatedAt = now;
                 existing.Remove(e.OfficialName);
                 replaced = true;
-                Warning(files.Employees, $"«{e.OfficialName}»: на должности новый сотрудник — прежняя запись «{previous.ShortName}» неактивна");
+                Warning(files.Employees, $"«{e.OfficialName}»: на должности новый сотрудник — «{previous.ShortName}» снят с должности"
+                    + (previous.IsActive ? " (учётная запись сохранена)" : ", запись неактивна"));
             }
-            // Частичные уникальные индексы смотрят только на активные записи: прежнюю — отключить до вставки новой.
+            // Уникальные индексы должности и места подписанта: прежнюю запись освободить до вставки новой.
             if (replaced) await db.SaveChangesAsync(ct);
 
             // Занятые места подписантов: заведующий — один на кафедру, директор — один на институт.

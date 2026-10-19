@@ -1,8 +1,10 @@
+using System.Security.Claims;
 using DisciplineDataExtractor;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using RpdFos.Core.Data;
 using RpdFos.Core.Data.Entities;
+using RpdFos.Core.Directory;
 using RpdFos.Core.Import;
 using Xunit;
 using Xunit.Abstractions;
@@ -70,26 +72,57 @@ public class ImportTests(ImportDatabaseFixture app, ITestOutputHelper output)
             Assert.Equal(plans[0] + 1, plans[1]);
         });
 
-        // Смена человека на должности: в файле должностей у заведующего ИТиВС другое ФИО.
-        const string itvsHead = "Информационные технологии и вычислительные системы";
+        // Смена человека на должности: в файле должностей у заведующих ИТиВС и ПриМ другие ФИО.
+        // Заведующий ПриМ заранее связан с учётной записью (например, остаётся преподавателем).
+        const string itvsHead = "Информационные технологии и вычислительные системы", primHead = "Прикладная математика";
+        var subject = Guid.NewGuid().ToString();
+        Guid itvsBefore = default, primBefore = default;
+        await WithDbAsync(async db =>
+        {
+            itvsBefore = (await db.Employees.SingleAsync(e => e.OfficialDesignation == itvsHead)).Id;
+            var prim = await db.Employees.SingleAsync(e => e.OfficialDesignation == primHead);
+            (prim.IdentitySubject, prim.Email, prim.CanLogin) = (subject, $"prim-{subject}@test.local", true);
+            primBefore = prim.Id;
+            await db.SaveChangesAsync();
+        });
+        var beforeThird = await CountsAsync();
+
         var third = await ImportAsync(methodist, ReadFixtures(), r => r with
         {
-            Employees = r.Employees.Select(e => e.OfficialName == itvsHead ? e with { FullName = "Преемников П. П." } : e).ToList()
+            Employees = r.Employees.Select(e => e.OfficialName switch
+            {
+                itvsHead => e with { FullName = "Преемников П. П." },
+                primHead => e with { FullName = "Наследников Н. Н." },
+                _ => e
+            }).ToList()
         });
         var afterThird = await CountsAsync();
 
         Assert.Equal(ParserRunStatuses.Partial, third.Status);
-        Assert.Equal(1, afterThird["users"] - afterSecond["users"]);
+        Assert.Equal(2, afterThird["users"] - beforeThird["users"]);
         await WithDbAsync(async db =>
         {
-            var rows = await db.Employees.Where(e => e.OfficialDesignation == itvsHead).OrderBy(e => e.CreatedAt).ToListAsync();
-            Assert.Equal(2, rows.Count);
-            // Прежняя запись не переписана — на неё могут ссылаться прошлые согласования.
-            Assert.Equal(("Сотрудник18 И. О.", false), (rows[0].ShortName, rows[0].IsActive));
-            Assert.Equal(("Преемников П. П.", "П. П. Преемников", SignatoryRoles.DepartmentHead, true),
-                (rows[1].ShortName, rows[1].NameForDocument, rows[1].SignatoryRole, rows[1].IsActive));
-            Assert.Equal(rows[0].DepartmentId, rows[1].DepartmentId);
+            // Прежние записи не переписаны — на них могут ссылаться прошлые согласования; снято только место.
+            var itvsOld = await db.Employees.SingleAsync(e => e.Id == itvsBefore);
+            Assert.Equal(("Сотрудник18 И. О.", (string?)null, (string?)null, false),
+                (itvsOld.ShortName, itvsOld.OfficialDesignation, itvsOld.SignatoryRole, itvsOld.IsActive));
+            var itvsNew = await db.Employees.SingleAsync(e => e.OfficialDesignation == itvsHead && e.IsActive);
+            Assert.Equal(("Преемников П. П.", "П. П. Преемников", SignatoryRoles.DepartmentHead),
+                (itvsNew.ShortName, itvsNew.NameForDocument, itvsNew.SignatoryRole));
+            Assert.Equal(itvsOld.DepartmentId, itvsNew.DepartmentId);
+
+            // С учётной записью — запись остаётся активной и связанной: человек не теряет доступ.
+            var primOld = await db.Employees.SingleAsync(e => e.Id == primBefore);
+            Assert.Equal(((string?)null, (string?)null, true, subject),
+                (primOld.OfficialDesignation, primOld.SignatoryRole, primOld.IsActive, primOld.IdentitySubject));
+            var primNew = await db.Employees.SingleAsync(e => e.OfficialDesignation == primHead && e.IsActive);
+            Assert.Equal(("Наследников Н. Н.", SignatoryRoles.DepartmentHead), (primNew.ShortName, primNew.SignatoryRole));
         });
+        await using (var scope = app.Services.CreateAsyncScope())
+        {
+            var user = new ClaimsPrincipal(new ClaimsIdentity([new Claim(DirectoryAccounts.SubjectClaim, subject)], "test"));
+            Assert.Equal(primBefore, await scope.ServiceProvider.GetRequiredService<DirectoryAccounts>().FindIdAsync(user));
+        }
     }
 
     // Проверки строк после первого импорта: кафедры, направление, ФГОС, дисциплины, матрица, подписанты.
