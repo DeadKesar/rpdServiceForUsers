@@ -4,6 +4,7 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using RpdFos.Api.Features.Directory;
 using RpdFos.Api.Features.Users;
 using RpdFos.Core.Data.Entities;
 using RpdFos.Core.Directory;
@@ -83,6 +84,54 @@ public class UsersApiTests(DatabaseFixture app)
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
         await app.WithDbAsync(async db => Assert.False(await db.Users.AnyAsync(u => u.Email == email)));
+    }
+
+    [Fact]
+    public async Task Accounts_list_shows_role_and_directory_record()
+    {
+        var email = NewEmail();
+        var created = (await (await CreateAsync(new CreateUserRequest(email, "Орлов Олег Олегович", Password, AppRoles.Methodist)))
+            .Content.ReadFromJsonAsync<UserItem>())!;
+
+        var list = await app.CreateClientFor(AppRoles.Admin).GetFromJsonAsync<List<AccountItem>>("/api/admin/users");
+
+        var item = Assert.Single(list!, a => a.Email == email);
+        Assert.Equal((created.Id, "Орлов Олег Олегович", AppRoles.Methodist), (item.Id, item.FullName, item.Role));
+        Assert.Equal((created.DirectoryUserId, "Орлов О. О."), (item.Directory!.Id, item.Directory.ShortName));
+    }
+
+    [Fact]
+    public async Task Directory_search_finds_active_unlinked_records_by_surname()
+    {
+        // Три записи с одной основой фамилии: подходит только активная без учётной записи.
+        var stem = "Зеленц" + Guid.NewGuid().ToString("N")[..6];
+        Employee Record(string surname, bool linked = false, bool active = true) => new()
+        {
+            ShortName = $"{surname} З. З.", NameForDocument = $"З. З. {surname}", CanLogin = linked, IsActive = active,
+            IdentitySubject = linked ? Guid.NewGuid().ToString() : null, Email = linked ? NewEmail() : null,
+            CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow
+        };
+        var free = Record(stem + "ов");
+        await app.WithDbAsync(async db =>
+        {
+            db.Employees.AddRange(free, Record(stem + "ин", linked: true), Record(stem + "ев", active: false));
+            await db.SaveChangesAsync();
+        });
+
+        var found = await app.CreateClientFor(AppRoles.Admin)
+            .GetFromJsonAsync<List<DirectoryRecordItem>>($"/api/admin/directory?surname={stem.ToUpperInvariant()}");
+
+        Assert.Equal([free.Id], found!.Select(r => r.Id));
+    }
+
+    [Theory]
+    [InlineData("/api/admin/users")]
+    [InlineData("/api/admin/directory?surname=А")]
+    public async Task Teacher_cannot_read_accounts_or_directory(string url)
+    {
+        var response = await app.CreateClientFor(AppRoles.Teacher).GetAsync(url);
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
     }
 
     [Fact]

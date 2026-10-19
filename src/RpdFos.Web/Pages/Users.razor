@@ -3,13 +3,40 @@
 @using System.ComponentModel.DataAnnotations
 @using System.Net.Http.Json
 @using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.WebAssembly.Authentication
 @inject HttpClient Http
 
 <PageTitle>Пользователи</PageTitle>
 
-<h1>Новый пользователь</h1>
+<h1>Пользователи</h1>
 
-<EditForm Model="model" OnValidSubmit="CreateAsync">
+@if (accounts is null)
+{
+    <p>Загрузка…</p>
+}
+else
+{
+    <table class="table table-sm">
+        <thead>
+            <tr><th>Email</th><th>ФИО</th><th>Роль</th><th>Запись справочника сотрудников</th></tr>
+        </thead>
+        <tbody>
+            @foreach (var a in accounts)
+            {
+                <tr>
+                    <td>@a.Email</td>
+                    <td>@a.FullName</td>
+                    <td>@RoleTitle(a.Role)</td>
+                    <td>@(a.Directory is { } d ? Describe(d) : "— не связана")</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+<h2 class="h4 mt-4">Новый пользователь</h2>
+
+<EditForm Model="model" OnValidSubmit="CreateAsync" style="max-width: 720px">
     <DataAnnotationsValidator />
     <ValidationSummary />
 
@@ -18,7 +45,7 @@
         <InputText class="form-control" @bind-Value="model.Email" />
     </div>
     <div class="mb-2">
-        <label class="form-label">ФИО</label>
+        <label class="form-label">ФИО полностью</label>
         <InputText class="form-control" @bind-Value="model.FullName" />
     </div>
     <div class="mb-2">
@@ -28,32 +55,148 @@
     <div class="mb-3">
         <label class="form-label">Роль</label>
         <InputSelect class="form-select" @bind-Value="model.Role">
-            <option value="teacher">Преподаватель</option>
-            <option value="methodist">Методист</option>
-            <option value="approver">Утверждающий</option>
-            <option value="admin">Администратор</option>
+            @foreach (var (roleCode, roleTitle) in Roles)
+            {
+                <option value="@roleCode">@roleTitle</option>
+            }
         </InputSelect>
     </div>
+
+    <fieldset class="mb-3">
+        <legend class="form-label">Запись справочника сотрудников (необязательно)</legend>
+        <p class="form-text mt-0">
+            Если сотрудник уже есть в справочнике — например, заведующий или директор из файла должностей, —
+            выберите его запись: учётная запись будет связана с ней. Иначе будет создана новая запись.
+        </p>
+        @if (selected is not null)
+        {
+            <p>
+                Выбрана: <strong>@Describe(selected)</strong>
+                <button type="button" class="btn btn-link" @onclick="() => selected = null">Сбросить</button>
+            </p>
+        }
+        else
+        {
+            <div class="input-group mb-2">
+                <input class="form-control" placeholder="Фамилия" @bind="surname" @bind:event="oninput" />
+                <button type="button" class="btn btn-outline-secondary" @onclick="SearchAsync">Найти</button>
+            </div>
+            @if (candidates is not null)
+            {
+                @if (candidates.Count == 0)
+                {
+                    <p class="form-text">Записей без учётной записи с такой фамилией нет.</p>
+                }
+                else
+                {
+                    <ul class="list-group">
+                        @foreach (var c in candidates)
+                        {
+                            <li class="list-group-item d-flex justify-content-between align-items-center">
+                                @Describe(c)
+                                <button type="button" class="btn btn-sm btn-outline-primary" @onclick="() => Select(c)">Выбрать</button>
+                            </li>
+                        }
+                    </ul>
+                }
+            }
+        }
+    </fieldset>
 
     <button class="btn btn-primary" type="submit">Создать</button>
 </EditForm>
 
 @if (message is not null)
 {
-    <p class="mt-3">@message</p>
+    <div class="alert @(messageIsError ? "alert-danger" : "alert-success") mt-3" role="status">@message</div>
 }
 
 @code {
-    private readonly NewUser model = new();
+    private static readonly (string Code, string Title)[] Roles =
+    [
+        ("teacher", "Преподаватель"), ("methodist", "Методист"), ("approver", "Утверждающий"), ("admin", "Администратор")
+    ];
+
+    private NewUser model = new();
+    private List<Account>? accounts;
+    private List<DirectoryRecord>? candidates;
+    private DirectoryRecord? selected;
+    private string surname = "";
     private string? message;
+    private bool messageIsError;
+
+    protected override async Task OnInitializedAsync() => await LoadAccountsAsync();
+
+    private async Task LoadAccountsAsync()
+    {
+        try
+        {
+            accounts = await Http.GetFromJsonAsync<List<Account>>("api/admin/users");
+        }
+        catch (AccessTokenNotAvailableException e)
+        {
+            e.Redirect();
+        }
+    }
+
+    private async Task SearchAsync()
+    {
+        try
+        {
+            candidates = await Http.GetFromJsonAsync<List<DirectoryRecord>>(
+                $"api/admin/directory?surname={Uri.EscapeDataString(surname.Trim())}");
+        }
+        catch (AccessTokenNotAvailableException e)
+        {
+            e.Redirect();
+        }
+    }
+
+    private void Select(DirectoryRecord record)
+    {
+        selected = record;
+        candidates = null;
+    }
 
     private async Task CreateAsync()
     {
-        var response = await Http.PostAsJsonAsync("api/admin/users", model);
-        message = response.IsSuccessStatusCode
-            ? $"Пользователь {model.Email} создан."
-            : $"Ошибка {(int)response.StatusCode}: {await response.Content.ReadAsStringAsync()}";
+        try
+        {
+            var response = await Http.PostAsJsonAsync("api/admin/users", new
+            {
+                model.Email, model.FullName, model.Password, model.Role, DirectoryUserId = selected?.Id
+            });
+            if (response.IsSuccessStatusCode)
+            {
+                messageIsError = false;
+                message = selected is null
+                    ? $"Пользователь {model.Email} создан."
+                    : $"Пользователь {model.Email} создан и связан с записью «{selected.ShortName}».";
+                model = new();
+                selected = null;
+                surname = "";
+                await LoadAccountsAsync();
+                return;
+            }
+
+            messageIsError = true;
+            var problem = await response.Content.ReadFromJsonAsync<Problem>();
+            message = problem?.Errors is { Count: > 0 } errors
+                ? string.Join(" ", errors.SelectMany(e => e.Value))
+                : problem?.Detail ?? problem?.Title ?? $"Ответ сервера: {(int)response.StatusCode}";
+        }
+        catch (AccessTokenNotAvailableException e)
+        {
+            e.Redirect();
+        }
     }
+
+    private static string RoleTitle(string? role) =>
+        Roles.FirstOrDefault(r => r.Code == role) is { Title: { } title } ? title : role ?? "—";
+
+    private static string Describe(DirectoryRecord r) =>
+        string.Join(", ", new[] { r.ShortName, r.Position, r.Department }.Where(s => !string.IsNullOrEmpty(s)))
+        + (r.IsActive ? "" : " (неактивна)");
 
     private sealed class NewUser
     {
@@ -68,4 +211,9 @@
 
         public string Role { get; set; } = "teacher";
     }
+
+    private sealed record DirectoryRecord(
+        Guid Id, string ShortName, string? FullName, string? Position, string? OfficialDesignation, string? Department, bool IsActive);
+    private sealed record Account(Guid Id, string Email, string FullName, string? Role, DirectoryRecord? Directory);
+    private sealed record Problem(string? Title, string? Detail, Dictionary<string, string[]>? Errors);
 }
