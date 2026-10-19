@@ -80,6 +80,27 @@ public sealed class DirectoryAccounts(AppDbContext db, TimeProvider clock)
         return (employee, null);
     }
 
+    /// <summary>
+    /// Создаёт записи справочника для учётных записей, у которых их нет, — созданных до появления справочника
+    /// (этап 1). Возвращает число связанных и учётные записи, которые связать не удалось.
+    /// </summary>
+    public async Task<(int Linked, IReadOnlyList<(string? Email, DirectoryLinkProblem Problem)> Problems)> LinkUnlinkedAccountsAsync(
+        CancellationToken ct = default)
+    {
+        var subjects = db.Employees.Where(e => e.IdentitySubject != null).Select(e => e.IdentitySubject);
+        var accounts = await db.Users.Where(u => !subjects.Contains(u.Id.ToString())).ToListAsync(ct);
+
+        var linked = 0;
+        var problems = new List<(string?, DirectoryLinkProblem)>();
+        foreach (var account in accounts)
+        {
+            var (_, problem) = await LinkAsync(account, ct: ct);
+            if (problem is null) linked++;
+            else problems.Add((account.Email, problem.Value));
+        }
+        return (linked, problems);
+    }
+
     /// <summary>Id активной записи справочника текущего пользователя по утверждению sub; null — не связан.</summary>
     public async Task<Guid?> FindIdAsync(ClaimsPrincipal user, CancellationToken ct = default)
     {

@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Security.Claims;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using RpdFos.Api.Features.Users;
@@ -82,6 +83,35 @@ public class UsersApiTests(DatabaseFixture app)
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
         await app.WithDbAsync(async db => Assert.False(await db.Users.AnyAsync(u => u.Email == email)));
+    }
+
+    [Fact]
+    public async Task Accounts_created_before_directory_are_linked()
+    {
+        // Учётная запись этапа 1: создана в обход UsersModule, записи справочника у неё нет.
+        await using var scope = app.Services.CreateAsyncScope();
+        var users = scope.ServiceProvider.GetRequiredService<UserManager<AppUser>>();
+        var email = NewEmail();
+        var account = new AppUser { UserName = email, Email = email, EmailConfirmed = true, FullName = "Смирнов Степан Сергеевич" };
+        Assert.True((await users.CreateAsync(account, Password)).Succeeded);
+        var directory = scope.ServiceProvider.GetRequiredService<DirectoryAccounts>();
+        ClaimsPrincipal User() => new(new ClaimsIdentity([new Claim(DirectoryAccounts.SubjectClaim, account.Id.ToString())], "test"));
+        Assert.Null(await directory.FindIdAsync(User()));
+
+        var (linked, _) = await directory.LinkUnlinkedAccountsAsync();
+
+        Assert.True(linked >= 1);
+        var id = await directory.FindIdAsync(User());
+        Assert.NotNull(id);
+        await app.WithDbAsync(async db =>
+        {
+            var e = await db.Employees.SingleAsync(x => x.Id == id);
+            Assert.Equal(("Смирнов С. С.", "С. С. Смирнов", true, email), (e.ShortName, e.NameForDocument, e.CanLogin, e.Email));
+        });
+
+        // Повторный запуск (каждый старт в Development) уже связанную запись не трогает.
+        await directory.LinkUnlinkedAccountsAsync();
+        await app.WithDbAsync(async db => Assert.Equal(1, await db.Employees.CountAsync(x => x.Email == email)));
     }
 
     [Fact]

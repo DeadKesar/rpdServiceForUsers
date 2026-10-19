@@ -72,7 +72,16 @@ public static class AuthSeed
             });
         }
 
-        // 3. Первый администратор — из user-secrets (в репозиторий пароль не попадает).
+        // 3. Учётные записи без записи в справочнике сотрудников — созданные на этапе 1, до справочника.
+        //    Без записи пользователь не может, например, загрузить исходные файлы (uploaded_by → users).
+        var directory = services.GetRequiredService<DirectoryAccounts>();
+        var (linked, problems) = await directory.LinkUnlinkedAccountsAsync();
+        if (linked > 0)
+            logger.LogInformation("Связано со справочником сотрудников учётных записей: {Count}", linked);
+        foreach (var (accountEmail, problem) in problems)
+            logger.LogWarning("Учётная запись {Email} не связана со справочником сотрудников: {Problem}", accountEmail, problem);
+
+        // 4. Первый администратор — из user-secrets (в репозиторий пароль не попадает).
         var email = config["Seed:AdminEmail"];
         var password = config["Seed:AdminPassword"];
         if (string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(password))
@@ -102,9 +111,9 @@ public static class AuthSeed
             }
         }
 
-        // 4. Запись администратора в справочнике сотрудников — и для созданного на этапе 1, у которого её нет.
-        var (_, problem) = await services.GetRequiredService<DirectoryAccounts>().LinkAsync(admin);
-        if (problem is not null)
-            logger.LogWarning("Администратор не связан со справочником сотрудников: {Problem}", problem);
+        // 5. Запись администратора в справочнике сотрудников (для только что созданного).
+        var (_, adminProblem) = await directory.LinkAsync(admin);
+        if (adminProblem is not null)
+            logger.LogWarning("Администратор не связан со справочником сотрудников: {Problem}", adminProblem);
     }
 }
