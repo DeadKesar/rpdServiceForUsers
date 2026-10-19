@@ -27,6 +27,16 @@ public class JobsTests(DatabaseFixture app)
     }
 
     [Fact]
+    public async Task Access_denied_page_explains_refusal()
+    {
+        // Сюда cookie входа отправляет не администратора с панели задач.
+        var response = await app.CreateClientFor(AppRoles.Teacher).GetAsync("/Account/AccessDenied?ReturnUrl=%2Fhangfire");
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.Contains("Нет доступа", await response.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
     public async Task Parsing_queue_runs_import_job()
     {
         Guid runId = default;
