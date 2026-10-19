@@ -49,6 +49,9 @@ internal sealed class EmployeesReader(SourceFile file, IssueLog log)
             col is int c && ExcelCells.Text(row.Cell(c)) is { Length: > 0 } text ? text : null;
 
         var result = new List<Employee>();
+        // «Офиц. название» — ключ должности в справочнике: две строки с одним названием слились бы в одну
+        // запись, и вторая перезаписала бы первую. Остаётся первая строка.
+        var firstRows = new Dictionary<string, (int Row, string FullName)>(StringComparer.OrdinalIgnoreCase);
         foreach (var row in ws.RowsUsed().Where(r => r.RowNumber() > header.RowNumber()))
         {
             // Строки без номера — примечания под таблицей.
@@ -67,6 +70,17 @@ internal sealed class EmployeesReader(SourceFile file, IssueLog log)
                     log.Warning(F, ws.Name, number, $"«{official}»: не указано ФИО — строка пропущена");
                 continue;
             }
+            if (firstRows.TryGetValue(official, out var first))
+            {
+                // Тот же человек — просто повтор; другое ФИО — противоречие, загружена только первая строка.
+                if (string.Equals(first.FullName, fullName, StringComparison.OrdinalIgnoreCase))
+                    log.Warning(F, ws.Name, number, $"«{official}»: повторяет строку {first.Row} — пропущена");
+                else
+                    log.Error(F, ws.Name, number,
+                        $"«{official}»: то же официальное название, что в строке {first.Row}, но другое ФИО — строка не загружена");
+                continue;
+            }
+            firstRows[official] = (number, fullName);
             if (position is null)
                 log.Warning(F, ws.Name, number, $"«{official}»: не указана должность");
 

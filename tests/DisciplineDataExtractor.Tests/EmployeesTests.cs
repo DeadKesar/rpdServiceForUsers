@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using ClosedXML.Excel;
 using Xunit;
 
 namespace DisciplineDataExtractor.Tests;
@@ -39,6 +40,34 @@ public class EmployeesTests(RealFiles files) : IClassFixture<RealFiles>
 
         var rector = ByOfficialName("Управление");
         Assert.Equal(("Ректор", (string?)null, (string?)null), (rector.Position, rector.Department, rector.Institute));
+    }
+
+    [Theory]
+    [InlineData(false, IssueSeverity.Error, "Сотрудник21 И. О.")]
+    [InlineData(true, IssueSeverity.Warning, "Сотрудник22 И. О.")]
+    public void Duplicate_official_name_keeps_first_row(bool samePerson, IssueSeverity severity, string keptName)
+    {
+        // Как после исправления опечатки «…и управление» → «…и управления»: у строк 22 и 23 одно официальное название.
+        const string asoiu = "Автоматизированные системы обработки информации и управления";
+        var input = Fixtures.Input() with { Employees = PositionsWithDuplicateRow(samePerson) };
+
+        var result = new DataExtractor().Extract(input);
+
+        Assert.Equal(36, result.Employees.Count);
+        Assert.Equal(keptName, Assert.Single(result.Employees, e => e.OfficialName == asoiu).FullName);
+        Assert.Contains(result.Issues, i =>
+            i.Severity == severity && i is { Sheet: "Сотрудники", Row: 23 } && i.Message.Contains(asoiu) && i.Message.Contains("22"));
+    }
+
+    private static SourceFile PositionsWithDuplicateRow(bool samePerson)
+    {
+        using var workbook = new XLWorkbook(new MemoryStream(Fixtures.File(Fixtures.Positions).Content));
+        var ws = workbook.Worksheet("Сотрудники");
+        ws.Cell("B22").Value = ws.Cell("B23").GetString();
+        if (samePerson) ws.Cell("E22").Value = ws.Cell("E23").GetString();
+        using var output = new MemoryStream();
+        workbook.SaveAs(output);
+        return new SourceFile("positions-duplicate.xlsx", output.ToArray());
     }
 
     [Fact]
