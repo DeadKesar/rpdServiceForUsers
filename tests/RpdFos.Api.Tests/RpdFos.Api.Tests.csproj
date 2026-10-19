@@ -3,6 +3,9 @@
     <IsPackable>false</IsPackable>
   </PropertyGroup>
   <ItemGroup>
+    <!-- Зачем 8.0.5: последняя версия под MIT; с 9.0 сборки на NuGet — по соглашению OSMF EULA (плата для коммерческих
+         пользователей), а CLAUDE.md допускает только MIT, Apache, LGPL. -->
+    <PackageReference Include="JsonSchema.Net" Version="8.0.5" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
     <!-- Зачем: OpenIddict.AspNetCore 7.7.2 транзитивно тянет System.Security.Cryptography.Pkcs и .Xml 10.0.11
          с известными уязвимостями (NuGetAudit NU1902/NU1903). Явные ссылки поднимают их до исправленной версии;

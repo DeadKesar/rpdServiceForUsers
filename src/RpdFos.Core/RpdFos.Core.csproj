@@ -10,6 +10,10 @@
     <PackageReference Include="OpenIddict.EntityFrameworkCore" Version="7.7.2" />
   </ItemGroup>
   <ItemGroup>
+    <!-- Структуры типов документов (схемы, сопоставление закладок, листы согласования) — файлами в ядре. -->
+    <EmbeddedResource Include="DocumentTypes\*.json" LogicalName="DocumentTypes.%(Filename)%(Extension)" />
+  </ItemGroup>
+  <ItemGroup>
     <!-- Разбор исходных файлов; результат разбора загружает в справочники конвейер импорта (Import/). -->
     <ProjectReference Include="..\DisciplineDataExtractor\DisciplineDataExtractor.csproj" />
   </ItemGroup>

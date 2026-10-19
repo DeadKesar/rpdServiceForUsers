@@ -1,0 +1,229 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://stankin.ru/schemas/fos/v1.json",
+  "title": "Фонд оценочных средств (ФОС)",
+  "type": "object",
+  "required": ["title_page", "linked_rpd", "competence_indicators", "passport", "evaluation_means", "approval_sheet"],
+  "properties": {
+
+    "title_page": {
+      "$ref": "https://stankin.ru/schemas/rpd/v1.json#/properties/title_page"
+    },
+
+    "linked_rpd": {
+      "type": "object",
+      "title": "Связь с РПД",
+      "required": ["rpd_document_id", "rpd_version"],
+      "properties": {
+        "rpd_document_id": { "type": "string", "format": "uuid" },
+        "rpd_version": { "type": "integer" }
+      },
+      "x-validation-rule": "linked_rpd_must_be_approved_or_under_review"
+    },
+
+    "competence_indicators": {
+      "type": "array",
+      "title": "Индикаторы достижения компетенций",
+      "x-source": "linked_rpd.competences.indicators",
+      "x-readonly": true,
+      "items": {
+        "type": "object",
+        "properties": {
+          "code": { "type": "string" },
+          "text": { "type": "string" }
+        }
+      }
+    },
+
+    "passport": {
+      "type": "object",
+      "title": "Паспорт ФОС",
+      "x-validation-rule": "fos_passport_consistent",
+      "properties": {
+        "sections": {
+          "type": "array",
+          "title": "Разделы дисциплины, компетенции и задания",
+          "items": {
+            "type": "object",
+            "required": ["section_number", "competence_codes", "tasks"],
+            "properties": {
+              "section_number": { "type": "integer", "minimum": 1 },
+              "section_title": { "type": "string" },
+              "competence_codes": { "type": "array", "items": { "type": "string", "pattern": "^(УК|ОПК|ПК)-\\d+$" } },
+              "tasks": { "type": "array", "items": { "$ref": "#/$defs/task_ref" } }
+            }
+          }
+        },
+        "indicators": {
+          "type": "array",
+          "title": "Компетенции, индикаторы, разделы РПД и задания",
+          "items": {
+            "type": "object",
+            "required": ["competence_code", "indicator_code", "tasks"],
+            "properties": {
+              "competence_code": { "type": "string", "pattern": "^(УК|ОПК|ПК)-\\d+$" },
+              "indicator_code": { "$ref": "#/$defs/indicator_code" },
+              "rpd_section_numbers": { "type": "array", "items": { "type": "integer", "minimum": 1 } },
+              "tasks": { "type": "array", "items": { "$ref": "#/$defs/task_ref" } }
+            }
+          }
+        }
+      }
+    },
+
+    "current_control": {
+      "type": "object",
+      "title": "Текущий контроль",
+      "x-validation-rule": "control_forms_match",
+      "properties": {
+        "forms": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Формы текущей аттестации"
+        },
+        "activities": {
+          "type": "array",
+          "description": "Мероприятия текущего контроля по модулям",
+          "items": {
+            "type": "object",
+            "required": ["title"],
+            "properties": {
+              "module": { "type": "string" },
+              "title": { "type": "string" },
+              "description": { "type": "string", "x-ui-widget": "richtext" }
+            }
+          }
+        },
+        "variants": {
+          "type": "array",
+          "items": { "type": "string", "x-ui-widget": "richtext" },
+          "description": "Программы и типовые варианты"
+        },
+        "rating": {
+          "type": "string",
+          "x-ui-widget": "richtext",
+          "description": "Модульно-рейтинговые атрибуты (баллы, недели) — текстом; раздел необязательный"
+        }
+      }
+    },
+
+    "evaluation_means": {
+      "type": "array",
+      "title": "Оценочные средства по индикаторам",
+      "x-validation-rule": "all_indicators_have_means",
+      "x-ui-widget": "evaluation_means_table",
+      "items": {
+        "type": "object",
+        "required": ["indicator_code", "control_form", "means_type", "description"],
+        "properties": {
+          "indicator_code": { "$ref": "#/$defs/indicator_code" },
+          "control_form": {
+            "type": "string",
+            "enum": ["current", "intermediate"],
+            "description": "Текущий или промежуточный контроль"
+          },
+          "means_type": {
+            "type": "string",
+            "enum": [
+              "test", "oral_survey", "written_survey", "practical_task",
+              "lab_report", "essay", "presentation", "case_study",
+              "project", "exam_questions", "credit_questions"
+            ],
+            "x-source-suggestion": "fos_means_recommender"
+          },
+          "description": { "type": "string", "minLength": 10 },
+          "evaluation_criteria": { "type": "string" }
+        }
+      }
+    },
+
+    "task_bank": {
+      "type": "array",
+      "title": "Банк заданий",
+      "description": "Именованные группы (уровень сложности, раздел, вид аттестации с семестром); нумерация — сквозная внутри группы",
+      "items": {
+        "type": "object",
+        "required": ["group", "tasks"],
+        "properties": {
+          "group": { "type": "string", "description": "Например: «A», «вопросы к экзамену, 3 семестр»" },
+          "semester": { "type": "integer", "minimum": 1, "maximum": 12 },
+          "tasks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["number", "text"],
+              "properties": {
+                "number": { "type": "integer", "minimum": 1 },
+                "text": { "type": "string", "x-ui-widget": "richtext" },
+                "expected_answer": { "type": "string" },
+                "max_score": { "type": "number" },
+                "indicator_codes": { "type": "array", "items": { "$ref": "#/$defs/indicator_code" } }
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "exam_tickets": {
+      "type": "array",
+      "title": "Экзаменационные билеты",
+      "description": "Необязательный раздел: билеты с шапкой и подписью заведующего кафедрой",
+      "items": {
+        "type": "object",
+        "required": ["number", "questions"],
+        "properties": {
+          "number": { "type": "integer", "minimum": 1 },
+          "questions": { "type": "array", "minItems": 2, "maxItems": 3, "items": { "type": "string" } }
+        }
+      }
+    },
+
+    "evaluation_scale": {
+      "type": "object",
+      "title": "Шкала оценивания",
+      "description": "Необязательный раздел",
+      "x-validation-rule": "scale_matches_control_type",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["five_point", "pass_fail", "hundred_point"],
+          "description": "Балльная (5), зачёт/незачёт, 100-балльная"
+        },
+        "criteria": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["grade", "min_score", "max_score", "description"],
+            "properties": {
+              "grade": { "type": "string" },
+              "min_score": { "type": "number" },
+              "max_score": { "type": "number" },
+              "description": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+
+    "approval_sheet": {
+      "$ref": "https://stankin.ru/schemas/rpd/v1.json#/properties/approval_sheet"
+    }
+  },
+
+  "$defs": {
+    "indicator_code": {
+      "type": "string",
+      "pattern": "^(УК|ОПК|ПК)-\\d+(\\.\\d+){1,2}$"
+    },
+    "task_ref": {
+      "type": "object",
+      "description": "Ссылка паспорта на задание банка: группа и номер",
+      "required": ["group", "number"],
+      "properties": {
+        "group": { "type": "string" },
+        "number": { "type": "integer", "minimum": 1 }
+      }
+    }
+  }
+}

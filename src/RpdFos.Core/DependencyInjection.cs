@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using RpdFos.Core.Data;
 using RpdFos.Core.Data.Interceptors;
 using RpdFos.Core.Directory;
+using RpdFos.Core.DocumentTypes;
 using RpdFos.Core.Import;
 
 namespace RpdFos.Core;
@@ -25,6 +26,7 @@ public static class DependencyInjection
         services.AddScoped<ReferenceImporter>();
         services.AddScoped<DirectoryAccounts>();
         services.AddScoped<ImportJob>();
+        services.AddSingleton<DocumentTypeRegistry>();
         return services;
     }
 }
