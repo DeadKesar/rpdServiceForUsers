@@ -82,8 +82,8 @@ builder.Services.AddAuthorizationBuilder()
 
 builder.Services.AddRazorPages(); // страница входа /Account/Login
 
-// Единая обработка ошибок: ответы в формате ProblemDetails, конфликт версий -> 409.
-builder.Services.AddProblemDetails();
+// Единая обработка ошибок: ответы в формате ProblemDetails с русскими заголовками, конфликт версий -> 409.
+builder.Services.AddProblemDetails(o => o.CustomizeProblemDetails = ProblemTitles.Apply);
 builder.Services.AddExceptionHandler<ConcurrencyExceptionHandler>();
 
 builder.Services.AddCarter();

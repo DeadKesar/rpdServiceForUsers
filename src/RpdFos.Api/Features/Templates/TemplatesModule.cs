@@ -56,7 +56,7 @@ public class TemplatesModule : ICarterModule
         Guid id, AppDbContext db, TemplateLifecycle lifecycle, DocumentTypeRegistry registry, CancellationToken ct)
     {
         var t = await db.DocumentTemplates.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct);
-        return t is null ? Results.NotFound() : Results.Ok(await DetailsAsync(t, db, lifecycle, registry, ct));
+        return t is null ? TemplateNotFound() : Results.Ok(await DetailsAsync(t, db, lifecycle, registry, ct));
     }
 
     private static async Task<IResult> Create(
@@ -90,7 +90,7 @@ public class TemplatesModule : ICarterModule
         DocumentTypeRegistry registry, IConfiguration config, TimeProvider clock, CancellationToken ct)
     {
         var t = await db.DocumentTemplates.SingleOrDefaultAsync(x => x.Id == id, ct);
-        if (t is null) return Results.NotFound();
+        if (t is null) return TemplateNotFound();
         if (!TemplateTransitions.CanAttachPrintTemplate(t.Status))
             return Refused(t, TemplateTransitions.AttachAction);
 
@@ -153,7 +153,7 @@ public class TemplatesModule : ICarterModule
         CancellationToken ct)
     {
         var t = await db.DocumentTemplates.SingleOrDefaultAsync(x => x.Id == id, ct);
-        if (t is null) return Results.NotFound();
+        if (t is null) return TemplateNotFound();
         if (!TemplateTransitions.CanSave(t.Status)) return Refused(t, TemplateTransitions.SaveAction);
 
         t.Save();
@@ -170,7 +170,7 @@ public class TemplatesModule : ICarterModule
         CancellationToken ct)
     {
         var t = await db.DocumentTemplates.SingleOrDefaultAsync(x => x.Id == id, ct);
-        if (t is null) return Results.NotFound();
+        if (t is null) return TemplateNotFound();
         if (!TemplateTransitions.CanPublish(t.Status)) return Refused(t, TemplateTransitions.PublishAction);
 
         db.Entry(t).Property(x => x.Version).OriginalValue = rq.Version;
@@ -192,7 +192,7 @@ public class TemplatesModule : ICarterModule
         CancellationToken ct)
     {
         var t = await db.DocumentTemplates.SingleOrDefaultAsync(x => x.Id == id, ct);
-        if (t is null) return Results.NotFound();
+        if (t is null) return TemplateNotFound();
         if (!TemplateTransitions.CanArchive(t.Status)) return Refused(t, TemplateTransitions.ArchiveAction);
 
         t.Archive();
@@ -208,7 +208,7 @@ public class TemplatesModule : ICarterModule
         TemplateLifecycle lifecycle, DocumentTypeRegistry registry, CancellationToken ct)
     {
         var t = await db.DocumentTemplates.SingleOrDefaultAsync(x => x.Id == id, ct);
-        if (t is null) return Results.NotFound();
+        if (t is null) return TemplateNotFound();
         if (!TemplateTransitions.CanCreateRevision(t.Status)) return Refused(t, TemplateTransitions.RevisionAction);
         // Опубликованная редакция при этом не меняется, поэтому версия клиента сравнивается явно.
         if (rq.Version != t.Version) return Results.Problem(ConcurrencyExceptionHandler.VersionConflict());
@@ -226,7 +226,7 @@ public class TemplatesModule : ICarterModule
     private static async Task<IResult> Delete(Guid id, int version, AppDbContext db, TimeProvider clock, CancellationToken ct)
     {
         var t = await db.DocumentTemplates.SingleOrDefaultAsync(x => x.Id == id, ct);
-        if (t is null) return Results.NotFound();
+        if (t is null) return TemplateNotFound();
         if (!TemplateTransitions.CanDelete(t.Status)) return Refused(t, TemplateTransitions.DeleteAction);
 
         t.Delete(clock.GetUtcNow());
@@ -259,6 +259,10 @@ public class TemplatesModule : ICarterModule
 
     private static IResult Invalid(string title, string detail) =>
         Results.Problem(statusCode: StatusCodes.Status422UnprocessableEntity, title: title, detail: detail);
+
+    private static IResult TemplateNotFound() =>
+        Results.Problem(statusCode: StatusCodes.Status404NotFound, title: "Шаблон не найден",
+            detail: "Возможно, он удалён в другой вкладке. Вернитесь к списку шаблонов.");
 
     private static IResult Refused(DocumentTemplate t, string action) =>
         Results.Problem(statusCode: StatusCodes.Status409Conflict, title: "Переход статуса невозможен",

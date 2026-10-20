@@ -75,7 +75,10 @@
 }
 else if (details is null)
 {
-    <p>Загрузка…</p>
+    @if (!loadFailed)
+    {
+        <p>Загрузка…</p>
+    }
 }
 else
 {
@@ -225,6 +228,7 @@ else
     private bool messageIsError;
     private List<string> problems = [];
     private bool busy;
+    private bool loadFailed;
 
     protected override async Task OnParametersSetAsync()
     {
@@ -233,18 +237,24 @@ else
         printTemplate = null;
         try
         {
+            loadFailed = false;
             if (Id is null)
                 plans = await Http.GetFromJsonAsync<List<PlanItem>>("api/curriculum-plans") ?? [];
             else
-                details = await Http.GetFromJsonAsync<TemplateDetails>($"api/templates/{Id}");
+            {
+                var response = await Http.GetAsync($"api/templates/{Id}");
+                if (response.IsSuccessStatusCode)
+                    details = await response.Content.ReadFromJsonAsync<TemplateDetails>();
+                else
+                {
+                    loadFailed = true;
+                    await ShowProblemAsync(response);
+                }
+            }
         }
         catch (AccessTokenNotAvailableException e)
         {
             e.Redirect();
-        }
-        catch (HttpRequestException e) when (e.StatusCode == HttpStatusCode.NotFound)
-        {
-            Show("Шаблон не найден.", true);
         }
     }
 
@@ -362,13 +372,17 @@ else
         {
             // Тело не ProblemDetails — достаточно кода ответа.
         }
+        // Заголовок и пояснение по-русски даёт сервер (ProblemDetails); по коду ответа — только когда тела нет.
         var text = response.StatusCode switch
         {
-            HttpStatusCode.Forbidden => "Недостаточно прав или учётная запись не связана со справочником сотрудников (403).",
             HttpStatusCode.Conflict when problem?.Title == "Конфликт версий" =>
                 "Шаблон изменён в другой сессии. Обновите страницу и повторите действие.",
-            _ => problem is null ? $"Ответ сервера: {(int)response.StatusCode}" :
-                problem.Errors is { Count: > 0 } ? problem.Title ?? "" : $"{problem.Title}. {problem.Detail}"
+            _ when problem?.Title is { } title =>
+                problem.Errors is { Count: > 0 } || problem.Detail is null ? title : $"{title}. {problem.Detail}",
+            HttpStatusCode.NotFound => "Шаблон не найден — возможно, он удалён в другой вкладке.",
+            HttpStatusCode.Forbidden => "Недостаточно прав для этого действия.",
+            >= HttpStatusCode.InternalServerError => "Ошибка сервера. Повторите действие позже.",
+            _ => $"Действие не выполнено (код ответа {(int)response.StatusCode})."
         };
         Show(text, true);
         problems = problem?.Errors ?? [];

@@ -120,7 +120,9 @@ public class ImportsModule : ICarterModule
     private static async Task<IResult> Get(Guid id, AppDbContext db, CancellationToken ct)
     {
         var run = await db.ParserRuns.AsNoTracking().SingleOrDefaultAsync(r => r.Id == id, ct);
-        if (run is null) return Results.NotFound();
+        if (run is null)
+            return Results.Problem(statusCode: StatusCodes.Status404NotFound, title: "Запуск импорта не найден",
+                detail: "Обновите список запусков на странице «Импорт данных».");
 
         var fileIds = new[] { run.PlanFileId, run.CompListFileId, run.CompMatrixFileId, run.EmployeesFileId ?? Guid.Empty };
         var names = await db.UploadedFiles.Where(f => fileIds.Contains(f.Id))
