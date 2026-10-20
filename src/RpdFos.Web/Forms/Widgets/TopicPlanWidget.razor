@@ -1,0 +1,160 @@
+@using System.Text.Json
+@using System.Text.Json.Nodes
+@inherits FieldBase
+
+@* Тематический план: темы по разделам, часы по видам занятий против плана, индикаторы из выбранных в «Компетенциях». *@
+<div class="mb-3">
+    <table class="table table-sm table-bordered mb-2">
+        <thead class="table-light">
+            <tr><th>Вид занятий</th><th>В плане тем</th><th>По учебному плану</th></tr>
+        </thead>
+        <tbody>
+            @foreach (var (key, title) in HourKinds)
+            {
+                var planned = PlanHours(key);
+                var topics = TopicHours(key);
+                <tr class="@(topics != planned ? "table-warning" : "")">
+                    <td>@title</td><td>@topics</td><td>@planned</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+
+    @{ var rows = Value as JsonArray; }
+    @for (var i = 0; i < (rows?.Count ?? 0); i++)
+    {
+        var index = i;
+        if (rows![index] is not JsonObject topic) continue;
+        var hours = Hours(topic);
+        <div class="border rounded p-2 mb-2">
+            <div class="row g-2 align-items-end">
+                <div class="col-md-2">
+                    <label class="form-label small">Раздел</label>
+                    <ScalarInput Context="Context" Schema="SectionNumber" Parent="topic" Key="section_number"
+                                 Path="@($"{Path}/{index}/section_number")" Compact="true" />
+                </div>
+                <div class="col-md-9">
+                    <label class="form-label small">Тема</label>
+                    <ScalarInput Context="Context" Schema="TopicTitle" Parent="topic" Key="topic_title"
+                                 Path="@($"{Path}/{index}/topic_title")" Compact="true" />
+                </div>
+                <div class="col-md-1 text-end">
+                    @if (!ReadOnly)
+                    {
+                        <button class="btn btn-sm btn-outline-secondary" type="button" title="Удалить тему" @onclick="() => Remove(index)">✕</button>
+                    }
+                </div>
+            </div>
+            <div class="mt-2">
+                <label class="form-label small">Содержание</label>
+                <textarea class="form-control form-control-sm" rows="2" readonly="@ReadOnly"
+                          @onchange='e => SetText(topic, "topic_description", e.Value as string)'>@Text(topic["topic_description"])</textarea>
+            </div>
+            <div class="row g-2 mt-1">
+                @foreach (var (key, title) in HourKinds)
+                {
+                    <div class="col-6 col-md-3">
+                        <label class="form-label small">@title</label>
+                        <ScalarInput Context="Context" Schema="HoursProperty(key)" Parent="hours" Key="@key"
+                                     Path="@($"{Path}/{index}/hours/{key}")" Compact="true" />
+                    </div>
+                }
+            </div>
+            @if (ChosenIndicators.Count > 0)
+            {
+                <div class="mt-2 small">
+                    <span class="text-muted">Индикаторы:</span>
+                    @foreach (var indicatorCode in ChosenIndicators)
+                    {
+                        <label class="form-check form-check-inline mb-0">
+                            <input type="checkbox" class="form-check-input" disabled="@ReadOnly"
+                                   checked="@HasIndicator(topic, indicatorCode)" @onchange="e => ToggleIndicator(topic, indicatorCode, e.Value is true)" />
+                            <span class="form-check-label">@indicatorCode</span>
+                        </label>
+                    }
+                </div>
+            }
+            <div class="mt-2">
+                <SchemaField Context="Context" Schema="ControlForms" Parent="topic" Key="current_control_forms"
+                             Path="@($"{Path}/{index}/current_control_forms")" Nested="true" />
+            </div>
+        </div>
+    }
+    @if (!ReadOnly)
+    {
+        <button class="btn btn-sm btn-outline-primary" type="button" @onclick="Add">Добавить тему</button>
+    }
+    @if (ChosenIndicators.Count == 0)
+    {
+        <div class="form-text">Индикаторы для тем появятся после выбора в разделе «Компетенции и индикаторы».</div>
+    }
+</div>
+
+@code {
+    private static readonly (string Key, string Title)[] HourKinds =
+        [("lectures", "Лекции"), ("practice", "Практика"), ("lab_hours", "Лабораторные"), ("self_study", "Самостоятельная работа")];
+
+    private JsonElement Property(string name) =>
+        Items.ValueKind == JsonValueKind.Object && Items.GetProperty("properties").TryGetProperty(name, out var p) ? Context.Resolve(p) : default;
+
+    private JsonElement SectionNumber => Property("section_number");
+    private JsonElement TopicTitle => Property("topic_title");
+    private JsonElement ControlForms => Property("current_control_forms");
+
+    private JsonElement HoursProperty(string name) =>
+        Property("hours") is { ValueKind: JsonValueKind.Object } h && h.GetProperty("properties").TryGetProperty(name, out var p) ? p : default;
+
+    // У темы всегда есть объект часов: поле обязательно, и в него пишут поля часов.
+    private static JsonObject Hours(JsonObject topic)
+    {
+        if (topic["hours"] is JsonObject hours) return hours;
+        var created = new JsonObject();
+        topic["hours"] = created;
+        return created;
+    }
+
+    private static int Int(JsonNode? node) => node is JsonValue v && v.TryGetValue(out int i) ? i : 0;
+
+    private int TopicHours(string key) => (Value as JsonArray ?? []).OfType<JsonObject>().Sum(t => Int(t["hours"]?[key]));
+
+    private int PlanHours(string key) =>
+        (Context.Payload["hours_distribution"]?["semesters"] as JsonArray ?? []).OfType<JsonObject>().Sum(s => Int(s[key]));
+
+    // Индикаторы, выбранные в разделе «Компетенции и индикаторы».
+    private List<string> ChosenIndicators =>
+        (Context.Payload["competences"] as JsonArray ?? []).OfType<JsonObject>()
+            .SelectMany(c => (c["indicators"] as JsonArray ?? []).OfType<JsonObject>())
+            .Select(i => Text(i["code"]) ?? "").Where(c => c.Length > 0).Distinct().ToList();
+
+    private bool HasIndicator(JsonObject topic, string code) =>
+        (topic["competence_indicators"] as JsonArray ?? []).Any(n => Text(n) == code);
+
+    private void ToggleIndicator(JsonObject topic, string code, bool on)
+    {
+        if (topic["competence_indicators"] is not JsonArray list) topic["competence_indicators"] = list = new JsonArray();
+        var existing = list.FirstOrDefault(n => Text(n) == code);
+        if (on && existing is null) list.Add(JsonValue.Create(code));
+        if (!on && existing is not null) list.Remove(existing);
+        Context.Changed();
+    }
+
+    private void SetText(JsonObject topic, string key, string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) topic.Remove(key);
+        else topic[key] = text.Trim();
+        Context.Changed();
+    }
+
+    private void Add()
+    {
+        var rows = EnsureArray();
+        rows.Add(new JsonObject { ["section_number"] = rows.Count + 1, ["hours"] = new JsonObject() });
+        Context.Changed();
+    }
+
+    private void Remove(int index)
+    {
+        EnsureArray().RemoveAt(index);
+        Context.Changed();
+    }
+}

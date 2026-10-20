@@ -12,6 +12,9 @@
     <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.DevServer" Version="10.0.13" PrivateAssets="all" />
     <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.Authentication" Version="10.0.13" />
     <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.13" />
+    <!-- Редактор форматированного текста (RadzenHtmlEditor): MIT, свой JS в пакете — без внешних CDN.
+         В документах — только полужирный, курсив и списки; разметку на сервере чистит санитайзер. -->
+    <PackageReference Include="Radzen.Blazor" Version="12.0.8" />
   </ItemGroup>
 
 </Project>

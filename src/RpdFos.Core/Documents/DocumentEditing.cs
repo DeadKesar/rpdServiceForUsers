@@ -42,7 +42,9 @@ public sealed class DocumentEditing(
 
         var payload = JsonNode.Parse(document.Payload)!.AsObject();
         var updated = payload.DeepClone().AsObject();
-        updated[section] = Sanitize(JsonNode.Parse(value.GetRawText()), sectionSchema, root, 0);
+        // Очищенный раздел (null) уходит из содержимого: в схеме пустых значений нет.
+        if (Sanitize(JsonNode.Parse(value.GetRawText()), sectionSchema, root, 0) is { } sanitized) updated[section] = sanitized;
+        else updated.Remove(section);
 
         // Поля из плана и закрытые статусом: присланное должно совпасть с тем, что уже в документе.
         var changed = DocumentMetadata.ReadOnly(schema, document.Status, registry.FindSchema)

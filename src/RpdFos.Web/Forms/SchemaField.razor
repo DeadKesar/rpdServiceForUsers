@@ -1,0 +1,83 @@
+@using System.Text.Json
+@using System.Text.Json.Nodes
+@inherits FieldBase
+
+@* Универсальный обработчик поля: виджет из реестра, вложенный объект или простое значение — по схеме. *@
+@if (!Context.IsHidden(Path))
+{
+    var widget = WidgetRegistry.Find(Schema, Context);
+    if (widget is not null)
+    {
+        <DynamicComponent Type="widget" Parameters="Parameters" />
+    }
+    else if (SchemaContext.Type(Schema) == "object")
+    {
+        <fieldset class="mb-3 @(Nested ? "border rounded p-2" : "")">
+            @if (Nested)
+            {
+                <legend class="fs-6 fw-semibold w-auto px-1">@Title</legend>
+            }
+            @foreach (var property in Properties)
+            {
+                <SchemaField Context="Context" Schema="property.Schema" Parent="Node" Key="@property.Name"
+                             Path="@($"{Path}/{property.Name}")" EnsureParent="AttachNode" Nested="true" />
+            }
+        </fieldset>
+    }
+    else
+    {
+        <div class="mb-3">
+            <label class="form-label">
+                @Title
+                @if (FromPlan)
+                {
+                    <span class="badge text-bg-light border ms-1" title="Заполняется из учебного плана и справочников">из учебного плана</span>
+                }
+            </label>
+            <ScalarInput Context="Context" Schema="Schema" Parent="Parent" Key="@Key" Path="@Path" EnsureParent="EnsureParent" />
+            @if (Hint is not null)
+            {
+                <div class="form-text">@Hint</div>
+            }
+        </div>
+    }
+}
+
+@code {
+    /// <summary>Вложенный объект — в рамке с подписью; раздел верхнего уровня подпись получает от страницы.</summary>
+    [Parameter] public bool Nested { get; set; }
+
+    private JsonObject? pending;
+
+    // Объект поля: существующий в содержимом или новый, ещё не прикреплённый.
+    private JsonObject Node => Value as JsonObject ?? (pending ??= new JsonObject());
+
+    private void AttachNode()
+    {
+        if (Value is JsonObject) return;
+        EnsureParent?.Invoke();
+        var node = pending ??= new JsonObject();
+        pending = null;
+        switch (Parent)
+        {
+            case JsonObject o: o[Key] = node; break;
+            case JsonArray a when int.TryParse(Key, out var i) && i < a.Count: a[i] = node; break;
+        }
+    }
+
+    private IEnumerable<(string Name, JsonElement Schema)> Properties =>
+        Schema.TryGetProperty("properties", out var props)
+            ? props.EnumerateObject().Select(p => (p.Name, Context.Resolve(p.Value)))
+            : [];
+
+    private Dictionary<string, object?> Parameters => new()
+    {
+        [nameof(Context)] = Context,
+        [nameof(Schema)] = Schema,
+        [nameof(Parent)] = Parent,
+        [nameof(Key)] = Key,
+        [nameof(Path)] = Path,
+        [nameof(Label)] = Label,
+        [nameof(EnsureParent)] = EnsureParent
+    };
+}

@@ -1,0 +1,58 @@
+@using System.Globalization
+@using System.Text.Json
+@using System.Text.Json.Nodes
+@inherits FieldBase
+
+@* Простое значение по схеме: перечисление, дата, число, логическое, строка. Пустое поле удаляется из содержимого. *@
+@switch (Kind)
+{
+    case "enum":
+        <select class="form-select @Size" disabled="@ReadOnly" value="@Current" @onchange="e => SetText(e.Value as string)">
+            <option value="">—</option>
+            @foreach (var option in Schema.GetProperty("enum").EnumerateArray().Select(v => v.ToString()))
+            {
+                <option value="@option">@SchemaContext.EnumTitle(Schema, option)</option>
+            }
+        </select>
+        break;
+    case "boolean":
+        <input type="checkbox" class="form-check-input" disabled="@ReadOnly" checked="@(Value?.GetValue<bool>() == true)"
+               @onchange="e => SetValue(e.Value is true ? JsonValue.Create(true) : null)" />
+        break;
+    case "integer" or "number":
+        <input type="number" class="form-control @Size" readonly="@ReadOnly" value="@Current"
+               step="@(Kind == "integer" ? "1" : "any")" @onchange="e => SetNumber(e.Value as string)" />
+        break;
+    case "date":
+        <input type="date" class="form-control @Size" readonly="@ReadOnly" value="@Current" @onchange="e => SetText(e.Value as string)" />
+        break;
+    case "textarea":
+        <textarea class="form-control @Size" rows="3" readonly="@ReadOnly" @onchange="e => SetText(e.Value as string)">@Current</textarea>
+        break;
+    default:
+        <input type="text" class="form-control @Size" readonly="@ReadOnly" value="@Current" @onchange="e => SetText(e.Value as string)" />
+        break;
+}
+
+@code {
+    /// <summary>Ячейка таблицы — компактный размер.</summary>
+    [Parameter] public bool Compact { get; set; }
+
+    private string Size => Compact ? "form-control-sm" : "";
+
+    private string Kind => Schema.TryGetProperty("enum", out _) ? "enum"
+        : SchemaContext.Text(Schema, "format") == "date" ? "date"
+        : SchemaContext.Text(Schema, "x-ui-widget") == "textarea" ? "textarea"
+        : SchemaContext.Type(Schema);
+
+    private string Current => Text(Value) ?? "";
+
+    private void SetText(string? text) => SetValue(string.IsNullOrWhiteSpace(text) ? null : JsonValue.Create(text.Trim()));
+
+    // Число, которое не разбирается, остаётся строкой — его отклонит проверка черновика с понятным сообщением.
+    private void SetNumber(string? text) => SetValue(
+        string.IsNullOrWhiteSpace(text) ? null
+        : Kind == "integer" && long.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var i) ? JsonValue.Create(i)
+        : decimal.TryParse(text, NumberStyles.Number, CultureInfo.InvariantCulture, out var d) ? JsonValue.Create(d)
+        : JsonValue.Create(text));
+}

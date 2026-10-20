@@ -98,10 +98,11 @@ public class DocumentsModule : ICarterModule
     {
         var document = await db.Documents.AsNoTracking().SingleOrDefaultAsync(d => d.Id == id, ct);
         if (document is null) return NotFound();
-        if (!SeesAll(http.User) && document.AuthorId != await directory.FindIdAsync(http.User, ct))
+        var me = await directory.FindIdAsync(http.User, ct);
+        if (!SeesAll(http.User) && document.AuthorId != me)
             return Results.Problem(statusCode: StatusCodes.Status403Forbidden, title: "Чужой документ",
                 detail: "Документ видят его автор, методист и администратор.");
-        return Results.Ok(await DetailsAsync(document, db, validator, registry, ct));
+        return Results.Ok(await DetailsAsync(document, db, validator, registry, ct, document.AuthorId == me));
     }
 
     private static async Task<IResult> Create(
@@ -116,7 +117,7 @@ public class DocumentsModule : ICarterModule
         return result switch
         {
             { Document: { } document } =>
-                Results.Created($"/api/documents/{document.Id}", await DetailsAsync(document, db, validator, registry, ct)),
+                Results.Created($"/api/documents/{document.Id}", await DetailsAsync(document, db, validator, registry, ct, isAuthor: true)),
             { Problem: DocumentCreationProblem.Duplicate } => Results.Problem(statusCode: StatusCodes.Status409Conflict,
                 title: "Документ уже есть", detail: result.Detail,
                 extensions: new Dictionary<string, object?>
@@ -213,7 +214,8 @@ public class DocumentsModule : ICarterModule
     }
 
     private static async Task<DocumentDetails> DetailsAsync(
-        Document document, AppDbContext db, IDocumentValidator validator, DocumentTypeRegistry registry, CancellationToken ct)
+        Document document, AppDbContext db, IDocumentValidator validator, DocumentTypeRegistry registry, CancellationToken ct,
+        bool isAuthor)
     {
         var schemaJson = await db.DocumentTemplates.IgnoreQueryFilters().Where(t => t.Id == document.TemplateId)
             .Select(t => t.Schema).SingleAsync(ct);
@@ -224,7 +226,9 @@ public class DocumentsModule : ICarterModule
             DocumentItem.From(document, facts.Discipline),
             payload,
             JsonDocument.Parse(schemaJson).RootElement,
-            DocumentMetadata.Build(schemaJson, payload, document.Status, facts, validator, registry.FindSchema));
+            DocumentMetadata.Build(schemaJson, payload, document.Status, facts, validator, registry.FindSchema),
+            // Изменяет документ автор, пока статус позволяет правку; остальным редактор показывает его только для чтения.
+            isAuthor && DocumentTransitions.CanEdit(document.Status));
     }
 
     private static IResult NotFound() =>
@@ -270,4 +274,4 @@ public record DocumentItem(
 }
 
 /// <summary>Документ для редактора: содержимое, схема из шаблона и метаданные (разделы, доступность полей, кандидаты).</summary>
-public record DocumentDetails(DocumentItem Document, JsonElement Payload, JsonElement Schema, DocumentMetadata Metadata);
+public record DocumentDetails(DocumentItem Document, JsonElement Payload, JsonElement Schema, DocumentMetadata Metadata, bool Editable);

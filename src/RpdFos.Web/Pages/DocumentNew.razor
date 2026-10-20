@@ -1,0 +1,157 @@
+@page "/documents/new"
+@attribute [Authorize(Roles = "teacher,methodist,admin")]
+@using System.Net
+@using System.Net.Http.Json
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.WebAssembly.Authentication
+@using RpdFos.Web.Models
+@inject HttpClient Http
+@inject NavigationManager Navigation
+
+<PageTitle>Создание документа</PageTitle>
+
+<p><a href="documents">← Мои документы</a></p>
+<h1>Создание документа</h1>
+
+@if (message is not null)
+{
+    <div class="alert @(messageIsError ? "alert-danger" : "alert-info")" role="status">
+        @message
+        @if (existingId is Guid id)
+        {
+            <a class="ms-1" href="@($"documents/{id}")">Открыть документ</a>
+        }
+    </div>
+}
+
+<div class="mb-3" style="max-width: 960px">
+    <label class="form-label">Опубликованный шаблон РПД</label>
+    <select class="form-select" @bind="templateId" @bind:after="LoadDisciplinesAsync">
+        <option value="">— выберите шаблон —</option>
+        @foreach (var t in templates)
+        {
+            <option value="@t.Id">@t.Name — @(t.Plan?.Title ?? "план не привязан"), редакция @t.Revision</option>
+        }
+    </select>
+    @if (templates.Count == 0)
+    {
+        <div class="form-text">Опубликованных шаблонов РПД нет — их публикует методист на странице «Шаблоны».</div>
+    }
+</div>
+
+@if (disciplines is not null)
+{
+    <p class="text-muted">
+        Дисциплины учебного плана, для которых создаётся РПД: модули, группы дисциплин по выбору, практики и ГИА
+        в списке не показываются.
+    </p>
+    <table class="table table-sm align-middle">
+        <thead>
+            <tr><th>Индекс</th><th>Дисциплина</th><th></th></tr>
+        </thead>
+        <tbody>
+            @foreach (var d in disciplines)
+            {
+                <tr>
+                    <td>@d.Code</td>
+                    <td>@d.Name</td>
+                    <td class="text-end">
+                        @if (d.DocumentId is Guid documentId)
+                        {
+                            @if (d.CanOpen)
+                            {
+                                <a class="btn btn-sm btn-outline-secondary" href="@($"documents/{documentId}")">Открыть документ</a>
+                            }
+                            else
+                            {
+                                <span class="small text-muted">РПД уже есть (автор — @d.DocumentAuthor)</span>
+                            }
+                        }
+                        else
+                        {
+                            <button class="btn btn-sm btn-primary" disabled="@busy" @onclick="() => CreateAsync(d)">Создать РПД</button>
+                        }
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    private List<TemplateItem> templates = [];
+    private List<DisciplineOption>? disciplines;
+    private string templateId = "";
+    private string? message;
+    private bool messageIsError;
+    private Guid? existingId;
+    private bool busy;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            templates = await Http.GetFromJsonAsync<List<TemplateItem>>("api/templates?type=rpd&status=published") ?? [];
+        }
+        catch (AccessTokenNotAvailableException e)
+        {
+            e.Redirect();
+        }
+    }
+
+    private async Task LoadDisciplinesAsync()
+    {
+        disciplines = null;
+        message = null;
+        if (templateId.Length == 0) return;
+        try
+        {
+            disciplines = await Http.GetFromJsonAsync<List<DisciplineOption>>($"api/documents/disciplines?templateId={templateId}");
+        }
+        catch (AccessTokenNotAvailableException e)
+        {
+            e.Redirect();
+        }
+    }
+
+    private async Task CreateAsync(DisciplineOption discipline)
+    {
+        busy = true;
+        message = null;
+        existingId = null;
+        try
+        {
+            var response = await Http.PostAsJsonAsync("api/documents", new { templateId = Guid.Parse(templateId), disciplineId = discipline.Id });
+            if (response.StatusCode == HttpStatusCode.Created && await response.Content.ReadFromJsonAsync<DocumentDetails>() is { } created)
+            {
+                Navigation.NavigateTo($"documents/{created.Document.Id}");
+                return;
+            }
+            var problem = await ReadProblemAsync(response);
+            messageIsError = true;
+            message = problem is null ? $"Документ не создан (код ответа {(int)response.StatusCode})."
+                : problem.Detail is null ? problem.Title : $"{problem.Title}. {problem.Detail}";
+            existingId = problem?.DocumentId;
+        }
+        catch (AccessTokenNotAvailableException e)
+        {
+            e.Redirect();
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private static async Task<DocumentProblem?> ReadProblemAsync(HttpResponseMessage response)
+    {
+        try
+        {
+            return await response.Content.ReadFromJsonAsync<DocumentProblem>();
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return null;
+        }
+    }
+}

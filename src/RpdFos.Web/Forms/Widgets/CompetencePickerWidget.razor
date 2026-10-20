@@ -1,0 +1,59 @@
+@using System.Text.Json.Nodes
+@inherits FieldBase
+
+@* Компетенции дисциплины из матрицы и выбор индикаторов: кандидаты — в метаданных документа. *@
+<div class="mb-3">
+    @foreach (var candidate in Context.Metadata.CompetenceCandidates)
+    {
+        <div class="border rounded p-2 mb-2">
+            <div class="fw-semibold">@candidate.Code</div>
+            <div class="small mb-1">@candidate.Formulation</div>
+            @foreach (var indicator in candidate.Indicators)
+            {
+                <div class="form-check">
+                    <input type="checkbox" class="form-check-input" id="@($"ind-{indicator.Id}")" disabled="@ReadOnly"
+                           checked="@IsChosen(candidate.Code, indicator.Code)"
+                           @onchange="e => Toggle(candidate, indicator.Code, indicator.Text, e.Value is true)" />
+                    <label class="form-check-label small" for="@($"ind-{indicator.Id}")"><b>@indicator.Code</b> @indicator.Text</label>
+                </div>
+            }
+        </div>
+    }
+    @if (Context.Metadata.CompetenceCandidates.Count == 0)
+    {
+        <p class="text-muted">В матрице компетенций для дисциплины нет компетенций.</p>
+    }
+    @foreach (var foreignCode in Foreign)
+    {
+        <div class="alert alert-warning py-1 small">Компетенции @foreignCode нет в матрице дисциплины.</div>
+    }
+</div>
+
+@code {
+    private IEnumerable<JsonObject> Chosen => (Value as JsonArray ?? []).OfType<JsonObject>();
+
+    private JsonObject? Competence(string code) => Chosen.FirstOrDefault(c => Text(c["code"]) == code);
+
+    private bool IsChosen(string competence, string indicator) =>
+        (Competence(competence)?["indicators"] as JsonArray ?? []).OfType<JsonObject>().Any(i => Text(i["code"]) == indicator);
+
+    // Компетенции в содержимом, которых нет среди кандидатов: например, матрицу загрузили заново.
+    private IEnumerable<string> Foreign => Chosen.Select(c => Text(c["code"]) ?? "")
+        .Where(code => Context.Metadata.CompetenceCandidates.All(k => k.Code != code));
+
+    private void Toggle(RpdFos.Web.Models.CompetenceCandidate candidate, string code, string text, bool on)
+    {
+        var competences = EnsureArray();
+        var competence = Competence(candidate.Code);
+        if (competence is null)
+        {
+            competence = new JsonObject { ["code"] = candidate.Code, ["formulation"] = candidate.Formulation, ["indicators"] = new JsonArray() };
+            competences.Add(competence);
+        }
+        if (competence["indicators"] is not JsonArray indicators) competence["indicators"] = indicators = new JsonArray();
+        var existing = indicators.OfType<JsonObject>().FirstOrDefault(i => Text(i["code"]) == code);
+        if (on && existing is null) indicators.Add(new JsonObject { ["code"] = code, ["text"] = text });
+        if (!on && existing is not null) indicators.Remove(existing);
+        Context.Changed();
+    }
+}

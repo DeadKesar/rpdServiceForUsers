@@ -1,0 +1,78 @@
+@using System.Text.Json
+@using System.Text.Json.Nodes
+@inherits FieldBase
+
+@* Таблица записей по схеме элемента: занятия, литература, интернет-ресурсы, составители. *@
+<div class="mb-3">
+    <label class="form-label">@Title</label>
+    @{ var rows = Value as JsonArray; }
+    <table class="table table-sm align-middle">
+        <thead>
+            <tr>
+                @foreach (var column in Columns)
+                {
+                    <th>@(SchemaContext.Text(column.Schema, "title") ?? column.Name)</th>
+                }
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            @for (var i = 0; i < (rows?.Count ?? 0); i++)
+            {
+                var index = i;
+                var row = rows![index] as JsonObject;
+                <tr>
+                    @foreach (var column in Columns)
+                    {
+                        <td>
+                            @if (row is not null)
+                            {
+                                <ScalarInput Context="Context" Schema="column.Schema" Parent="row" Key="@column.Name"
+                                             Path="@($"{Path}/{index}/{column.Name}")" Compact="true" />
+                            }
+                        </td>
+                    }
+                    <td class="text-end">
+                        @if (!ReadOnly)
+                        {
+                            <button class="btn btn-sm btn-outline-secondary" type="button" title="Удалить строку" @onclick="() => Remove(index)">✕</button>
+                        }
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+    @if (!ReadOnly)
+    {
+        <button class="btn btn-sm btn-outline-primary" type="button" @onclick="Add">Добавить строку</button>
+    }
+    @if (Hint is not null)
+    {
+        <div class="form-text">@Hint</div>
+    }
+</div>
+
+@code {
+    // Столбцы — простые свойства элемента; вложенные списки и объекты в таблице не редактируются.
+    private IEnumerable<(string Name, JsonElement Schema)> Columns =>
+        Items.ValueKind == JsonValueKind.Object && Items.TryGetProperty("properties", out var props)
+            ? props.EnumerateObject().Select(p => (p.Name, Schema: Context.Resolve(p.Value)))
+                .Where(c => SchemaContext.Type(c.Schema) is not ("array" or "object"))
+            : [];
+
+    private void Add()
+    {
+        var rows = EnsureArray();
+        var row = new JsonObject();
+        // Номер по порядку — следующий: так у занятий не нужно набирать его вручную.
+        if (Columns.Any(c => c.Name == "number")) row["number"] = rows.Count + 1;
+        rows.Add(row);
+        Context.Changed();
+    }
+
+    private void Remove(int index)
+    {
+        EnsureArray().RemoveAt(index);
+        Context.Changed();
+    }
+}

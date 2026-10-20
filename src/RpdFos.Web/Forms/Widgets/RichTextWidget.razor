@@ -1,0 +1,31 @@
+@using System.Text.Json.Nodes
+@using System.Text.RegularExpressions
+@inherits FieldBase
+
+@* Форматированный текст: только полужирный, курсив и списки (решение этапа 4); разметку на сервере чистит санитайзер. *@
+<div class="mb-3">
+    <label class="form-label">@Title</label>
+    @if (ReadOnly)
+    {
+        <div class="border rounded p-2 bg-light">@((MarkupString)(Text(Value) ?? ""))</div>
+    }
+    else
+    {
+        <RadzenHtmlEditor Value="@(Text(Value) ?? "")" ValueChanged="@((string html) => OnChanged(html))" Style="height: 220px;">
+            <RadzenHtmlEditorBold Title="Полужирный" />
+            <RadzenHtmlEditorItalic Title="Курсив" />
+            <RadzenHtmlEditorUnorderedList Title="Маркированный список" />
+            <RadzenHtmlEditorOrderedList Title="Нумерованный список" />
+        </RadzenHtmlEditor>
+    }
+    @if (Hint is not null)
+    {
+        <div class="form-text">@Hint</div>
+    }
+</div>
+
+@code {
+    // Пустой редактор отдаёт «<br>» или пустой абзац — это не текст: поле удаляется из содержимого.
+    private void OnChanged(string? html) =>
+        SetValue(string.IsNullOrWhiteSpace(Regex.Replace(html ?? "", "<[^>]*>|&nbsp;", "")) ? null : JsonValue.Create(html));
+}

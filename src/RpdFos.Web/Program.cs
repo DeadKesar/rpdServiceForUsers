@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Components.Web;
 using Microsoft.AspNetCore.Components.WebAssembly.Authentication;
 using Microsoft.AspNetCore.Components.WebAssembly.Hosting;
+using Radzen;
 using RpdFos.Web;
 
 var builder = WebAssemblyHostBuilder.CreateDefault(args);
@@ -11,6 +12,9 @@ builder.RootComponents.Add<HeadOutlet>("head::after");
 builder.Services.AddHttpClient("api", c => c.BaseAddress = new Uri(builder.HostEnvironment.BaseAddress))
     .AddHttpMessageHandler<BaseAddressAuthorizationMessageHandler>();
 builder.Services.AddScoped(sp => sp.GetRequiredService<IHttpClientFactory>().CreateClient("api"));
+
+// Компоненты Radzen: редактор форматированного текста документа.
+builder.Services.AddRadzenComponents();
 
 // Вход через сервер авторизации OpenIddict на том же хосте: authorization code + PKCE.
 builder.Services.AddOidcAuthentication(options =>

@@ -1,0 +1,49 @@
+@using System.Text.Json.Nodes
+@inherits FieldBase
+
+@* Список строк: задачи, формы контроля, программное обеспечение. *@
+<div class="mb-3">
+    <label class="form-label">@Title</label>
+    @{ var items = Value as JsonArray; }
+    @for (var i = 0; i < (items?.Count ?? 0); i++)
+    {
+        var index = i;
+        <div class="input-group input-group-sm mb-1">
+            <span class="input-group-text">@(index + 1)</span>
+            <input type="text" class="form-control" readonly="@ReadOnly" value="@Text(items![index])"
+                   @onchange="e => Change(index, e.Value as string)" />
+            @if (!ReadOnly)
+            {
+                <button class="btn btn-outline-secondary" type="button" title="Удалить" @onclick="() => Remove(index)">✕</button>
+            }
+        </div>
+    }
+    @if (!ReadOnly)
+    {
+        <button class="btn btn-sm btn-outline-primary" type="button" @onclick="Add">Добавить</button>
+    }
+    @if (Hint is not null)
+    {
+        <div class="form-text">@Hint</div>
+    }
+</div>
+
+@code {
+    private void Add()
+    {
+        EnsureArray().Add(JsonValue.Create(""));
+        Context.Changed();
+    }
+
+    private void Change(int index, string? text)
+    {
+        EnsureArray()[index] = JsonValue.Create(text?.Trim() ?? "");
+        Context.Changed();
+    }
+
+    private void Remove(int index)
+    {
+        EnsureArray().RemoveAt(index);
+        Context.Changed();
+    }
+}
