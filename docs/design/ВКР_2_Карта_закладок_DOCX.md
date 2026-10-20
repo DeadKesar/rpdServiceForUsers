@@ -17,7 +17,7 @@
 | `AutofillPartType1–2` (2) | Цикл дисциплины и его часть | `parser.discipline.block` + `part_type` |
 | `AutofillDepartment1–2` (2) | Кафедра | `reference.department.name` |
 | `AutofillYear1` (1) | Год | `document.year` |
-| `AutofillKurs1` (1) | Курс | производное: из семестров дисциплины |
+| `AutofillKurs1` (1) | Фраза о курсовом проекте (работе) в разделе 3.5 «Курсовой проект (курсовая работа)»: «По дисциплине … AutofillKurs»; без курсового проекта по плану — стандартная заглушка раздела (FR-TPL-14). *Исправлено по шаблонам, этап 3: было «Курс, производное из семестров».* | `payload`: `course_work` (условный раздел) |
 | `AutofillSemester1` (1) | Семестр(ы) | `parser.discipline.semesters` |
 
 ### Трудоёмкость и содержательные блоки
@@ -41,7 +41,7 @@
 | Закладки | Подписант | Резолвер / источник |
 |---|---|---|
 | `AutofillPositionOdimp1` / `AutofillPositionOdimpName1` | Проректор по ОДиМП (гриф «УТВЕРЖДАЮ», титул) | `lookup.role:vice_rector_edu`, placement: title |
-| `AutofillPositionKaf1` / `AutofillPositionKafName1` / `AutofillPositionKafForDoc1` | Заведующий кафедрой (краткая должность / ФИО / формулировка для документа) | `discipline.department.head`; `ForDoc` ↔ `nameForDoc` парсера должностей |
+| `AutofillPositionKaf1` / `AutofillPositionKafName1` / `AutofillPositionKafForDoc1` | Заведующий кафедрой (краткая должность / ФИО / наименование кафедры под строкой подписи) | `discipline.department.head`; `ForDoc` — сокращение кафедры заведующего («ИТиВС»), `departments.short_name`. *Исправлено по шаблонам, этап 3: было `ForDoc` ↔ `nameForDoc` парсера должностей.* |
 | `AutofillPositionInst1` / `AutofillPositionInstName1` | Директор института | `discipline.department.institute.director` |
 | `AutofillPositionUmu1` / `AutofillPositionUmuName1` | Начальник УМУ | `lookup.role:umu_head` |
 | `AutofillPositionBib1` / `AutofillPositionBibName1` | Директор научно-технической библиотеки | `lookup.role:library_director` |
@@ -55,7 +55,8 @@
 | `AutofillWayCode1–4` (4) | Код направления | `reference.direction.code` |
 | `AutofillWayName1,2,7` (3) | Наименование направления | `reference.direction.name` |
 | `AutofillWaySection1` | Профиль | `reference.profile.name` |
-| `AutofillEducationLevel1` / `AutofillEducationLvl1` | Уровень образования / квалификация | `reference.direction.level` |
+| `AutofillEducationLevel1` | Квалификация («Квалификация магистр»). *Исправлено по шаблонам, этап 3: было «Уровень образования / квалификация» с источником `reference.direction.level`.* | `reference.direction.qualification`: явная из плана, иначе производная от уровня (бакалавриат → бакалавр, магистратура → магистр, специалитет → специалист) |
+| `AutofillEducationLvl1` | Уровень образования в шапке экзаменационного билета («для обучающихся N курса магистратуры»), родительный падеж | `reference.direction.level` |
 | `AutofillEducationForm1` | Форма обучения | `reference.curriculum_plan.education_form` |
 | `AutofillCurs1` | Курс («для обучающихся N курса») | производное из семестров |
 | `AutofillYear1–6` (6) | Год (в датах подписей и на титуле) | `document.year` |
