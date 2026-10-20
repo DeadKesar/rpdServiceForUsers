@@ -41,6 +41,16 @@ public sealed class TemplateLifecycle(AppDbContext db, DocumentTypeRegistry regi
 
         template.Publish(clock.GetUtcNow());
         await db.SaveChangesAsync(ct);
+
+        // FR-DOC-12: документы прежних редакций линии устарели — в той же транзакции, что и публикация.
+        // Версию документа не трогаем: признак ортогонален содержимому, и правка в открытом редакторе
+        // не должна упасть с конфликтом версий из-за публикации шаблона.
+        // IgnoreQueryFilters здесь нельзя: он снимает фильтры со всего запроса, и удалённые документы тоже устарели бы.
+        var olderRevisions = db.DocumentTemplates
+            .Where(t => t.LineageId == template.LineageId && t.Revision < template.Revision).Select(t => t.Id);
+        await db.Documents.Where(d => olderRevisions.Contains(d.TemplateId) && !d.IsOutdated && !d.IsDeleted)
+            .ExecuteUpdateAsync(s => s.SetProperty(d => d.IsOutdated, true), ct);
+
         await tx.CommitAsync(ct);
         return [];
     }
