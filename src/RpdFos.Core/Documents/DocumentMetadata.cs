@@ -27,8 +27,8 @@ public sealed record DocumentMetadata(
         IDocumentValidator validator, Func<string, JsonElement?> resolve)
     {
         var schema = JsonDocument.Parse(schemaJson).RootElement;
-        var missing = validator.Validate(schemaJson, payload, ValidationMode.Submit)
-            .ToLookup(e => e.Path.TrimStart('/').Split('/')[0]);
+        var missing = DocumentSubmission.Check(schemaJson, payload, facts, validator, resolve)
+            .ToLookup(e => DocumentSubmission.Section(e.Path));
 
         var sections = new List<SectionState>();
         if (schema.TryGetProperty("properties", out var properties))

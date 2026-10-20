@@ -98,6 +98,12 @@ public class DocumentsApiTests(DatabaseFixture app)
         });
         Assert.Equal(SectionFill.Complete, sections["hours_distribution"].Fill);
         Assert.Equal(SectionFill.Incomplete, sections["goals_and_objectives"].Fill);
+        // Видимый условный раздел обязателен при отправке — хотя бы одна запись; новый документ его ещё не заполнил.
+        Assert.All(sections.Values.Where(s => s.Visible && s.Key is "lab_works" or "practical_classes" or "course_work"), s =>
+        {
+            Assert.Equal(SectionFill.Incomplete, s.Fill);
+            Assert.Equal(DocumentSubmission.EmptyVisibleSection, Assert.Single(s.Missing).Message);
+        });
     }
 
     [Theory]
