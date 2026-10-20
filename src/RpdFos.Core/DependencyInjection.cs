@@ -5,6 +5,7 @@ using RpdFos.Core.Data.Interceptors;
 using RpdFos.Core.Directory;
 using RpdFos.Core.DocumentTypes;
 using RpdFos.Core.Import;
+using RpdFos.Core.Templates;
 
 namespace RpdFos.Core;
 
@@ -27,6 +28,7 @@ public static class DependencyInjection
         services.AddScoped<DirectoryAccounts>();
         services.AddScoped<ImportJob>();
         services.AddSingleton<DocumentTypeRegistry>();
+        services.AddScoped<TemplateLifecycle>();
         return services;
     }
 }

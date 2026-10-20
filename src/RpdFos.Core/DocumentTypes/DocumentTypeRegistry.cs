@@ -48,9 +48,9 @@ public sealed class DocumentTypeRegistry
         var schemaJson = ReadResource($"{code}.schema.json");
         var schema = JsonDocument.Parse(schemaJson).RootElement.Clone();
         var mappingJson = ReadResource($"{code}.print-mapping.json");
-        var mapping = JsonSerializer.Deserialize<Dictionary<string, BookmarkTarget>>(mappingJson, PrintMappingValidator.Json)!;
+        var mapping = PrintMappingJson.ReadMapping(mappingJson);
         var signaturesJson = ReadResource($"{code}.signatures.json");
-        var signatures = JsonSerializer.Deserialize<List<SignatureSeat>>(signaturesJson, PrintMappingValidator.Json)!;
+        var signatures = PrintMappingJson.ReadSignatures(signaturesJson);
         return new DocumentTypeDefinition(code, title, schemaJson, schema, schema.GetProperty("$id").GetString()!,
             mappingJson, mapping, signaturesJson, signatures);
     }

@@ -4,6 +4,7 @@ using RpdFos.Api.Infrastructure;
 using RpdFos.Core.Data;
 using RpdFos.Core.Data.Entities;
 using RpdFos.Core.DocumentTypes;
+using RpdFos.Core.Templates;
 
 namespace RpdFos.Api.Features.Templates;
 
@@ -43,7 +44,7 @@ public class TemplatesModule : ICarterModule
         // Образец среза «смена статуса + проверка версии»: загрузить -> 404 -> правило перехода (409)
         // -> изменить -> сохранить. Конфликт версий превращает в 409 ConcurrencyExceptionHandler.
         g.MapPost("/{id:guid}/publish", async (
-            Guid id, PublishTemplateRequest rq, AppDbContext db, CancellationToken ct) =>
+            Guid id, PublishTemplateRequest rq, AppDbContext db, TemplateLifecycle lifecycle, CancellationToken ct) =>
         {
             var t = await db.DocumentTemplates.FirstOrDefaultAsync(x => x.Id == id, ct);
             if (t is null)
@@ -53,14 +54,19 @@ public class TemplatesModule : ICarterModule
                 return Results.Problem(
                     statusCode: StatusCodes.Status409Conflict,
                     title: "Переход статуса невозможен",
-                    detail: $"Шаблон в статусе «{t.Status}» нельзя опубликовать.");
-
-            t.Status = TemplateStatuses.Published;
+                    detail: TemplateTransitions.Refusal(t.Status, TemplateTransitions.PublishAction));
 
             // Сравнивать будем с версией, которую видел клиент.
             // Новую версию и время изменения проставит перехватчик сохранения.
             db.Entry(t).Property(x => x.Version).OriginalValue = rq.Version;
-            await db.SaveChangesAsync(ct);
+
+            // Проверка перед публикацией (FR-TPL-11, FR-TPL-13): ошибки — списком.
+            var errors = await lifecycle.PublishAsync(t, ct);
+            if (errors.Count > 0)
+                return Results.Problem(
+                    statusCode: StatusCodes.Status422UnprocessableEntity,
+                    title: "Шаблон не прошёл проверку перед публикацией",
+                    extensions: new Dictionary<string, object?> { ["errors"] = errors });
 
             return Results.Ok(TemplateListItem.From(t));
         }).RequireAuthorization(Policies.MethodistOrAdmin);

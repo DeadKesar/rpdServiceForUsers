@@ -1,4 +1,6 @@
+using System.Text.Encodings.Web;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using RpdFos.Core.Data.Entities;
 
@@ -58,18 +60,46 @@ public static class SignaturePlacements
     public const string Title = "title", ApprovalSheet = "approval_sheet";
 }
 
+/// <summary>JSON сопоставления закладок и листа согласования: файлы реестра типов и снимки в шаблоне (jsonb).</summary>
+public static class PrintMappingJson
+{
+    private static readonly JsonSerializerOptions Options = new()
+    {
+        PropertyNameCaseInsensitive = true,
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+        // Пояснения к целям — по-русски; без экранирования jsonb читается и в psql.
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+    };
+
+    public static IReadOnlyDictionary<string, BookmarkTarget> ReadMapping(string json) =>
+        JsonSerializer.Deserialize<Dictionary<string, BookmarkTarget>>(json, Options)!;
+
+    public static IReadOnlyList<SignatureSeat> ReadSignatures(string json) =>
+        JsonSerializer.Deserialize<List<SignatureSeat>>(json, Options)!;
+
+    public static string Write(IReadOnlyDictionary<string, BookmarkTarget> mapping) => JsonSerializer.Serialize(mapping, Options);
+}
+
 /// <summary>Проверка сопоставления закладок и листа согласования: каждая закладка сопоставлена, каждая цель существует.</summary>
 public static partial class PrintMappingValidator
 {
-    internal static readonly JsonSerializerOptions Json = new() { PropertyNameCaseInsensitive = true };
-
     // Подстановка в тексте: {parser.discipline.name}.
     [GeneratedRegex(@"\{(?<source>[^{}]+)\}")]
     private static partial Regex Placeholder();
 
-    /// <summary>Ошибки сопоставления закладок; пустой список — всё сопоставлено и все цели существуют.</summary>
+    /// <summary>Ошибки сопоставления по схеме типа из реестра.</summary>
     public static IReadOnlyList<string> Validate(
         DocumentTypeRegistry registry, string documentType, IReadOnlyDictionary<string, BookmarkTarget> mapping,
+        IReadOnlyList<SignatureSeat> signatures, IEnumerable<string> bookmarkBaseNames) =>
+        Validate(pointer => registry.FieldExists(documentType, pointer), mapping, signatures, bookmarkBaseNames);
+
+    /// <summary>
+    /// Ошибки сопоставления закладок; пустой список — всё сопоставлено и все цели существуют.
+    /// <paramref name="fieldExists"/> — есть ли поле в схеме: у шаблона это его снимок схемы.
+    /// </summary>
+    public static IReadOnlyList<string> Validate(
+        Func<string, bool> fieldExists, IReadOnlyDictionary<string, BookmarkTarget> mapping,
         IReadOnlyList<SignatureSeat> signatures, IEnumerable<string> bookmarkBaseNames)
     {
         var errors = new List<string>();
@@ -100,7 +130,7 @@ public static partial class PrintMappingValidator
         string? Problem(string kind, string value, string? part) => kind switch
         {
             BookmarkTargetKinds.Source when !DocumentSources.IsKnown(value) => $"неизвестный источник {value}",
-            BookmarkTargetKinds.Field when !registry.FieldExists(documentType, value) => $"поля {value} нет в схеме",
+            BookmarkTargetKinds.Field when !fieldExists(value) => $"поля {value} нет в схеме",
             BookmarkTargetKinds.Signature when !seats.Contains(value) => $"места {value} нет в листе согласования",
             BookmarkTargetKinds.Signature when part is null || !SignatureParts.All.Contains(part) =>
                 $"неизвестная часть подписи «{part}»",

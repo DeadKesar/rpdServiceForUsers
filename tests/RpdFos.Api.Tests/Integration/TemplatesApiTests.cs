@@ -16,7 +16,7 @@ public class TemplatesApiTests(DatabaseFixture app)
     public async Task Publish_increments_version()
     {
         var client = app.CreateClientFor(AppRoles.Methodist);
-        var created = await CreateTemplateAsync(client);
+        var created = await AddDraftAsync();
         Assert.Equal(1, created.Version);
 
         var response = await client.PostAsJsonAsync($"/api/templates/{created.Id}/publish",
@@ -36,7 +36,7 @@ public class TemplatesApiTests(DatabaseFixture app)
     public async Task Publish_with_stale_version_returns_409()
     {
         var client = app.CreateClientFor(AppRoles.Methodist);
-        var created = await CreateTemplateAsync(client);
+        var created = await AddDraftAsync();
 
         // Другая сессия изменила шаблон после того, как клиент его прочитал: версия 1 -> 2.
         await app.WithDbAsync(async db =>
@@ -57,7 +57,7 @@ public class TemplatesApiTests(DatabaseFixture app)
         await app.WithDbAsync(async db =>
         {
             var t = await db.DocumentTemplates.SingleAsync(x => x.Id == created.Id);
-            Assert.Equal(TemplateStatuses.Empty, t.Status);
+            Assert.Equal(TemplateStatuses.Draft, t.Status);
             Assert.Equal(2, t.Version);
         });
     }
@@ -81,11 +81,23 @@ public class TemplatesApiTests(DatabaseFixture app)
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 
-    private static async Task<TemplateListItem> CreateTemplateAsync(HttpClient client)
+    [Fact]
+    public async Task Publish_of_empty_template_returns_409()
     {
-        var response = await client.PostAsJsonAsync("/api/templates",
-            new CreateTemplateRequest(TemplateTypes.Rpd, "Тестовый шаблон"));
-        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
-        return (await response.Content.ReadFromJsonAsync<TemplateListItem>())!;
+        // Правило этапа 0 обновлено: из «Пустого» публиковать нельзя.
+        var client = app.CreateClientFor(AppRoles.Methodist);
+        var response = await client.PostAsJsonAsync("/api/templates", new CreateTemplateRequest(TemplateTypes.Rpd, "Пустой"));
+        var created = (await response.Content.ReadFromJsonAsync<TemplateListItem>())!;
+
+        var publish = await client.PostAsJsonAsync($"/api/templates/{created.Id}/publish", new PublishTemplateRequest(created.Version));
+
+        Assert.Equal(HttpStatusCode.Conflict, publish.StatusCode);
+    }
+
+    private async Task<DocumentTemplate> AddDraftAsync()
+    {
+        DocumentTemplate? template = null;
+        await app.WithDbAsync(async db => template = await TemplateData.AddDraftAsync(db));
+        return template!;
     }
 }
