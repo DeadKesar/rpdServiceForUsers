@@ -374,7 +374,7 @@ public sealed class ReferenceImporter(AppDbContext db, TimeProvider clock)
                 }
                 var departmentId = department?.Id;
                 var instituteId = department is null ? institute?.Id : null;
-                if (role is not null && SignatoryRoles.University.Contains(role)) (departmentId, instituteId) = (null, null);
+                if (role is not null && SignatoryRoles.WithoutUnit.Contains(role)) (departmentId, instituteId) = (null, null);
                 if (SeatOf(role, departmentId, instituteId) is { } seat && !taken.Add(seat))
                 {
                     Warning(files.Employees, $"«{e.OfficialName}»: место подписанта уже занято другим сотрудником — категория не назначена");

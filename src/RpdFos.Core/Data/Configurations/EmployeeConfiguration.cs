@@ -25,7 +25,7 @@ internal sealed class EmployeeConfiguration : IEntityTypeConfiguration<Employee>
             t.HasCheckConstraint("ck_users_signatory_scope",
                 $"(signatory_role IN ({heads}) AND department_id IS NOT NULL)" +
                 $" OR (signatory_role = '{SignatoryRoles.InstituteDirector}' AND institute_id IS NOT NULL AND department_id IS NULL)" +
-                $" OR (signatory_role IN ({List(SignatoryRoles.University)}) AND department_id IS NULL AND institute_id IS NULL)" +
+                $" OR (signatory_role IN ({List(SignatoryRoles.WithoutUnit)}) AND department_id IS NULL AND institute_id IS NULL)" +
                 " OR (signatory_role IS NULL)");
         });
 

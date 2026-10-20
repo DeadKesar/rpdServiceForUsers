@@ -1,3 +1,4 @@
+using RpdFos.Core.Data.Entities;
 using RpdFos.Core.DocumentTypes;
 using Xunit;
 
@@ -63,6 +64,15 @@ public class PrintMappingTests
         Assert.Empty(PrintMappingValidator.ValidateSignatures(signatures));
         // Электронные места в прототипе — заведующий кафедрой дисциплины и начальник УМУ, остальные — бумажные.
         Assert.Equal(["department_head", "umu_head"], signatures.Where(s => s.Electronic).Select(s => s.Id).Order());
+    }
+
+    [Fact]
+    public void Role_lookups_use_directory_signatory_codes()
+    {
+        // Один набор кодов категорий: lookup.role:<код> ищет по users.signatory_role.
+        var lookups = SignatureResolvers.All.Keys.Where(k => k.StartsWith("lookup.role:")).Select(k => k["lookup.role:".Length..]);
+
+        Assert.All(lookups, code => Assert.Contains(code, SignatoryRoles.All));
     }
 
     [Fact]

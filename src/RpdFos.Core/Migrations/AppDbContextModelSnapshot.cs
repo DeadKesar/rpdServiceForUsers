@@ -934,26 +934,68 @@ namespace RpdFos.Core.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
 
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("created_by");
+
+                    b.Property<Guid?>("CurriculumPlanId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("curriculum_plan_id");
+
+                    b.Property<DateTimeOffset?>("DeletedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("deleted_at");
+
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("boolean")
                         .HasColumnName("is_deleted");
 
+                    b.Property<Guid>("LineageId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("lineage_id");
+
                     b.Property<string>("Name")
                         .IsRequired()
-                        .HasMaxLength(512)
-                        .HasColumnType("character varying(512)")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
                         .HasColumnName("name");
+
+                    b.Property<string>("PrintMapping")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("print_mapping");
+
+                    b.Property<Guid?>("PrintTemplateFileId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("print_template_file_id");
+
+                    b.Property<DateTimeOffset?>("PublishedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("published_at");
+
+                    b.Property<int>("Revision")
+                        .HasColumnType("integer")
+                        .HasColumnName("revision");
+
+                    b.Property<string>("Schema")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("schema");
+
+                    b.Property<string>("SignaturesConfig")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("signatures_config");
 
                     b.Property<string>("Status")
                         .IsRequired()
-                        .HasMaxLength(32)
-                        .HasColumnType("character varying(32)")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
                         .HasColumnName("status");
 
                     b.Property<string>("Type")
                         .IsRequired()
-                        .HasMaxLength(32)
-                        .HasColumnType("character varying(32)")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
                         .HasColumnName("type");
 
                     b.Property<DateTimeOffset>("UpdatedAt")
@@ -965,12 +1007,29 @@ namespace RpdFos.Core.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("version");
 
-                    b.Property<int>("Year")
-                        .HasColumnType("integer")
-                        .HasColumnName("year");
-
                     b.HasKey("Id")
                         .HasName("pk_document_templates");
+
+                    b.HasIndex("CreatedBy")
+                        .HasDatabaseName("ix_document_templates_created_by");
+
+                    b.HasIndex("CurriculumPlanId")
+                        .HasDatabaseName("ix_document_templates_curriculum_plan_id");
+
+                    b.HasIndex("PrintTemplateFileId")
+                        .HasDatabaseName("ix_document_templates_print_template_file_id");
+
+                    b.HasIndex("LineageId", "Revision")
+                        .IsUnique()
+                        .HasDatabaseName("ix_document_templates_lineage_id_revision");
+
+                    b.HasIndex("Type", "Status")
+                        .HasDatabaseName("ix_document_templates_type_status");
+
+                    b.HasIndex(new[] { "LineageId" }, "ux_document_templates_lineage_published")
+                        .IsUnique()
+                        .HasDatabaseName("ix_document_templates_lineage_id")
+                        .HasFilter("status = 'published'");
 
                     b.ToTable("document_templates", (string)null);
                 });
@@ -1097,9 +1156,9 @@ namespace RpdFos.Core.Migrations
                         {
                             t.HasCheckConstraint("ck_users_can_login", "can_login = false OR (email IS NOT NULL AND identity_subject IS NOT NULL)");
 
-                            t.HasCheckConstraint("ck_users_signatory_role", "signatory_role IS NULL OR signatory_role IN ('department_head', 'department_head_acting', 'institute_director', 'vice_rector', 'rector', 'umu_head', 'library_director', 'it_dept_head')");
+                            t.HasCheckConstraint("ck_users_signatory_role", "signatory_role IS NULL OR signatory_role IN ('department_head', 'department_head_acting', 'institute_director', 'rector', 'vice_rector_edu', 'umu_head', 'library_director', 'it_directorate_head', 'umk_chair')");
 
-                            t.HasCheckConstraint("ck_users_signatory_scope", "(signatory_role IN ('department_head', 'department_head_acting') AND department_id IS NOT NULL) OR (signatory_role = 'institute_director' AND institute_id IS NOT NULL AND department_id IS NULL) OR (signatory_role IN ('rector', 'vice_rector', 'umu_head', 'library_director', 'it_dept_head') AND department_id IS NULL AND institute_id IS NULL) OR (signatory_role IS NULL)");
+                            t.HasCheckConstraint("ck_users_signatory_scope", "(signatory_role IN ('department_head', 'department_head_acting') AND department_id IS NOT NULL) OR (signatory_role = 'institute_director' AND institute_id IS NOT NULL AND department_id IS NULL) OR (signatory_role IN ('rector', 'vice_rector_edu', 'umu_head', 'library_director', 'it_directorate_head', 'umk_chair') AND department_id IS NULL AND institute_id IS NULL) OR (signatory_role IS NULL)");
                         });
                 });
 
@@ -1612,6 +1671,27 @@ namespace RpdFos.Core.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
                         .HasConstraintName("fk_discipline_semester_details_disciplines_discipline_id");
+                });
+
+            modelBuilder.Entity("RpdFos.Core.Data.Entities.DocumentTemplate", b =>
+                {
+                    b.HasOne("RpdFos.Core.Data.Entities.Employee", null)
+                        .WithMany()
+                        .HasForeignKey("CreatedBy")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_document_templates_employees_created_by");
+
+                    b.HasOne("RpdFos.Core.Data.Entities.CurriculumPlan", null)
+                        .WithMany()
+                        .HasForeignKey("CurriculumPlanId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_document_templates_curriculum_plans_curriculum_plan_id");
+
+                    b.HasOne("RpdFos.Core.Data.Entities.UploadedFile", null)
+                        .WithMany()
+                        .HasForeignKey("PrintTemplateFileId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_document_templates_uploaded_files_print_template_file_id");
                 });
 
             modelBuilder.Entity("RpdFos.Core.Data.Entities.Employee", b =>

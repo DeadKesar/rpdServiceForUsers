@@ -34,16 +34,26 @@ public class Employee
     public DateTimeOffset UpdatedAt { get; set; }
 }
 
-/// <summary>Категории подписантов (раздел 2.4 ВКР): по ним резолверы шаблона находят подписанта.</summary>
+/// <summary>
+/// Категории подписантов (раздел 2.4 ВКР): по ним резолверы шаблона находят подписанта. Один набор кодов —
+/// и в листах согласования шаблонов (<c>role</c>, <c>lookup.role:&lt;код&gt;</c>), и в users.signatory_role.
+/// </summary>
 public static class SignatoryRoles
 {
     public const string DepartmentHead = "department_head", DepartmentHeadActing = "department_head_acting",
-        InstituteDirector = "institute_director", ViceRector = "vice_rector", Rector = "rector",
-        UmuHead = "umu_head", LibraryDirector = "library_director", ItDeptHead = "it_dept_head";
+        InstituteDirector = "institute_director", Rector = "rector", ViceRectorEdu = "vice_rector_edu",
+        UmuHead = "umu_head", LibraryDirector = "library_director", ItDirectorateHead = "it_directorate_head",
+        UmkChair = "umk_chair";
 
     public static readonly string[] All =
-        [DepartmentHead, DepartmentHeadActing, InstituteDirector, ViceRector, Rector, UmuHead, LibraryDirector, ItDeptHead];
+    [
+        DepartmentHead, DepartmentHeadActing, InstituteDirector, Rector, ViceRectorEdu, UmuHead, LibraryDirector,
+        ItDirectorateHead, UmkChair
+    ];
 
-    /// <summary>Подписанты уровня университета: без кафедры и без института.</summary>
-    public static readonly string[] University = [Rector, ViceRector, UmuHead, LibraryDirector, ItDeptHead];
+    /// <summary>
+    /// Подписанты без кафедры и без института: уровня университета и председатель УМК — его связь
+    /// с направлением подготовки появится на этапе 6.
+    /// </summary>
+    public static readonly string[] WithoutUnit = [Rector, ViceRectorEdu, UmuHead, LibraryDirector, ItDirectorateHead, UmkChair];
 }

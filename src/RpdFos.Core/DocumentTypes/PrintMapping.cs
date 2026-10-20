@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using RpdFos.Core.Data.Entities;
 
 namespace RpdFos.Core.DocumentTypes;
 
@@ -115,12 +116,17 @@ public static partial class PrintMappingValidator
         };
     }
 
-    /// <summary>Ошибки листа согласования: только известные правила определения и размещения, без повторов мест.</summary>
+    /// <summary>
+    /// Ошибки листа согласования: только известные категории подписантов, правила определения и размещения,
+    /// без повторов мест.
+    /// </summary>
     public static IReadOnlyList<string> ValidateSignatures(IReadOnlyList<SignatureSeat> signatures)
     {
         var errors = new List<string>();
         foreach (var seat in signatures)
         {
+            if (!SignatoryRoles.All.Contains(seat.Role))
+                errors.Add($"Место {seat.Id}: неизвестная категория подписанта {seat.Role}");
             if (!SignatureResolvers.All.ContainsKey(seat.Resolver))
                 errors.Add($"Место {seat.Id}: неизвестное правило определения {seat.Resolver}");
             if (seat.Placement is not (SignaturePlacements.Title or SignaturePlacements.ApprovalSheet))

@@ -172,6 +172,12 @@ public class ImportTests(ImportDatabaseFixture app, ITestOutputHelper output)
             var rector = await db.Employees.SingleAsync(e => e.OfficialDesignation == "Управление");
             Assert.Equal((SignatoryRoles.Rector, (Guid?)null, (Guid?)null), (rector.SignatoryRole, rector.DepartmentId, rector.InstituteId));
 
+            // Коды — те же, что в листах согласования шаблонов.
+            var viceRector = await db.Employees.SingleAsync(e => e.OfficialDesignation == "Проректор по образовательной деятельности и молодежной политике");
+            Assert.Equal(SignatoryRoles.ViceRectorEdu, viceRector.SignatoryRole);
+            var itHead = await db.Employees.SingleAsync(e => e.OfficialDesignation == "Начальник управления информационно-технической поддержки ДЦТ");
+            Assert.Equal(SignatoryRoles.ItDirectorateHead, itHead.SignatoryRole);
+
             // Кафедры нет в плане — сотрудник без кафедры и без категории, с предупреждением в журнале.
             var acting = await db.Employees.SingleAsync(e => e.OfficialDesignation == "Гидропневмоавтоматика и гидропривод");
             Assert.Equal(((string?)null, (Guid?)null), (acting.SignatoryRole, acting.DepartmentId));

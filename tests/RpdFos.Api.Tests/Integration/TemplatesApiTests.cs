@@ -68,7 +68,7 @@ public class TemplatesApiTests(DatabaseFixture app)
     public async Task Create_template_is_allowed_by_role(string role, HttpStatusCode expected)
     {
         var response = await app.CreateClientFor(role).PostAsJsonAsync("/api/templates",
-            new CreateTemplateRequest(TemplateTypes.Rpd, $"Шаблон ({role})", 2026));
+            new CreateTemplateRequest(TemplateTypes.Rpd, $"Шаблон ({role})"));
 
         Assert.Equal(expected, response.StatusCode);
     }
@@ -84,7 +84,7 @@ public class TemplatesApiTests(DatabaseFixture app)
     private static async Task<TemplateListItem> CreateTemplateAsync(HttpClient client)
     {
         var response = await client.PostAsJsonAsync("/api/templates",
-            new CreateTemplateRequest(TemplateTypes.Rpd, "Тестовый шаблон", 2026));
+            new CreateTemplateRequest(TemplateTypes.Rpd, "Тестовый шаблон"));
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         return (await response.Content.ReadFromJsonAsync<TemplateListItem>())!;
     }

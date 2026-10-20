@@ -9,7 +9,9 @@ internal static partial class EmployeeRules
     // Ключевые слова должностей — по границам слов: «директор» не должен совпадать с «ректор».
     [GeneratedRegex(@"\bзаведующ")] private static partial Regex Head();
     [GeneratedRegex(@"\bи\.\s?о\.|\bисполняющ|\bврио\b")] private static partial Regex Acting();
+    // Подписант РПД и ФОС — проректор по образовательной деятельности; другие проректоры — не подписанты.
     [GeneratedRegex(@"\bпроректор")] private static partial Regex ViceRector();
+    [GeneratedRegex(@"\bобразовательн|\bодимп\b")] private static partial Regex Education();
     [GeneratedRegex(@"\bректор\b")] private static partial Regex Rector();
     [GeneratedRegex(@"\bбиблиотек")] private static partial Regex Library();
     [GeneratedRegex(@"\bуму\b|\bучебно-методическ")] private static partial Regex Umu();
@@ -25,11 +27,11 @@ internal static partial class EmployeeRules
         var text = $"{position} {officialName}".ToLowerInvariant();
         if (Head().IsMatch(text))
             return Acting().IsMatch(text) ? SignatoryRoles.DepartmentHeadActing : SignatoryRoles.DepartmentHead;
-        if (ViceRector().IsMatch(text)) return SignatoryRoles.ViceRector;
+        if (ViceRector().IsMatch(text)) return Education().IsMatch(text) ? SignatoryRoles.ViceRectorEdu : null;
         if (Rector().IsMatch(text)) return SignatoryRoles.Rector;
         if (Library().IsMatch(text)) return SignatoryRoles.LibraryDirector;
         if (Umu().IsMatch(text)) return SignatoryRoles.UmuHead;
-        if (ItDept().IsMatch(text)) return SignatoryRoles.ItDeptHead;
+        if (ItDept().IsMatch(text)) return SignatoryRoles.ItDirectorateHead;
         if (Director().IsMatch(text) && isInstituteRow) return SignatoryRoles.InstituteDirector;
         return null;
     }

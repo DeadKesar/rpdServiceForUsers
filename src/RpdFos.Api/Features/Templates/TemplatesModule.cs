@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using RpdFos.Api.Infrastructure;
 using RpdFos.Core.Data;
 using RpdFos.Core.Data.Entities;
+using RpdFos.Core.DocumentTypes;
 
 namespace RpdFos.Api.Features.Templates;
 
@@ -17,10 +18,10 @@ public class TemplatesModule : ICarterModule
         g.MapGet("/", async (AppDbContext db, CancellationToken ct) =>
             await db.DocumentTemplates
                 .OrderByDescending(t => t.CreatedAt)
-                .Select(t => new TemplateListItem(t.Id, t.Type, t.Name, t.Status, t.Version, t.Year))
+                .Select(t => new TemplateListItem(t.Id, t.Type, t.Name, t.Status, t.Version, t.Revision))
                 .ToListAsync(ct));
 
-        g.MapPost("/", async (CreateTemplateRequest rq, AppDbContext db, CancellationToken ct) =>
+        g.MapPost("/", async (CreateTemplateRequest rq, DocumentTypeRegistry registry, AppDbContext db, CancellationToken ct) =>
         {
             if (rq.Type is not (TemplateTypes.Rpd or TemplateTypes.Fos))
                 return Results.Problem(
@@ -28,7 +29,11 @@ public class TemplatesModule : ICarterModule
                     title: "Неизвестный тип документа",
                     detail: $"Тип «{rq.Type}» не поддерживается.");
 
-            var t = new DocumentTemplate { Type = rq.Type, Name = rq.Name, Year = rq.Year };
+            var type = registry.Get(rq.Type);
+            var t = new DocumentTemplate
+            {
+                Type = rq.Type, Name = rq.Name, Schema = type.SchemaJson, SignaturesConfig = type.SignaturesJson
+            };
             db.Add(t);
             await db.SaveChangesAsync(ct);
 
@@ -62,12 +67,12 @@ public class TemplatesModule : ICarterModule
     }
 }
 
-public record CreateTemplateRequest(string Type, string Name, int Year);
+public record CreateTemplateRequest(string Type, string Name);
 
 public record PublishTemplateRequest(int Version);
 
-public record TemplateListItem(Guid Id, string Type, string Name, string Status, int Version, int Year)
+public record TemplateListItem(Guid Id, string Type, string Name, string Status, int Version, int Revision)
 {
     public static TemplateListItem From(DocumentTemplate t) =>
-        new(t.Id, t.Type, t.Name, t.Status, t.Version, t.Year);
+        new(t.Id, t.Type, t.Name, t.Status, t.Version, t.Revision);
 }
