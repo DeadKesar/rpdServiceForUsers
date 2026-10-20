@@ -12,7 +12,8 @@
 | `AutofillWayCode1–4` (4) | Код направления подготовки | `reference.direction.code` |
 | `AutofillWayName1–4` (4) | Наименование направления | `reference.direction.name` |
 | `AutofillWaySection1–2` (2) | Направленность (профиль) | `reference.profile.name` |
-| `AutofillEducationLevel1–2` (2) | Уровень образования | `reference.direction.level` |
+| `AutofillEducationLevel1` (1) | Уровень образования («Уровень высшего образования» на титуле) | `reference.direction.level` |
+| `AutofillEducationLevel2` (1) | Квалификация: «…по направлению подготовки … с квалификацией «AutofillEducationLevel»» (раздел 1). *Исправлено по шаблонам, этап 4: было «Уровень образования» для обоих вхождений.* | `reference.direction.qualification` — переопределение вхождения: явная из плана, иначе производная от уровня |
 | `AutofillEducationForm1–2` (2) | Форма обучения | `reference.curriculum_plan.education_form` |
 | `AutofillPartType1–2` (2) | Цикл дисциплины и его часть | `parser.discipline.block` + `part_type` |
 | `AutofillDepartment1–2` (2) | Кафедра | `reference.department.name` |
