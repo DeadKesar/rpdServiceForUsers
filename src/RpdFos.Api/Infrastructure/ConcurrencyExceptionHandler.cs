@@ -22,13 +22,19 @@ public sealed class ConcurrencyExceptionHandler(IProblemDetailsService problemDe
         await problemDetails.TryWriteAsync(new ProblemDetailsContext
         {
             HttpContext = httpContext,
-            ProblemDetails = new ProblemDetails
-            {
-                Status = StatusCodes.Status409Conflict,
-                Title = "Конфликт версий",
-                Detail = "Запись изменена в другой сессии. Обновите данные и повторите действие."
-            }
+            ProblemDetails = VersionConflict()
         });
         return true;
     }
+
+    /// <summary>
+    /// Тот же ответ — для действий, которые запись с версией не меняют, но должны опираться на её актуальное
+    /// состояние (новая редакция шаблона): версию клиента там сравнивают явно.
+    /// </summary>
+    public static ProblemDetails VersionConflict() => new()
+    {
+        Status = StatusCodes.Status409Conflict,
+        Title = "Конфликт версий",
+        Detail = "Запись изменена в другой сессии. Обновите данные и повторите действие."
+    };
 }

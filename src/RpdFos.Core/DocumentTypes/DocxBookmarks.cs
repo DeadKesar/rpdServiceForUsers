@@ -29,6 +29,20 @@ public static partial class DocxBookmarks
     /// <summary>Базовое имя закладки: без числового суффикса.</summary>
     public static string BaseName(string bookmarkName) => NumericSuffix().Replace(bookmarkName, "");
 
+    /// <summary>Закладки загруженного файла; null — файл не читается как документ Word.</summary>
+    public static IReadOnlyList<BookmarkGroup>? TryRead(byte[] docx)
+    {
+        try
+        {
+            return Read(docx);
+        }
+        // Не ZIP, ZIP без документа Word, повреждённые части — ошибка данных пользователя, а не сервера.
+        catch (Exception e) when (e is OpenXmlPackageException or InvalidDataException or FileFormatException or IOException)
+        {
+            return null;
+        }
+    }
+
     /// <summary>Базовые имена закладок с префиксом Autofill по порядку первого появления в документе.</summary>
     public static IReadOnlyList<BookmarkGroup> Read(byte[] docx)
     {
