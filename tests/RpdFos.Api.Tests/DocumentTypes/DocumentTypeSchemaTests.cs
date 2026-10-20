@@ -58,4 +58,18 @@ public class DocumentTypeSchemaTests
 
         Assert.Equal(ValidationRules.Names.Order(), used.Order());
     }
+
+    [Theory]
+    [MemberData(nameof(Types))]
+    public void Approval_sheet_holds_only_author_input(string type)
+    {
+        // Подписантов определяют правила листа согласования шаблона, отметки согласования — document_signatures:
+        // в содержимом только составители и протокол заседания кафедры (ФОС — по $ref на схему РПД).
+        var sheet = SchemaInspector.SubschemaAt(Registry.Get(type).Schema, "/approval_sheet", Registry.FindSchema)!.Value;
+
+        Assert.Equal(["department_protocol", "developers"],
+            sheet.GetProperty("properties").EnumerateObject().Select(p => p.Name).Order());
+        var protocol = SchemaInspector.SubschemaAt(Registry.Get(type).Schema, "/approval_sheet/department_protocol", Registry.FindSchema)!.Value;
+        Assert.Equal("approval", protocol.GetProperty("x-required-for-status").GetString());
+    }
 }

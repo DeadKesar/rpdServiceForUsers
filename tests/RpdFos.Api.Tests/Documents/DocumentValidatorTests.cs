@@ -65,14 +65,26 @@ public class DocumentValidatorTests
 
     [Theory]
     [InlineData(DocumentStatuses.UnderReview)]
-    [InlineData(DocumentStatuses.Approval, "/approval_sheet/department_head", "/approval_sheet/methodist")]
-    [InlineData(DocumentStatuses.Approved, "/approval_sheet/approver", "/approval_sheet/department_head", "/approval_sheet/methodist")]
-    public void Signatures_are_required_from_their_status_on(string target, params string[] expected)
+    [InlineData(DocumentStatuses.Accepted)]
+    [InlineData(DocumentStatuses.Approval, "/approval_sheet/department_protocol")]
+    [InlineData(DocumentStatuses.Approved, "/approval_sheet/department_protocol")]
+    public void Department_protocol_is_required_from_approval_on(string target, params string[] expected)
     {
-        // x-required-for-status: подписи заведующего и методиста — к согласованию, утверждающего — к утверждению.
-        var errors = Validate(Rpd, """{ "approval_sheet": { "developer": {} } }""", ValidationMode.Submit, target);
+        // x-required-for-status «с указанного статуса и дальше»: протокол заседания кафедры — к согласованию.
+        var errors = Validate(Rpd, """{ "approval_sheet": { "developers": [] } }""", ValidationMode.Submit, target);
 
         Assert.Equal(expected, errors.Where(e => e.Message.StartsWith("Обязательно для перехода")).Select(e => e.Path));
+    }
+
+    [Fact]
+    public void Protocol_needs_number_and_date_once_entered()
+    {
+        var errors = Validate(Rpd, """{ "approval_sheet": { "developers": [], "department_protocol": { "number": "5" } } }""",
+            ValidationMode.Submit, DocumentStatuses.Approval);
+
+        Assert.Contains(new DocumentValidationError("/approval_sheet/department_protocol/date", "Обязательное поле не заполнено"), errors);
+        Assert.Contains(new DocumentValidationError("/approval_sheet/developers", "Добавьте хотя бы один элемент"), errors);
+        Assert.DoesNotContain(errors, e => e.Path == "/approval_sheet/department_protocol");
     }
 
     [Fact]
@@ -83,11 +95,26 @@ public class DocumentValidatorTests
               "title_page": { "direction_code": "09.04.04", "academic_year": "2026/2027" },
               "hours_distribution": { "semesters": [ { "semester": 2, "lectures": 16, "control_types": ["exam", "course_project"] } ] },
               "competences": [ { "code": "ПК-1", "indicators": [ { "code": "ПК-1.1.1" } ] } ],
-              "literature": { "internet_resources": [ { "title": "ЭБС", "url": "https://e.lanbook.com/book/1", "accessed_on": "2026-12-31" } ] }
+              "literature": { "internet_resources": [ { "title": "ЭБС", "url": "https://e.lanbook.com/book/1", "accessed_on": "2026-12-31" } ] },
+              "approval_sheet": {
+                "developers": [ { "user_id": "6f1d3a2e-0c4b-4f5e-9a7d-2b8c1e0f4a93", "name_for_document": "И. О. Составитель", "position": "доцент" } ],
+                "department_protocol": { "number": "5", "date": "2026-06-18" }
+              }
             }
             """;
 
         Assert.Empty(Validate(Rpd, payload, ValidationMode.Draft));
+    }
+
+    [Fact]
+    public void Developer_must_be_a_directory_record()
+    {
+        // Составитель — запись справочника сотрудников, а не произвольный текст.
+        var errors = Validate(Rpd, """{ "approval_sheet": { "developers": [ { "user_id": "Иванов", "name_for_document": "И. И. Иванов" } ] } }""",
+            ValidationMode.Draft);
+
+        Assert.Equal([new DocumentValidationError("/approval_sheet/developers/0/user_id",
+            "Ожидается запись справочника — выберите её из списка")], errors);
     }
 
     [Fact]

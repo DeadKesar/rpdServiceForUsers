@@ -137,6 +137,7 @@ public sealed class DocumentValidator(DocumentTypeRegistry registry) : IDocument
                 "date" => "Ожидается дата в формате ГГГГ-ММ-ДД",
                 "uri" => "Ожидается адрес ссылки, например https://…",
                 "email" => "Ожидается адрес электронной почты",
+                "uuid" => "Ожидается запись справочника — выберите её из списка",
                 var format => $"Неверный формат ({format})"
             },
             "minimum" => $"Значение должно быть не меньше {Value("minimum")}",
@@ -144,16 +145,25 @@ public sealed class DocumentValidator(DocumentTypeRegistry registry) : IDocument
             "exclusiveMinimum" => $"Значение должно быть больше {Value("exclusiveMinimum")}",
             "exclusiveMaximum" => $"Значение должно быть меньше {Value("exclusiveMaximum")}",
             "multipleOf" => $"Значение должно быть кратно {Value("multipleOf")}",
-            "minLength" => $"Слишком короткий текст: нужно не меньше {Value("minLength")} символов",
-            "maxLength" => $"Слишком длинный текст: допустимо не больше {Value("maxLength")} символов",
-            "minItems" => $"Нужно не меньше {Value("minItems")} элементов",
-            "maxItems" => $"Допустимо не больше {Value("maxItems")} элементов",
+            "minLength" => $"Слишком короткий текст: нужно не меньше {Count(Value("minLength"), "символа", "символов", "символов")}",
+            "maxLength" => $"Слишком длинный текст: допустимо не больше {Count(Value("maxLength"), "символа", "символов", "символов")}",
+            "minItems" => Value("minItems") == "1" ? "Добавьте хотя бы один элемент"
+                : $"Нужно не меньше {Count(Value("minItems"), "элемента", "элементов", "элементов")}",
+            "maxItems" => $"Допустимо не больше {Count(Value("maxItems"), "элемента", "элементов", "элементов")}",
             "uniqueItems" => "Элементы списка повторяются",
             "additionalProperties" => "Поле не предусмотрено структурой документа",
             "minProperties" or "dependentRequired" => "Раздел заполнен не полностью",
             "maxProperties" => "В разделе слишком много полей",
             _ => "Значение не соответствует структуре документа"
         };
+    }
+
+    // «не меньше 1 символа», «2 символов», «50 символов»: после «не меньше / не больше» — родительный падеж.
+    private static string Count(string? value, string one, string few, string many)
+    {
+        if (!int.TryParse(value, out var n)) return $"{value} {many}";
+        var word = n % 10 == 1 && n % 100 != 11 ? one : n % 10 is >= 2 and <= 4 && n % 100 is < 12 or > 14 ? few : many;
+        return $"{n} {word}";
     }
 
     private static string TypeTitle(JsonElement? field)

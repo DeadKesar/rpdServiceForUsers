@@ -331,48 +331,33 @@
     "approval_sheet": {
       "type": "object",
       "title": "Лист согласования",
-      "description": "Данные, которые вносит человек; места подписантов задаёт лист согласования шаблона (signatures_config)",
-      "x-source": "db.users.by_role",
+      "description": "Только то, что вводит автор. Подписантов определяют правила листа согласования шаблона (signatures_config), отметки согласования хранятся в document_signatures",
+      "required": ["developers"],
       "properties": {
-        "developer": {
-          "type": "object",
+        "developers": {
+          "type": "array",
+          "title": "Составители",
+          "description": "По порядку в документе; первый — автор документа",
           "x-source": "db.user.current",
-          "properties": {
-            "name_for_document": { "type": "string" },
-            "position": { "type": "string" },
-            "academic_degree": { "type": "string" }
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["user_id", "name_for_document"],
+            "properties": {
+              "user_id": { "type": "string", "format": "uuid", "description": "Запись справочника сотрудников (users.id)" },
+              "name_for_document": { "type": "string", "description": "«И. О. Фамилия» на момент ввода" },
+              "position": { "type": "string", "description": "Должность на момент ввода" }
+            }
           }
         },
         "department_protocol": {
           "type": "object",
           "title": "Протокол заседания кафедры",
-          "properties": {
-            "number": { "type": "string" },
-            "date": { "type": "string", "format": "date" }
-          }
-        },
-        "department_head": {
-          "type": "object",
           "x-required-for-status": "approval",
+          "required": ["number", "date"],
           "properties": {
-            "name_for_document": { "type": "string" },
-            "approval_date": { "type": "string", "format": "date" }
-          }
-        },
-        "methodist": {
-          "type": "object",
-          "x-required-for-status": "approval",
-          "properties": {
-            "name_for_document": { "type": "string" },
-            "review_date": { "type": "string", "format": "date" }
-          }
-        },
-        "approver": {
-          "type": "object",
-          "x-required-for-status": "approved",
-          "properties": {
-            "name_for_document": { "type": "string" },
-            "approval_date": { "type": "string", "format": "date" }
+            "number": { "type": "string", "description": "Номер протокола" },
+            "date": { "type": "string", "format": "date", "description": "Дата заседания кафедры" }
           }
         }
       }

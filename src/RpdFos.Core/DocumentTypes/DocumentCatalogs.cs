@@ -28,8 +28,8 @@ public static class DocumentSources
         ["reference.curriculum_plan.education_form"] = "Форма обучения (curriculum_plans.study_form)",
         ["reference.department.name"] = "Кафедра дисциплины (departments.name)",
         ["db.competence_matrix.by_discipline"] = "Компетенции и индикаторы дисциплины (competence_matrix, competences, competence_indicators)",
-        ["db.user.current"] = "Текущий пользователь — составитель (users)",
-        ["db.users.by_role"] = "Подписанты по категориям (users.signatory_role)",
+        // Подписантов в содержимом нет: их определяют правила листа согласования шаблона (SignatureResolvers).
+        ["db.user.current"] = "Текущий пользователь — первый составитель (users: id, name_for_document, position)",
         ["linked_rpd.competences.indicators"] = "Индикаторы из связанной РПД (для ФОС)",
         ["document.year"] = "Год документа"
     };
