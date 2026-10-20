@@ -1,0 +1,11 @@
+<Project>
+  <!-- Зачем: Corvus.Text.Json (зависимость валидатора JSON Schema в ядре) приносит свои анализаторы стиля
+       (CTJ001 «используйте "…"u8» и др.), и они срабатывают на обычном коде System.Text.Json во всех проектах,
+       которые ссылаются на ядро. Валидатор нужен только для проверки документов; ExcludeAssets="analyzers"
+       на пакет, пришедший транзитивно, не действует, поэтому анализатор снимается перед компиляцией. -->
+  <Target Name="RemoveCorvusTextJsonAnalyzers" BeforeTargets="CoreCompile">
+    <ItemGroup>
+      <Analyzer Remove="@(Analyzer)" Condition="'%(Filename)' == 'Corvus.Text.Json.Analyzers'" />
+    </ItemGroup>
+  </Target>
+</Project>

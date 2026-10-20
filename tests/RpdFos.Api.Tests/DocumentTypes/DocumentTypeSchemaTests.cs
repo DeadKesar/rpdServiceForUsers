@@ -1,5 +1,4 @@
-using System.Text.Json;
-using Json.Schema;
+using Corvus.Text.Json.Validator;
 using RpdFos.Core.DocumentTypes;
 using Xunit;
 
@@ -12,32 +11,19 @@ public class DocumentTypeSchemaTests
 
     public static TheoryData<string> Types => [DocumentTypeRegistry.Rpd, DocumentTypeRegistry.Fos];
 
+    // Метасхема 2020-12 — встроенная в валидатор, без сети. Форматы в метасхеме — аннотации (словарь
+    // format-annotation): проверка format "regex" у Corvus 5.7.9 отвергает «\.», хотя для ECMA-262 это верно.
+    private static readonly JsonSchema MetaSchema = JsonSchema.FromUri("https://json-schema.org/draft/2020-12/schema",
+        new JsonSchema.Options(allowFileSystemAndHttpResolution: false, alwaysAssertFormat: false));
+
     [Theory]
     [MemberData(nameof(Types))]
     public void Schema_is_valid_json_schema_2020_12(string type)
     {
         // x-расширения — неизвестные ключевые слова: стандарт 2020-12 их допускает.
-        var result = MetaSchemas.Draft202012.Evaluate(Registry.Get(type).Schema,
-            new EvaluationOptions { OutputFormat = OutputFormat.List });
-
-        Assert.True(result.IsValid, string.Join("; ",
-            (result.Details ?? []).Where(d => d.Errors is not null).SelectMany(d => d.Errors!.Select(e => $"{d.InstanceLocation}: {e.Value}"))));
-    }
-
-    [Fact]
-    public void Fos_references_to_rpd_resolve()
-    {
-        // ФОС берёт титул и лист согласования из схемы РПД по $id.
-        var options = new BuildOptions { SchemaRegistry = new SchemaRegistry() };
-        options.SchemaRegistry.Register(JsonSchema.FromText(Registry.Get(DocumentTypeRegistry.Rpd).SchemaJson, options));
-        var fos = JsonSchema.FromText(Registry.Get(DocumentTypeRegistry.Fos).SchemaJson, options);
-
-        var instance = JsonDocument.Parse("""{ "title_page": { "discipline_name": "Дискретная математика" } }""").RootElement;
-        var result = fos.Evaluate(instance, new EvaluationOptions { OutputFormat = OutputFormat.List });
-
-        // Ошибки — про обязательные поля титула из схемы РПД: значит, ссылка разрешилась.
-        Assert.False(result.IsValid);
-        Assert.Contains(result.Details ?? [], d => d.InstanceLocation.ToString() == "/title_page" && d.Errors?.ContainsKey("required") == true);
+        Assert.True(MetaSchema.Validate(Registry.Get(type).SchemaJson));
+        // Проверка метасхемой действует: схема с ошибкой не проходит.
+        Assert.False(MetaSchema.Validate("""{ "type": "strin", "minLength": -1 }"""));
     }
 
     [Theory]

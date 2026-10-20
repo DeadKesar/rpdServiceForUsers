@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using RpdFos.Core.Data;
 using RpdFos.Core.Data.Interceptors;
 using RpdFos.Core.Directory;
+using RpdFos.Core.Documents;
 using RpdFos.Core.DocumentTypes;
 using RpdFos.Core.Import;
 using RpdFos.Core.Templates;
@@ -29,6 +30,9 @@ public static class DependencyInjection
         services.AddScoped<ImportJob>();
         services.AddSingleton<DocumentTypeRegistry>();
         services.AddScoped<TemplateLifecycle>();
+        // Скомпилированные схемы и настроенный санитайзер — общие на приложение.
+        services.AddSingleton<IDocumentValidator, DocumentValidator>();
+        services.AddSingleton<RichTextSanitizer>();
         return services;
     }
 }

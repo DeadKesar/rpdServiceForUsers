@@ -70,6 +70,65 @@ public static class SchemaInspector
         return node is not null;
     }
 
+    /// <summary>
+    /// Подсхема места в содержимом документа (JSON Pointer экземпляра: /competences/0/code) — по properties,
+    /// items и $ref. Схемы типов не используют oneOf/anyOf, поэтому место однозначно; нет такого места — null.
+    /// </summary>
+    public static JsonElement? SubschemaAt(JsonElement schema, string instancePointer, Func<string, JsonElement?> resolve)
+    {
+        var root = schema;
+        var node = Deref(schema, ref root, resolve);
+        if (instancePointer.Length == 0) return node;
+        foreach (var raw in instancePointer.TrimStart('/').Split('/'))
+        {
+            if (node is not { ValueKind: JsonValueKind.Object } n) return null;
+            var segment = raw.Replace("~1", "/").Replace("~0", "~");
+            if (n.TryGetProperty("properties", out var props) && props.TryGetProperty(segment, out var next))
+                node = Deref(next, ref root, resolve);
+            else if (int.TryParse(segment, out _) && n.TryGetProperty("items", out var items))
+                node = Deref(items, ref root, resolve);
+            else
+                return null;
+        }
+        return node;
+    }
+
+    /// <summary>
+    /// Поля с <c>x-required-for-status</c>: шаблон пути (элемент массива — «*») и статус, при переходе в который
+    /// поле обязательно.
+    /// </summary>
+    public static IReadOnlyList<(string Path, string Status)> RequiredForStatus(JsonElement schema, Func<string, JsonElement?> resolve)
+    {
+        var result = new List<(string, string)>();
+        var root = schema;
+        Walk(Deref(schema, ref root, resolve), root, "", 0);
+        return result;
+
+        void Walk(JsonElement? node, JsonElement currentRoot, string path, int depth)
+        {
+            // Глубина ограничена: $defs могут ссылаться сами на себя.
+            if (node is not { ValueKind: JsonValueKind.Object } n || depth > 32) return;
+            if (n.TryGetProperty("properties", out var props))
+                foreach (var p in props.EnumerateObject())
+                {
+                    var childRoot = currentRoot;
+                    var child = Deref(p.Value, ref childRoot, resolve);
+                    var childPath = $"{path}/{p.Name.Replace("~", "~0").Replace("/", "~1")}";
+                    var status = Status(p.Value) ?? (child is { } c ? Status(c) : null);
+                    if (status is not null) result.Add((childPath, status));
+                    Walk(child, childRoot, childPath, depth + 1);
+                }
+            if (n.TryGetProperty("items", out var items))
+            {
+                var itemsRoot = currentRoot;
+                Walk(Deref(items, ref itemsRoot, resolve), itemsRoot, $"{path}/*", depth + 1);
+            }
+        }
+
+        static string? Status(JsonElement node) =>
+            node.TryGetProperty("x-required-for-status", out var s) && s.ValueKind == JsonValueKind.String ? s.GetString() : null;
+    }
+
     // Переход по $ref: «#/…» — внутри текущей схемы, «https://…#/…» — в схеме с таким $id.
     private static JsonElement? Deref(JsonElement node, ref JsonElement root, Func<string, JsonElement?> resolve)
     {
