@@ -113,12 +113,10 @@
         return created;
     }
 
-    private static int Int(JsonNode? node) => node is JsonValue v && v.TryGetValue(out int i) ? i : 0;
-
-    private int TopicHours(string key) => (Value as JsonArray ?? []).OfType<JsonObject>().Sum(t => Int(t["hours"]?[key]));
+    private int TopicHours(string key) => (Value as JsonArray ?? []).OfType<JsonObject>().Sum(t => Number(t["hours"]?[key]));
 
     private int PlanHours(string key) =>
-        (Context.Payload["hours_distribution"]?["semesters"] as JsonArray ?? []).OfType<JsonObject>().Sum(s => Int(s[key]));
+        (Context.Payload["hours_distribution"]?["semesters"] as JsonArray ?? []).OfType<JsonObject>().Sum(s => Number(s[key]));
 
     // Индикаторы, выбранные в разделе «Компетенции и индикаторы».
     private List<string> ChosenIndicators =>

@@ -52,6 +52,14 @@ public abstract class FieldBase : ComponentBase
 
     protected string? Text(JsonNode? node) => node is JsonValue v && v.TryGetValue(out string? s) ? s : node?.ToString();
 
+    /// <summary>
+    /// Целое из содержимого. Значение, пришедшее с сервера, и созданное в клиенте хранятся по-разному
+    /// (JsonElement и примитив .NET): чтение через текст одинаково для обоих.
+    /// </summary>
+    protected static int Number(JsonNode? node) =>
+        node is JsonValue && int.TryParse(node.ToString(), System.Globalization.NumberStyles.Integer,
+            System.Globalization.CultureInfo.InvariantCulture, out var i) ? i : 0;
+
     /// <summary>Список в содержимом — существующий или новый, привязанный к месту поля.</summary>
     protected JsonArray EnsureArray()
     {

@@ -52,7 +52,7 @@
     // Число, которое не разбирается, остаётся строкой — его отклонит проверка черновика с понятным сообщением.
     private void SetNumber(string? text) => SetValue(
         string.IsNullOrWhiteSpace(text) ? null
-        : Kind == "integer" && long.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var i) ? JsonValue.Create(i)
+        : Kind == "integer" && int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var i) ? JsonValue.Create(i)
         : decimal.TryParse(text, NumberStyles.Number, CultureInfo.InvariantCulture, out var d) ? JsonValue.Create(d)
         : JsonValue.Create(text));
 }

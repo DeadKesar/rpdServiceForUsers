@@ -6,7 +6,7 @@
 <div class="mb-3">
     <p class="text-muted small mb-2">
         <span class="badge text-bg-light border">из учебного плана</span>
-        Трудоёмкость: @Int(Value?["total_credits"]) з. е., @Int(Value?["total_hours"]) ч.
+        Трудоёмкость: @Number(Value?["total_credits"]) з. е., @Number(Value?["total_hours"]) ч.
     </p>
     <table class="table table-sm table-bordered text-center">
         <thead class="table-light">
@@ -19,8 +19,8 @@
             @foreach (var s in Semesters)
             {
                 <tr>
-                    <td>@Int(s["semester"])</td><td>@Int(s["contact_hours"])</td><td>@Int(s["lectures"])</td><td>@Int(s["practice"])</td>
-                    <td>@Int(s["lab_hours"])</td><td>@Int(s["self_study"])</td><td>@Int(s["control"])</td><td>@Int(s["credits"])</td>
+                    <td>@Number(s["semester"])</td><td>@Number(s["contact_hours"])</td><td>@Number(s["lectures"])</td><td>@Number(s["practice"])</td>
+                    <td>@Number(s["lab_hours"])</td><td>@Number(s["self_study"])</td><td>@Number(s["control"])</td><td>@Number(s["credits"])</td>
                     <td>@string.Join(", ", (s["control_types"] as JsonArray ?? []).Select(t => SchemaContext.EnumTitle(ControlTypes, Text(t) ?? "")))</td>
                 </tr>
             }
@@ -30,8 +30,6 @@
 
 @code {
     private IEnumerable<JsonObject> Semesters => (Value?["semesters"] as JsonArray ?? []).OfType<JsonObject>();
-
-    private static int Int(JsonNode? node) => node is JsonValue v && v.TryGetValue(out int i) ? i : 0;
 
     // Схема видов аттестации — для русских названий кодов (x-enum-titles).
     private JsonElement ControlTypes =>
