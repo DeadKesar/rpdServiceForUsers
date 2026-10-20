@@ -5,38 +5,41 @@
   "AutofillWaySection": { "kind": "field", "target": "/title_page/profile_name" },
   "AutofillEducationForm": {
     "kind": "field", "target": "/title_page/study_form",
-    "note": "В шаблоне — «Для обучающихся AutofillEducationForm формы обучения»: нужен родительный падеж («очной»)."
+    "note": "«Для обучающихся очной формы обучения».",
+    "occurrences": { "AutofillEducationForm1": { "form": "gen" } }
   },
   "AutofillEducationLevel": {
     "kind": "source", "target": "reference.direction.qualification",
-    "note": "В ФОС закладка стоит после «Квалификация» — квалификация («магистр»), а не уровень образования, как в РПД."
+    "note": "Стоит после «Квалификация» — квалификация («магистр»), а не уровень образования. Если в плане нет явной — производная от уровня."
   },
   "AutofillEducationLvl": {
     "kind": "field", "target": "/title_page/education_level",
-    "note": "Шапка экзаменационного билета: «Для обучающихся N курса AutofillEducationLvl <код> <направление>» — вероятно, уровень в родительном падеже («магистратуры»)."
+    "note": "Шапка экзаменационного билета: «Для обучающихся N курса магистратуры <код> <направление>».",
+    "occurrences": { "AutofillEducationLvl1": { "form": "gen" } }
   },
   "AutofillCurs": { "kind": "source", "target": "parser.discipline.course" },
   "AutofillYear": { "kind": "source", "target": "document.year" },
   "AutofillDepartment": { "kind": "field", "target": "/title_page/department_name" },
   "AutofillPassDestination": {
-    "kind": "text", "target": "фонда оценочных средств по дисциплине «{parser.discipline.name}»",
-    "note": "Стоит сразу после заголовка «Паспорт» — продолжение заголовка. Формулировка — предложение, нужна сверка с реальными ФОС."
+    "kind": "text", "target": "фонда оценочных средств по дисциплине «{parser.discipline.name}»"
   },
   "AutofillMonitoringU": {
     "kind": "field", "target": "/current_control/forms",
-    "note": "«Вопросы для подготовки к AutofillMonitoringU по дисциплине …» — форма текущего контроля в дательном падеже."
+    "note": "Формы текущего контроля через запятую: «Вопросы для подготовки к … по дисциплине …».",
+    "occurrences": { "AutofillMonitoringU1": { "form": "dat" } }
   },
   "AutofillMonitoring": {
     "kind": "field", "target": "/current_control/forms",
-    "note": "«Комплект практических заданий, используемых при проведении AutofillMonitoring по дисциплине …» — форма текущего контроля в родительном падеже."
+    "note": "Формы текущего контроля через запятую: «…используемых при проведении … по дисциплине …».",
+    "occurrences": { "AutofillMonitoring2": { "form": "gen" }, "AutofillMonitoring3": { "form": "gen" } }
   },
   "AutofillExaming": {
     "kind": "source", "target": "parser.discipline.attestation",
-    "note": "Каталог: вид промежуточной аттестации в заголовке приложения с билетами. В шаблоне закладка стоит в строке «Приложение № 6» перед образцом теста — место неочевидно."
+    "note": "Не подтверждено, сверка на этапе 5. Каталог: вид промежуточной аттестации в заголовке приложения с билетами; в шаблоне закладка стоит в строке «Приложение № 6» перед образцом теста."
   },
   "AutofillCompetenciesTable": {
     "kind": "table", "target": "fos_passport",
-    "note": "В ФОС эта таблица — паспорт ФОС (разделы, компетенции, индикаторы, задания), а не таблица компетенций РПД: отдельный построитель."
+    "note": "В ФОС эта таблица — паспорт ФОС (разделы, компетенции, индикаторы, задания): шестой построитель."
   },
   "AutofillProOD": { "kind": "signature", "target": "vice_rector_edu", "part": "position" },
   "AutofillProODName": { "kind": "signature", "target": "vice_rector_edu", "part": "name" },

@@ -3,18 +3,27 @@
   "AutofillWayCode": { "kind": "field", "target": "/title_page/direction_code" },
   "AutofillWayName": { "kind": "field", "target": "/title_page/direction_name" },
   "AutofillWaySection": { "kind": "field", "target": "/title_page/profile_name" },
-  "AutofillEducationLevel": { "kind": "field", "target": "/title_page/education_level" },
+  "AutofillEducationLevel": {
+    "kind": "field", "target": "/title_page/education_level",
+    "occurrences": {
+      "AutofillEducationLevel2": {
+        "kind": "source", "target": "reference.direction.qualification",
+        "note": "Раздел 1: «…по направлению подготовки … с квалификацией «AutofillEducationLevel»» — квалификация, как AutofillEducationLevel в ФОС."
+      }
+    }
+  },
   "AutofillEducationForm": { "kind": "field", "target": "/title_page/study_form" },
   "AutofillDepartment": { "kind": "field", "target": "/title_page/department_name" },
   "AutofillPartType": {
     "kind": "source", "target": "parser.discipline.part_type",
-    "note": "В шаблоне «Блок 1» — текстом, закладка — только часть плана. Одно значение в двух падежах: «Обязательная часть» (титул) и «относится к обязательной части» (раздел 2)."
+    "note": "Только часть плана: «Блок 1» в шаблоне — текстом. На титуле — «Обязательная часть», в разделе 2 — «относится к обязательной части».",
+    "occurrences": { "AutofillPartType2": { "form": "dat" } }
   },
   "AutofillYear": { "kind": "source", "target": "document.year" },
   "AutofillSemester": { "kind": "source", "target": "parser.discipline.semesters" },
   "AutofillKurs": {
     "kind": "field", "target": "/course_work",
-    "note": "По контексту шаблона — раздел «3.5 Курсовой проект (курсовая работа)»: «По дисциплине … AutofillKurs». В каталоге закладок — «курс, производное из семестров»; не подтверждается шаблоном."
+    "note": "Фраза раздела «3.5 Курсовой проект (курсовая работа)»: «По дисциплине … AutofillKurs». Без курсового проекта по плану — стандартная заглушка раздела (x-stub-text, FR-TPL-14)."
   },
   "AutofillZeAtAll": { "kind": "field", "target": "/hours_distribution/total_credits" },
   "AutofillByPlan": { "kind": "source", "target": "parser.discipline.hours_total" },
@@ -33,7 +42,7 @@
   "AutofillPositionKafName": { "kind": "signature", "target": "department_head", "part": "name" },
   "AutofillPositionKafForDoc": {
     "kind": "signature", "target": "department_head", "part": "document_title",
-    "note": "Под строкой подписи — «наименование кафедры»: сокращение кафедры («ИТиВС»), колонка «То что вносится в документ» файла должностей. В справочнике users этой колонки нет — для заведующего берётся departments.short_name."
+    "note": "Под строкой подписи — «наименование кафедры»: сокращение кафедры заведующего («ИТиВС») — departments.short_name."
   },
   "AutofillPositionInst": { "kind": "signature", "target": "institute_director", "part": "position" },
   "AutofillPositionInstName": { "kind": "signature", "target": "institute_director", "part": "name" },

@@ -30,6 +30,32 @@ public class PrintMappingTests
 
     [Theory]
     [MemberData(nameof(Templates))]
+    public void Occurrence_overrides_name_real_template_occurrences(string type, string template)
+    {
+        var names = DocxBookmarks.Read(DocxBookmarksTests.Template(template)).SelectMany(g => g.Names).ToHashSet();
+        var overrides = Registry.Get(type).PrintMapping.Values.SelectMany(t => t.Occurrences?.Keys ?? []).ToList();
+
+        Assert.NotEmpty(overrides);
+        Assert.All(overrides, o => Assert.Contains(o, names));
+    }
+
+    // Формы и цели вхождений — по контексту шаблонов (решения по сверке B3).
+    [Theory]
+    [InlineData(DocumentTypeRegistry.Rpd, "AutofillPartType", "AutofillPartType2", WordForms.Dat, null)]
+    [InlineData(DocumentTypeRegistry.Rpd, "AutofillEducationLevel", "AutofillEducationLevel2", null, "reference.direction.qualification")]
+    [InlineData(DocumentTypeRegistry.Fos, "AutofillEducationForm", "AutofillEducationForm1", WordForms.Gen, null)]
+    [InlineData(DocumentTypeRegistry.Fos, "AutofillEducationLvl", "AutofillEducationLvl1", WordForms.Gen, null)]
+    [InlineData(DocumentTypeRegistry.Fos, "AutofillMonitoringU", "AutofillMonitoringU1", WordForms.Dat, null)]
+    [InlineData(DocumentTypeRegistry.Fos, "AutofillMonitoring", "AutofillMonitoring3", WordForms.Gen, null)]
+    public void Occurrences_follow_template_context(string type, string bookmark, string occurrence, string? form, string? target)
+    {
+        var o = Registry.Get(type).PrintMapping[bookmark].Occurrences![occurrence];
+
+        Assert.Equal((form, target), (o.Form, o.Target));
+    }
+
+    [Theory]
+    [MemberData(nameof(Templates))]
     public void Signatures_use_known_resolvers(string type, string _)
     {
         var signatures = Registry.Get(type).Signatures;
@@ -58,17 +84,27 @@ public class PrintMappingTests
             ["AutofillC"] = new(BookmarkTargetKinds.Table, "no_such_table"),
             ["AutofillD"] = new(BookmarkTargetKinds.Source, "parser.discipline.no_such_source"),
             ["AutofillE"] = new(BookmarkTargetKinds.Text, "по дисциплине «{parser.discipline.nam}»"),
-            ["AutofillF"] = new("picture", "logo")
+            ["AutofillF"] = new("picture", "logo"),
+            ["AutofillG"] = new(BookmarkTargetKinds.Source, "document.year", Occurrences: new Dictionary<string, BookmarkOccurrence>
+            {
+                ["AutofillG1"] = new(Form: WordForms.Gen),
+                ["AutofillH2"] = new(Form: WordForms.Gen),
+                ["AutofillG3"] = new(Form: "vocative"),
+                ["AutofillG4"] = new(Target: "/title_page/no_such_field", Kind: BookmarkTargetKinds.Field)
+            })
         };
         var signatures = Registry.Get(DocumentTypeRegistry.Rpd).Signatures;
 
         var errors = PrintMappingValidator.Validate(Registry, DocumentTypeRegistry.Rpd, mapping, signatures,
             [.. mapping.Keys, "AutofillUnmapped"]);
 
-        Assert.Equal(7, errors.Count);
+        Assert.Equal(10, errors.Count);
         Assert.Contains("Закладка AutofillUnmapped не сопоставлена", errors);
         Assert.Contains(errors, e => e.StartsWith("Закладка AutofillA:") && e.Contains("нет в схеме"));
         Assert.Contains(errors, e => e.StartsWith("Закладка AutofillB:") && e.Contains("нет в листе согласования"));
+        Assert.Contains(errors, e => e.StartsWith("Закладка AutofillG, вхождение AutofillH2:") && e.Contains("другой закладке"));
+        Assert.Contains(errors, e => e.StartsWith("Закладка AutofillG, вхождение AutofillG3:") && e.Contains("форма"));
+        Assert.Contains(errors, e => e.StartsWith("Закладка AutofillG, вхождение AutofillG4:") && e.Contains("нет в схеме"));
     }
 
     [Fact]

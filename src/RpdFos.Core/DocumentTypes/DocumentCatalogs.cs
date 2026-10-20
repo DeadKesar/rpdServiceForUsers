@@ -21,7 +21,9 @@ public static class DocumentSources
         ["reference.direction.code"] = "Код направления подготовки (study_directions.code)",
         ["reference.direction.name"] = "Наименование направления (study_directions.name)",
         ["reference.direction.level"] = "Уровень образования (study_directions.education_level)",
-        ["reference.direction.qualification"] = "Квалификация — производное из уровня образования («магистр»)",
+        // Явной квалификации в разобранном плане пока нет — производная от уровня, словарём на этапе 5.
+        ["reference.direction.qualification"] =
+            "Квалификация: явная из плана, иначе по уровню (бакалавриат → бакалавр, магистратура → магистр, специалитет → специалист)",
         ["reference.profile.name"] = "Направленность (профиль) (study_profiles.name)",
         ["reference.curriculum_plan.education_form"] = "Форма обучения (curriculum_plans.study_form)",
         ["reference.department.name"] = "Кафедра дисциплины (departments.name)",

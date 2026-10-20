@@ -49,7 +49,18 @@ public class DocxBookmarksTests
 
         var groups = DocxBookmarks.Read(docx);
 
-        Assert.Equal([new BookmarkGroup("AutofillDiscipline", 3), new BookmarkGroup("AutofillYear", 1)], groups);
+        Assert.Equal(["AutofillDiscipline", "AutofillYear"], groups.Select(g => g.BaseName));
+        Assert.Equal(["AutofillDiscipline3", "AutofillDiscipline12", "AutofillDiscipline107"], groups[0].Names);
+    }
+
+    [Fact]
+    public void Occurrences_keep_full_names_in_document_order()
+    {
+        // По полному имени вхождения сопоставление задаёт форму слова: на титуле РПД — «Обязательная часть»,
+        // в разделе 2 — «относится к обязательной части».
+        var rpd = DocxBookmarks.Read(Template(Rpd)).ToDictionary(g => g.BaseName);
+
+        Assert.Equal(["AutofillPartType1", "AutofillPartType2"], rpd["AutofillPartType"].Names);
     }
 
     private static byte[] Docx(params string[] bookmarks)

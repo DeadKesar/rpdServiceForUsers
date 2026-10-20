@@ -5,8 +5,14 @@ using DocumentFormat.OpenXml.Wordprocessing;
 
 namespace RpdFos.Core.DocumentTypes;
 
-/// <summary>Базовое имя закладки DOCX-шаблона и число её вхождений.</summary>
-public sealed record BookmarkGroup(string BaseName, int Count);
+/// <summary>
+/// Базовое имя закладки DOCX-шаблона и полные имена её вхождений по порядку в документе:
+/// по полному имени сопоставление переопределяет форму слова для отдельного вхождения.
+/// </summary>
+public sealed record BookmarkGroup(string BaseName, IReadOnlyList<string> Names)
+{
+    public int Count => Names.Count;
+}
 
 /// <summary>
 /// Закладки автозаполнения DOCX-шаблона оформления: <c>Autofill&lt;Поле&gt;&lt;N&gt;</c>. Одно значение
@@ -41,7 +47,7 @@ public static partial class DocxBookmarks
             .Select(b => b.Name?.Value ?? "")
             .Where(name => name.StartsWith(Prefix, StringComparison.Ordinal))
             .GroupBy(BaseName)
-            .Select(g => new BookmarkGroup(g.Key, g.Count()))
+            .Select(g => new BookmarkGroup(g.Key, g.ToList()))
             .ToList();
     }
 }
