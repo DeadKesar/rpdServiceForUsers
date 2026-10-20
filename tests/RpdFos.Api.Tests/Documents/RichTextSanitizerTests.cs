@@ -40,4 +40,16 @@ public class RichTextSanitizerTests
     [Fact]
     public void Escaped_text_stays_text() =>
         Assert.Equal("<p>a &lt;script&gt; &amp; b</p>", Sanitizer.Sanitize("<p>a &lt;script&gt; &amp; b</p>"));
+
+    [Theory]
+    // Разметка редактора Radzen (Ctrl+B, Ctrl+I, список) — как она пришла из браузера при проверке этапа 4.
+    [InlineData("Сформировать у обучающихся <span style=\"font-weight: bold;\">умения</span> строить модели.",
+        "Сформировать у обучающихся <strong>умения</strong> строить модели.")]
+    [InlineData("<div><ul><li>моделирование<span style=\"font-style: italic;\"> (курсив)</span></li></ul></div>",
+        "<ul><li>моделирование<em> (курсив)</em></li></ul>")]
+    [InlineData("<span style=\"font-weight: 700; font-style: italic; color: red\">оба</span>", "<em><strong>оба</strong></em>")]
+    [InlineData("<span style=\"color: red\">цвет</span>", "цвет")]
+    public void Bold_and_italic_styles_become_tags(string html, string expected) =>
+        // Без перевода в теги санитайзер снял бы span со стилем, и форматирование молча пропало бы.
+        Assert.Equal(expected, Sanitizer.Sanitize(html));
 }

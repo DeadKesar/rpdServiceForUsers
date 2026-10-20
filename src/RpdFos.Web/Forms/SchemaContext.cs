@@ -24,10 +24,12 @@ public sealed class SchemaContext(JsonElement root, JsonObject payload, Document
         Locked || schema.TryGetProperty("readOnly", out var r) && r.ValueKind == JsonValueKind.True ||
         Metadata.ReadOnlyPaths.Any(p => path == p || path.StartsWith(p + "/", StringComparison.Ordinal));
 
-    /// <summary>Поле из учебного плана — для пометки источника.</summary>
+    /// <summary>
+    /// Поле из учебного плана — для пометки источника: закрыто схемой (<c>readOnly</c>). Предзаполненные, но
+    /// редактируемые поля (учебный год) пометки не получают — их меняет автор.
+    /// </summary>
     public bool FromPlan(string path, JsonElement schema) =>
-        schema.TryGetProperty("x-source", out var s) && s.GetString() is { } source &&
-        (source.StartsWith("parser.") || source.StartsWith("reference.")) ||
+        schema.TryGetProperty("readOnly", out var r) && r.ValueKind == JsonValueKind.True ||
         Metadata.ReadOnlyPaths.Any(p => path == p || path.StartsWith(p + "/", StringComparison.Ordinal));
 
     public bool IsHidden(string path) => Metadata.HiddenPaths.Contains(path);
