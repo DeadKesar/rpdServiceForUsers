@@ -5,6 +5,12 @@ using RpdFos.Core.Data.Entities;
 
 namespace RpdFos.Core.Documents;
 
+/// <summary>Привязка к компетенции и индикатору — для снимка версии.</summary>
+public sealed record CompetenceLinkState(Guid? CompetenceId, Guid? IndicatorId);
+
+/// <summary>Нормализованные копии содержимого после сохранения — то, что попадает в снимок версии.</summary>
+public sealed record DocumentProjectionState(IReadOnlyList<DocumentHours> Hours, IReadOnlyList<CompetenceLinkState> Links);
+
 /// <summary>
 /// Нормализованные копии содержимого документа: часы по семестрам (document_hours) и привязки к компетенциям
 /// и индикаторам (document_competence_links). Пересобираются по payload при каждом сохранении — изменения
@@ -12,11 +18,14 @@ namespace RpdFos.Core.Documents;
 /// </summary>
 public sealed class DocumentProjections(AppDbContext db)
 {
-    public async Task SyncAsync(Document document, CancellationToken ct = default)
+    /// <summary>Пересобирает нормализованные таблицы; возвращает их итоговое содержимое — для снимка версии.</summary>
+    public async Task<DocumentProjectionState> SyncAsync(Document document, CancellationToken ct = default)
     {
         var payload = JsonDocument.Parse(document.Payload).RootElement;
-        await SyncHoursAsync(document.Id, Hours(payload), ct);
-        await SyncCompetencesAsync(document, payload, ct);
+        var hours = Hours(payload);
+        await SyncHoursAsync(document.Id, hours, ct);
+        var links = await SyncCompetencesAsync(document, payload, ct);
+        return new DocumentProjectionState(hours, links);
     }
 
     /// <summary>Часы из раздела hours_distribution: по семестру, первый повтор семестра выигрывает.</summary>
@@ -56,7 +65,7 @@ public sealed class DocumentProjections(AppDbContext db)
     // Коды из payload — в id по матрице компетенций дисциплины. Выбранный индикатор даёт строку
     // (компетенция, индикатор); компетенция без выбранных индикаторов — (компетенция, null).
     // Кода нет в матрице — привязки нет: такие расхождения проверит правило этапа 5.
-    private async Task SyncCompetencesAsync(Document document, JsonElement payload, CancellationToken ct)
+    private async Task<IReadOnlyList<CompetenceLinkState>> SyncCompetencesAsync(Document document, JsonElement payload, CancellationToken ct)
     {
         var candidates = await (
                 from m in db.CompetenceMatrix
@@ -82,10 +91,12 @@ public sealed class DocumentProjections(AppDbContext db)
                 foreach (var indicatorId in chosen) wanted.Add((competenceId, indicatorId));
             }
 
+        var result = wanted.Select(w => new CompetenceLinkState(w.Competence, w.Indicator)).ToList();
         var existing = await db.DocumentCompetenceLinks.Where(l => l.DocumentId == document.Id).ToListAsync(ct);
         db.DocumentCompetenceLinks.RemoveRange(existing.Where(l => !wanted.Remove((l.CompetenceId, l.IndicatorId))));
         db.DocumentCompetenceLinks.AddRange(wanted.Select(w =>
             new DocumentCompetenceLink { DocumentId = document.Id, CompetenceId = w.Competence, IndicatorId = w.Indicator }));
+        return result;
     }
 
     private static int? Int(JsonElement node, string name) =>

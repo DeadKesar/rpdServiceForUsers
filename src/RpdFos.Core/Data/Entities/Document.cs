@@ -38,6 +38,63 @@ public class Document : IVersioned
     public DateTimeOffset? ApprovedAt { get; set; }
     public bool IsDeleted { get; set; }
     public DateTimeOffset? DeletedAt { get; set; }
+
+    /// <summary>
+    /// Изменено содержимое. Сохранённый черновик снова становится черновиком: изменения после «Сохранить» ещё
+    /// не сохранены. Возвращает прежний статус, если он сменился.
+    /// </summary>
+    public string? Edit(string payload)
+    {
+        Require(DocumentTransitions.CanEdit(Status), DocumentTransitions.EditAction);
+        Payload = payload;
+        return Status == DocumentStatuses.SavedDraft ? Move(DocumentStatuses.Draft) : null;
+    }
+
+    /// <summary>«Сохранить»: сохранённый черновик. Возвращает прежний статус, если он сменился.</summary>
+    public string? Save()
+    {
+        Require(DocumentTransitions.CanSave(Status), DocumentTransitions.SaveAction);
+        return Status == DocumentStatuses.SavedDraft ? null : Move(DocumentStatuses.SavedDraft);
+    }
+
+    /// <summary>Мягкое удаление: статус и флаг — вместе. Возвращает прежний статус.</summary>
+    public string Delete(DateTimeOffset now)
+    {
+        Require(DocumentTransitions.CanDelete(Status), DocumentTransitions.DeleteAction);
+        IsDeleted = true;
+        DeletedAt = now;
+        return Move(DocumentStatuses.Deleted);
+    }
+
+    private string Move(string status)
+    {
+        var from = Status;
+        Status = status;
+        return from;
+    }
+
+    // Эндпоинты проверяют переход заранее и отвечают 409; здесь — защита от ошибки в коде.
+    private void Require(bool allowed, string action)
+    {
+        if (!allowed) throw new InvalidOperationException(DocumentTransitions.Refusal(Status, action));
+    }
+}
+
+/// <summary>Разрешённые действия с документом по статусу — в одном месте, а не в эндпоинтах.</summary>
+public static class DocumentTransitions
+{
+    public const string EditAction = "изменить", SaveAction = "сохранить", DeleteAction = "удалить";
+
+    // Автор правит черновик, сохранённый черновик и документ, возвращённый на доработку.
+    public static bool CanEdit(string status) =>
+        status is DocumentStatuses.Draft or DocumentStatuses.SavedDraft or DocumentStatuses.Returned;
+
+    public static bool CanSave(string status) => status is DocumentStatuses.Draft or DocumentStatuses.SavedDraft;
+
+    public static bool CanDelete(string status) => status is DocumentStatuses.Draft or DocumentStatuses.SavedDraft;
+
+    public static string Refusal(string status, string action) =>
+        $"Документ в статусе «{DocumentStatuses.Title(status)}» нельзя {action}.";
 }
 
 /// <summary>
