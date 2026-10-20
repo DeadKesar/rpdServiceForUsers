@@ -58,12 +58,12 @@ public static class TemplateTitles
 
     public static string Form(string? form) => form switch
     {
-        "nom" => "им. п.",
-        "gen" => "род. п.",
-        "dat" => "дат. п.",
-        "acc" => "вин. п.",
-        "ins" => "твор. п.",
-        "prep" => "предл. п.",
+        "nom" => "именительный падеж",
+        "gen" => "родительный падеж",
+        "dat" => "дательный падеж",
+        "acc" => "винительный падеж",
+        "ins" => "творительный падеж",
+        "prep" => "предложный падеж",
         _ => form ?? ""
     };
 

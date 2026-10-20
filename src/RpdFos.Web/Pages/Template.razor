@@ -11,7 +11,7 @@
 @inject NavigationManager Navigation
 @inject IJSRuntime JS
 
-<PageTitle>@(details?.Template.Name ?? "Новый шаблон")</PageTitle>
+<PageTitle>@(Id is null ? "Новый шаблон" : details?.Template.Name ?? "Шаблон")</PageTitle>
 
 <p><a href="templates">← Шаблоны</a></p>
 
@@ -152,10 +152,18 @@ else
     }
     else
     {
-        <p>Закладок: @details.Bookmarks.Count, вхождений: @details.Bookmarks.Sum(b => b.Count), не сопоставлено: @details.Bookmarks.Count(b => b.Target is null).</p>
+        <p>
+            Закладок: @details.Bookmarks.Count, вхождений: @details.Bookmarks.Sum(b => b.Count),
+            не сопоставлено: @details.Bookmarks.Count(b => b.Target is null),
+            с особыми вхождениями: @details.Bookmarks.Count(b => b.Target?.Occurrences is { Count: > 0 }).
+            Вхождение без особых указаний получает цель закладки в именительном падеже.
+        </p>
         <table class="table table-sm">
             <thead>
-                <tr><th>Закладка</th><th>Вхождений</th><th>Сопоставлена</th><th>Вид цели</th><th>Цель</th><th>Пояснение</th></tr>
+                <tr>
+                    <th>Закладка</th><th>Вхождений</th><th>Сопоставлена</th><th>Вид цели</th><th>Цель</th>
+                    <th>Особые вхождения</th><th>Пояснение</th>
+                </tr>
             </thead>
             <tbody>
                 @foreach (var b in details.Bookmarks)
@@ -169,23 +177,19 @@ else
                             @if (b.Target is { } target)
                             {
                                 <code>@TargetText(target.Kind, target.Target, target.Part)</code>
-                                @foreach (var (name, o) in target.Occurrences ?? [])
+                            }
+                        </td>
+                        <td>
+                            @foreach (var (name, o) in b.Target?.Occurrences ?? [])
+                            {
+                                <div>@OccurrenceText(b.BaseName, name, b.Target!, o)</div>
+                                @if (o.Note is not null)
                                 {
-                                    <div class="small text-muted">
-                                        <code>@name</code>:
-                                        @if (o.Form is not null) { <span>@TemplateTitles.Form(o.Form) </span> }
-                                        @if (o.Target is not null) { <code>@TargetText(o.Kind ?? target.Kind, o.Target, o.Part ?? target.Part)</code> }
-                                    </div>
+                                    <div class="small text-muted">@o.Note</div>
                                 }
                             }
                         </td>
-                        <td class="small">
-                            @b.Target?.Note
-                            @foreach (var o in (b.Target?.Occurrences ?? []).Values.Where(o => o.Note is not null))
-                            {
-                                <div>@o.Note</div>
-                            }
-                        </td>
+                        <td class="small">@b.Target?.Note</td>
                     </tr>
                 }
             </tbody>
@@ -394,4 +398,19 @@ else
     private string TargetText(string kind, string target, string? part) => kind == "signature"
         ? $"{details?.Signatures.FirstOrDefault(s => s.Id == target)?.Title ?? target} · {TemplateTitles.Part(part)}"
         : target;
+
+    // «вхождение 2: дательный падеж», «вхождение 2: своя цель — …»; номер — суффикс полного имени закладки.
+    private string OccurrenceText(string baseName, string name, BookmarkTarget target, BookmarkOccurrence o)
+    {
+        var number = name.StartsWith(baseName) ? name[baseName.Length..] : name;
+        var parts = new List<string>();
+        if (o.Target is not null)
+        {
+            var kind = o.Kind ?? target.Kind;
+            parts.Add($"своя цель — {TemplateTitles.Kind(kind)}: {TargetText(kind, o.Target, o.Part ?? target.Part)}");
+        }
+        if (o.Form is not null)
+            parts.Add(TemplateTitles.Form(o.Form));
+        return $"вхождение {number}: {string.Join(", ", parts)}";
+    }
 }
