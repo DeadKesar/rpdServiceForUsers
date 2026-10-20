@@ -923,6 +923,255 @@ namespace RpdFos.Core.Migrations
                         });
                 });
 
+            modelBuilder.Entity("RpdFos.Core.Data.Entities.Document", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset?>("ApprovedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("approved_at");
+
+                    b.Property<Guid>("AuthorId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("author_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<DateTimeOffset?>("DeletedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("deleted_at");
+
+                    b.Property<Guid>("DisciplineId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("discipline_id");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_deleted");
+
+                    b.Property<bool>("IsOutdated")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("is_outdated");
+
+                    b.Property<string>("Payload")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("payload");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)")
+                        .HasColumnName("status");
+
+                    b.Property<DateTimeOffset?>("SubmittedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("submitted_at");
+
+                    b.Property<Guid>("TemplateId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("template_id");
+
+                    b.Property<int>("TemplateRevision")
+                        .HasColumnType("integer")
+                        .HasColumnName("template_revision");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("title");
+
+                    b.Property<string>("Type")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("type");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer")
+                        .HasColumnName("version");
+
+                    b.HasKey("Id")
+                        .HasName("pk_documents");
+
+                    b.HasIndex("DisciplineId")
+                        .HasDatabaseName("ix_documents_discipline_id");
+
+                    b.HasIndex("IsOutdated")
+                        .HasDatabaseName("ix_documents_is_outdated")
+                        .HasFilter("is_outdated");
+
+                    b.HasIndex("Payload")
+                        .HasDatabaseName("ix_documents_payload");
+
+                    NpgsqlIndexBuilderExtensions.HasMethod(b.HasIndex("Payload"), "gin");
+
+                    b.HasIndex("TemplateId")
+                        .HasDatabaseName("ix_documents_template_id");
+
+                    b.HasIndex("AuthorId", "Status")
+                        .HasDatabaseName("ix_documents_author_id_status");
+
+                    b.HasIndex("Status", "UpdatedAt")
+                        .IsDescending(false, true)
+                        .HasDatabaseName("ix_documents_status_updated_at");
+
+                    b.ToTable("documents", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_documents_deleted", "is_deleted = (status = 'deleted')");
+
+                            t.HasCheckConstraint("ck_documents_status", "status IN ('draft', 'saved_draft', 'under_review', 'returned', 'accepted', 'approval', 'approved', 'archived', 'deleted')");
+                        });
+                });
+
+            modelBuilder.Entity("RpdFos.Core.Data.Entities.DocumentCompetenceLink", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid?>("CompetenceId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("competence_id");
+
+                    b.Property<Guid>("DocumentId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("document_id");
+
+                    b.Property<Guid?>("IndicatorId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("indicator_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_document_competence_links");
+
+                    b.HasIndex("CompetenceId")
+                        .HasDatabaseName("ix_document_competence_links_competence_id");
+
+                    b.HasIndex("IndicatorId")
+                        .HasDatabaseName("ix_document_competence_links_indicator_id");
+
+                    b.HasIndex("DocumentId", "CompetenceId", "IndicatorId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_document_competence_links_document_id_competence_id_indicat");
+
+                    NpgsqlIndexBuilderExtensions.AreNullsDistinct(b.HasIndex("DocumentId", "CompetenceId", "IndicatorId"), false);
+
+                    b.ToTable("document_competence_links", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_document_competence_links_target", "competence_id IS NOT NULL OR indicator_id IS NOT NULL");
+                        });
+                });
+
+            modelBuilder.Entity("RpdFos.Core.Data.Entities.DocumentHours", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<int>("Control")
+                        .HasColumnType("integer")
+                        .HasColumnName("control");
+
+                    b.Property<Guid>("DocumentId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("document_id");
+
+                    b.Property<int>("LabHours")
+                        .HasColumnType("integer")
+                        .HasColumnName("lab_hours");
+
+                    b.Property<int>("Lectures")
+                        .HasColumnType("integer")
+                        .HasColumnName("lectures");
+
+                    b.Property<int>("Practice")
+                        .HasColumnType("integer")
+                        .HasColumnName("practice");
+
+                    b.Property<int>("SelfStudy")
+                        .HasColumnType("integer")
+                        .HasColumnName("self_study");
+
+                    b.Property<int>("Semester")
+                        .HasColumnType("integer")
+                        .HasColumnName("semester");
+
+                    b.HasKey("Id")
+                        .HasName("pk_document_hours");
+
+                    b.HasIndex("DocumentId", "Semester")
+                        .IsUnique()
+                        .HasDatabaseName("ix_document_hours_document_id_semester");
+
+                    b.ToTable("document_hours", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_document_hours_non_negative", "lectures >= 0 AND practice >= 0 AND lab_hours >= 0 AND self_study >= 0 AND control >= 0");
+                        });
+                });
+
+            modelBuilder.Entity("RpdFos.Core.Data.Entities.DocumentStatusChange", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("ChangedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("changed_at");
+
+                    b.Property<Guid>("ChangedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("changed_by");
+
+                    b.Property<string>("Comment")
+                        .HasColumnType("text")
+                        .HasColumnName("comment");
+
+                    b.Property<Guid>("DocumentId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("document_id");
+
+                    b.Property<string>("FromStatus")
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)")
+                        .HasColumnName("from_status");
+
+                    b.Property<string>("ToStatus")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)")
+                        .HasColumnName("to_status");
+
+                    b.HasKey("Id")
+                        .HasName("pk_document_status_history");
+
+                    b.HasIndex("ChangedBy")
+                        .HasDatabaseName("ix_document_status_history_changed_by");
+
+                    b.HasIndex("DocumentId", "ChangedAt")
+                        .IsDescending(false, true)
+                        .HasDatabaseName("ix_document_status_history_document_id_changed_at");
+
+                    b.ToTable("document_status_history", (string)null);
+                });
+
             modelBuilder.Entity("RpdFos.Core.Data.Entities.DocumentTemplate", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1032,6 +1281,63 @@ namespace RpdFos.Core.Migrations
                         .HasFilter("status = 'published'");
 
                     b.ToTable("document_templates", (string)null);
+                });
+
+            modelBuilder.Entity("RpdFos.Core.Data.Entities.DocumentVersion", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("CompetencesSnapshot")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("competences_snapshot");
+
+                    b.Property<Guid>("DocumentId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("document_id");
+
+                    b.Property<string>("HoursSnapshot")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("hours_snapshot");
+
+                    b.Property<DateTimeOffset>("SavedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("saved_at");
+
+                    b.Property<Guid>("SavedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("saved_by");
+
+                    b.Property<string>("Snapshot")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("snapshot");
+
+                    b.Property<string>("TriggerEvent")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("trigger_event");
+
+                    b.Property<int>("VersionNumber")
+                        .HasColumnType("integer")
+                        .HasColumnName("version_number");
+
+                    b.HasKey("Id")
+                        .HasName("pk_document_versions");
+
+                    b.HasIndex("SavedBy")
+                        .HasDatabaseName("ix_document_versions_saved_by");
+
+                    b.HasIndex("DocumentId", "VersionNumber")
+                        .IsUnique()
+                        .HasDatabaseName("ix_document_versions_document_id_version_number");
+
+                    b.ToTable("document_versions", (string)null);
                 });
 
             modelBuilder.Entity("RpdFos.Core.Data.Entities.Employee", b =>
@@ -1673,6 +1979,79 @@ namespace RpdFos.Core.Migrations
                         .HasConstraintName("fk_discipline_semester_details_disciplines_discipline_id");
                 });
 
+            modelBuilder.Entity("RpdFos.Core.Data.Entities.Document", b =>
+                {
+                    b.HasOne("RpdFos.Core.Data.Entities.Employee", null)
+                        .WithMany()
+                        .HasForeignKey("AuthorId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_documents_employees_author_id");
+
+                    b.HasOne("RpdFos.Core.Data.Entities.Discipline", null)
+                        .WithMany()
+                        .HasForeignKey("DisciplineId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_documents_disciplines_discipline_id");
+
+                    b.HasOne("RpdFos.Core.Data.Entities.DocumentTemplate", null)
+                        .WithMany()
+                        .HasForeignKey("TemplateId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_documents_document_templates_template_id");
+                });
+
+            modelBuilder.Entity("RpdFos.Core.Data.Entities.DocumentCompetenceLink", b =>
+                {
+                    b.HasOne("RpdFos.Core.Data.Entities.Competence", null)
+                        .WithMany()
+                        .HasForeignKey("CompetenceId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_document_competence_links_competences_competence_id");
+
+                    b.HasOne("RpdFos.Core.Data.Entities.Document", null)
+                        .WithMany()
+                        .HasForeignKey("DocumentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_document_competence_links_documents_document_id");
+
+                    b.HasOne("RpdFos.Core.Data.Entities.CompetenceIndicator", null)
+                        .WithMany()
+                        .HasForeignKey("IndicatorId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_document_competence_links_competence_indicators_indicator_id");
+                });
+
+            modelBuilder.Entity("RpdFos.Core.Data.Entities.DocumentHours", b =>
+                {
+                    b.HasOne("RpdFos.Core.Data.Entities.Document", null)
+                        .WithMany()
+                        .HasForeignKey("DocumentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_document_hours_documents_document_id");
+                });
+
+            modelBuilder.Entity("RpdFos.Core.Data.Entities.DocumentStatusChange", b =>
+                {
+                    b.HasOne("RpdFos.Core.Data.Entities.Employee", null)
+                        .WithMany()
+                        .HasForeignKey("ChangedBy")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_document_status_history_employees_changed_by");
+
+                    b.HasOne("RpdFos.Core.Data.Entities.Document", null)
+                        .WithMany()
+                        .HasForeignKey("DocumentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_document_status_history_documents_document_id");
+                });
+
             modelBuilder.Entity("RpdFos.Core.Data.Entities.DocumentTemplate", b =>
                 {
                     b.HasOne("RpdFos.Core.Data.Entities.Employee", null)
@@ -1692,6 +2071,23 @@ namespace RpdFos.Core.Migrations
                         .HasForeignKey("PrintTemplateFileId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .HasConstraintName("fk_document_templates_uploaded_files_print_template_file_id");
+                });
+
+            modelBuilder.Entity("RpdFos.Core.Data.Entities.DocumentVersion", b =>
+                {
+                    b.HasOne("RpdFos.Core.Data.Entities.Document", null)
+                        .WithMany()
+                        .HasForeignKey("DocumentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_document_versions_documents_document_id");
+
+                    b.HasOne("RpdFos.Core.Data.Entities.Employee", null)
+                        .WithMany()
+                        .HasForeignKey("SavedBy")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_document_versions_employees_saved_by");
                 });
 
             modelBuilder.Entity("RpdFos.Core.Data.Entities.Employee", b =>

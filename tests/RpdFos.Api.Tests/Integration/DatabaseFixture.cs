@@ -1,4 +1,6 @@
 using System.Net.Http.Headers;
+using DisciplineDataExtractor;
+using RpdFos.Core.Import;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Hosting;
@@ -68,6 +70,26 @@ public class DatabaseFixture : WebApplicationFactory<Program>, IAsyncLifetime
         if (subject is not null)
             client.DefaultRequestHeaders.Add(TestAuthHandler.SubjectHeader, subject);
         return client;
+    }
+
+    private Task<Guid>? _realPlan;
+
+    /// <summary>
+    /// Учебный план 09.04.04 из реальных файлов (tests/fixtures), импортированный один раз на базу: дисциплины,
+    /// часы по семестрам, матрица компетенций. Тесты одной коллекции идут по очереди, поэтому без блокировок.
+    /// </summary>
+    public Task<Guid> RealPlanIdAsync() => _realPlan ??= ImportRealPlanAsync();
+
+    private async Task<Guid> ImportRealPlanAsync()
+    {
+        await using var scope = Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var methodist = await ImportFiles.AddMethodistAsync(db);
+        var (run, uploaded) = await ImportFiles.AddRunAsync(db, methodist.Id, ImportFiles.Read());
+        SourceFile Source(int i) => new(uploaded[i].OriginalName, uploaded[i].Content!);
+        var result = new DataExtractor().Extract(new ExtractionInput(Source(0), Source(1), Source(2), Source(3)));
+        run = await scope.ServiceProvider.GetRequiredService<ReferenceImporter>().ImportAsync(run.Id, result);
+        return run.CreatedCurriculumPlanId ?? throw new InvalidOperationException("Учебный план не импортирован.");
     }
 
     /// <summary>Прямой доступ к базе — подготовить данные в обход API.</summary>

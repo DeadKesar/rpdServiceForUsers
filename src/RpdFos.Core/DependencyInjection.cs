@@ -33,6 +33,7 @@ public static class DependencyInjection
         // Скомпилированные схемы и настроенный санитайзер — общие на приложение.
         services.AddSingleton<IDocumentValidator, DocumentValidator>();
         services.AddSingleton<RichTextSanitizer>();
+        services.AddScoped<DocumentProjections>();
         return services;
     }
 }

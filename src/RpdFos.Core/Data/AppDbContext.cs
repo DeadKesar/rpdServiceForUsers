@@ -10,6 +10,13 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
 {
     public DbSet<DocumentTemplate> DocumentTemplates => Set<DocumentTemplate>();
 
+    // Документы (контекст Documents).
+    public DbSet<Document> Documents => Set<Document>();
+    public DbSet<DocumentVersion> DocumentVersions => Set<DocumentVersion>();
+    public DbSet<DocumentHours> DocumentHours => Set<DocumentHours>();
+    public DbSet<DocumentCompetenceLink> DocumentCompetenceLinks => Set<DocumentCompetenceLink>();
+    public DbSet<DocumentStatusChange> DocumentStatusHistory => Set<DocumentStatusChange>();
+
     // Справочники (контекст Reference) и справочник сотрудников.
     public DbSet<Institute> Institutes => Set<Institute>();
     public DbSet<Department> Departments => Set<Department>();
