@@ -49,6 +49,21 @@ public static class TemplateData
         return uploaded;
     }
 
+    /// <summary>Опубликованный шаблон для плана — своя линия редакций на каждый вызов.</summary>
+    public static async Task<DocumentTemplate> AddPublishedAsync(AppDbContext db, Guid planId, string type = DocumentTypeRegistry.Rpd)
+    {
+        var methodist = await ImportFiles.AddMethodistAsync(db);
+        var file = await AddPrintTemplateAsync(db, methodist.Id,
+            type == DocumentTypeRegistry.Rpd ? DocxBookmarksTests.Rpd : DocxBookmarksTests.Fos);
+        var definition = Registry.Get(type);
+        var template = DocumentTemplate.Create(definition, $"Шаблон {Guid.NewGuid()}", planId, methodist.Id);
+        template.AttachPrintTemplate(file.Id, TemplateCheck.DefaultMapping(definition, DocxBookmarks.Read(file.Content!)));
+        template.Publish(DateTimeOffset.UtcNow);
+        db.DocumentTemplates.Add(template);
+        await db.SaveChangesAsync();
+        return template;
+    }
+
     /// <summary>Шаблон в статусе «Черновик» с реальным шаблоном оформления — проходит проверку перед публикацией.</summary>
     public static async Task<DocumentTemplate> AddDraftAsync(AppDbContext db, string type = DocumentTypeRegistry.Rpd)
     {

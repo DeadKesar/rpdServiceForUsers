@@ -11,6 +11,7 @@ public static class DocumentSources
     {
         ["parser.discipline.name"] = "Наименование дисциплины (disciplines.name)",
         ["parser.discipline.ind"] = "Индекс дисциплины по плану (disciplines.code)",
+        ["parser.discipline.block"] = "Блок учебного плана: Б1, ФТД (disciplines.block)",
         ["parser.discipline.part_type"] = "Часть плана: обязательная, формируемая участниками… (disciplines.part_type)",
         ["parser.discipline.semesters"] = "Семестры изучения (discipline_semester_details.semester)",
         ["parser.discipline.course"] = "Курс — производное из семестров изучения",
@@ -26,6 +27,7 @@ public static class DocumentSources
             "Квалификация: явная из плана, иначе по уровню (бакалавриат → бакалавр, магистратура → магистр, специалитет → специалист)",
         ["reference.profile.name"] = "Направленность (профиль) (study_profiles.name)",
         ["reference.curriculum_plan.education_form"] = "Форма обучения (curriculum_plans.study_form)",
+        ["reference.curriculum_plan.academic_year"] = "Учебный год начала изучения: год набора и первый семестр дисциплины",
         ["reference.department.name"] = "Кафедра дисциплины (departments.name)",
         ["db.competence_matrix.by_discipline"] = "Компетенции и индикаторы дисциплины (competence_matrix, competences, competence_indicators)",
         // Подписантов в содержимом нет: их определяют правила листа согласования шаблона (SignatureResolvers).

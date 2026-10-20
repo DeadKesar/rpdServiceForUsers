@@ -6,6 +6,9 @@ public static class Policies
     public const string MethodistOrAdmin = "methodist-or-admin";
     public const string Admin = "admin-only";
 
+    /// <summary>Авторы документов: преподаватель создаёт РПД, методист и администратор — тоже (за кафедру).</summary>
+    public const string DocumentAuthors = "document-authors";
+
     /// <summary>
     /// Панель фоновых задач — только администратору. Её открывают в браузере переходом по адресу,
     /// без токена доступа, поэтому вход проверяется по cookie страницы входа.

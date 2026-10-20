@@ -130,7 +130,7 @@ public static class SchemaInspector
     }
 
     // Переход по $ref: «#/…» — внутри текущей схемы, «https://…#/…» — в схеме с таким $id.
-    private static JsonElement? Deref(JsonElement node, ref JsonElement root, Func<string, JsonElement?> resolve)
+    internal static JsonElement? Deref(JsonElement node, ref JsonElement root, Func<string, JsonElement?> resolve)
     {
         for (var depth = 0; depth < 16 && node.TryGetProperty("$ref", out var reference); depth++)
         {

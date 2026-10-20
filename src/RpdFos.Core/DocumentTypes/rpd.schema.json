@@ -13,43 +13,52 @@
       "properties": {
         "discipline_name": {
           "type": "string",
+          "readOnly": true,
           "x-source": "parser.discipline.name",
           "x-readonly-after": "draft"
         },
         "discipline_code": {
           "type": "string",
+          "readOnly": true,
           "x-source": "parser.discipline.ind",
           "description": "Индекс по учебному плану, например Б1.О.01"
         },
         "direction_code": {
           "type": "string",
+          "readOnly": true,
           "pattern": "^\\d{2}\\.\\d{2}\\.\\d{2}$",
           "x-source": "reference.direction.code"
         },
         "direction_name": {
           "type": "string",
+          "readOnly": true,
           "x-source": "reference.direction.name"
         },
         "profile_name": {
           "type": "string",
+          "readOnly": true,
           "x-source": "reference.profile.name"
         },
         "education_level": {
           "type": "string",
+          "readOnly": true,
           "enum": ["Бакалавриат", "Магистратура", "Специалитет", "Аспирантура"],
           "x-source": "reference.direction.level"
         },
         "study_form": {
           "type": "string",
+          "readOnly": true,
           "x-source": "reference.curriculum_plan.education_form"
         },
         "department_name": {
           "type": "string",
+          "readOnly": true,
           "x-source": "reference.department.name"
         },
         "academic_year": {
           "type": "string",
           "pattern": "^\\d{4}/\\d{4}$",
+          "x-source": "reference.curriculum_plan.academic_year",
           "description": "Учебный год, например 2026/2027"
         }
       }
@@ -91,6 +100,24 @@
       "type": "object",
       "title": "Место дисциплины в структуре образовательной программы",
       "properties": {
+        "index": {
+          "type": "string",
+          "readOnly": true,
+          "x-source": "parser.discipline.ind",
+          "description": "Индекс по учебному плану"
+        },
+        "block": {
+          "type": "string",
+          "readOnly": true,
+          "x-source": "parser.discipline.block",
+          "description": "Блок учебного плана"
+        },
+        "part": {
+          "type": "string",
+          "readOnly": true,
+          "x-source": "parser.discipline.part_type",
+          "description": "Часть блока"
+        },
         "prerequisites": {
           "type": "string",
           "x-ui-widget": "richtext",
@@ -143,12 +170,14 @@
     "hours_distribution": {
       "type": "object",
       "title": "Распределение часов по семестрам",
-      "x-source": "parser.discipline.details",
+      "description": "Трудоёмкость, часы по видам занятий и виды аттестации — из учебного плана",
+      "readOnly": true,
       "x-ui-widget": "hours_table",
       "x-validation-rule": "hours_match_curriculum",
       "properties": {
         "semesters": {
           "type": "array",
+          "x-source": "parser.discipline.details",
           "items": {
             "type": "object",
             "properties": {
@@ -168,7 +197,8 @@
             }
           }
         },
-        "total_credits": { "type": "integer", "x-source": "parser.discipline.ze_total" }
+        "total_credits": { "type": "integer", "x-source": "parser.discipline.ze_total", "description": "Зачётных единиц" },
+        "total_hours": { "type": "integer", "x-source": "parser.discipline.hours_total", "description": "Академических часов по плану" }
       }
     },
 
