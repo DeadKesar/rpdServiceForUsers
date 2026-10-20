@@ -1227,7 +1227,7 @@ namespace RpdFos.Core.Migrations
 
                     b.Property<string>("Schema")
                         .IsRequired()
-                        .HasColumnType("jsonb")
+                        .HasColumnType("json")
                         .HasColumnName("schema");
 
                     b.Property<string>("SignaturesConfig")

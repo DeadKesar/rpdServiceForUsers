@@ -16,7 +16,10 @@ internal sealed class DocumentTemplateConfiguration : IEntityTypeConfiguration<D
         e.Property(x => x.Type).HasMaxLength(50);
         e.Property(x => x.Name).HasMaxLength(255);
         e.Property(x => x.Status).HasMaxLength(20);
-        e.Property(x => x.Schema).HasColumnType("jsonb");
+        // Снимок схемы — json, а не jsonb: jsonb не хранит порядок ключей, а по порядку свойств схемы
+        // редактор строит разделы и поля. Лист согласования — массив: порядок мест jsonb сохраняет,
+        // порядок ключей внутри места не важен.
+        e.Property(x => x.Schema).HasColumnType("json");
         e.Property(x => x.SignaturesConfig).HasColumnType("jsonb");
         e.Property(x => x.PrintMapping).HasColumnType("jsonb");
 
