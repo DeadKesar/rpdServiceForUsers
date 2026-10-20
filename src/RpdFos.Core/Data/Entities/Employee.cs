@@ -56,4 +56,19 @@ public static class SignatoryRoles
     /// с направлением подготовки появится на этапе 6.
     /// </summary>
     public static readonly string[] WithoutUnit = [Rector, ViceRectorEdu, UmuHead, LibraryDirector, ItDirectorateHead, UmkChair];
+
+    /// <summary>Название категории для интерфейса; код остаётся в данных и в подсказке.</summary>
+    public static string Title(string role) => role switch
+    {
+        DepartmentHead => "Заведующий кафедрой",
+        DepartmentHeadActing => "Исполняющий обязанности заведующего кафедрой",
+        InstituteDirector => "Директор института",
+        Rector => "Ректор",
+        ViceRectorEdu => "Проректор по образовательной деятельности",
+        UmuHead => "Начальник учебно-методического управления",
+        LibraryDirector => "Директор научно-технической библиотеки",
+        ItDirectorateHead => "Начальник управления информационно-технической поддержки",
+        UmkChair => "Председатель учебно-методической комиссии",
+        _ => role
+    };
 }

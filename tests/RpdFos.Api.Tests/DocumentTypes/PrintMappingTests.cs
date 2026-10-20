@@ -76,6 +76,14 @@ public class PrintMappingTests
     }
 
     [Fact]
+    public void Every_signatory_category_has_russian_title()
+    {
+        // В интерфейсе — название, код только в подсказке.
+        Assert.All(SignatoryRoles.All, code => Assert.NotEqual(code, SignatoryRoles.Title(code)));
+        Assert.Equal("Проректор по образовательной деятельности", SignatoryRoles.Title(SignatoryRoles.ViceRectorEdu));
+    }
+
+    [Fact]
     public void Rpd_title_carries_vice_rector_approval_stamp()
     {
         var seat = Assert.Single(Registry.Get(DocumentTypeRegistry.Rpd).Signatures, s => s.Placement == SignaturePlacements.Title);

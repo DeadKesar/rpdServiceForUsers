@@ -252,8 +252,8 @@ public class TemplatesModule : ICarterModule
             printTemplateName,
             inspection.Bookmarks.Select(b => new BookmarkRow(b.BaseName, b.Count, b.Names,
                 inspection.Mapping.GetValueOrDefault(b.BaseName))).ToList(),
-            inspection.Signatures.Select(s => new SignatureRow(s.Id, s.Title, s.Role, s.Resolver,
-                SignatureResolvers.All.GetValueOrDefault(s.Resolver), s.Electronic, s.Placement)).ToList(),
+            inspection.Signatures.Select(s => new SignatureRow(s.Id, s.Title, s.Role, SignatoryRoles.Title(s.Role),
+                s.Resolver, SignatureResolvers.All.GetValueOrDefault(s.Resolver), s.Electronic, s.Placement)).ToList(),
             inspection.Errors);
     }
 
@@ -294,5 +294,7 @@ public record TemplateDetails(
 /// <summary>Закладка шаблона оформления: вхождения и цель; цели нет — закладка не сопоставлена.</summary>
 public record BookmarkRow(string BaseName, int Count, IReadOnlyList<string> Names, BookmarkTarget? Target);
 
+/// <summary>Место листа согласования: коды категории и правила — с русскими названиями для интерфейса.</summary>
 public record SignatureRow(
-    string Id, string Title, string Role, string Resolver, string? ResolverTitle, bool Electronic, string Placement);
+    string Id, string Title, string Role, string RoleTitle, string Resolver, string? ResolverTitle, bool Electronic,
+    string Placement);

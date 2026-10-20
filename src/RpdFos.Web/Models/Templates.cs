@@ -21,8 +21,8 @@ public sealed record BookmarkTarget(string Kind, string Target, string? Part, st
 
 public sealed record BookmarkOccurrence(string? Form, string? Kind, string? Target, string? Part, string? Note);
 
-public sealed record SignatureRow(string Id, string Title, string Role, string Resolver, string? ResolverTitle,
-    bool Electronic, string Placement);
+public sealed record SignatureRow(string Id, string Title, string Role, string RoleTitle, string Resolver,
+    string? ResolverTitle, bool Electronic, string Placement);
 
 /// <summary>Ответ об ошибке (ProblemDetails); <see cref="Errors"/> — причины, по которым шаблон не прошёл проверку.</summary>
 public sealed record TemplateProblem(string? Title, string? Detail, List<string>? Errors);

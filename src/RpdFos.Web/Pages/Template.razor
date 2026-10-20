@@ -199,8 +199,9 @@ else
             {
                 <tr>
                     <td>@s.Title</td>
-                    <td><code>@s.Role</code></td>
-                    <td>@(s.ResolverTitle ?? s.Resolver) <span class="small text-muted"><code>@s.Resolver</code></span></td>
+                    @* Коды категории и правила — во всплывающей подсказке. *@
+                    <td title="@s.Role">@s.RoleTitle</td>
+                    <td title="@s.Resolver">@(s.ResolverTitle ?? s.Resolver)</td>
                     <td>@(s.Electronic ? "электронно" : "на бумаге")</td>
                     <td>@TemplateTitles.Placement(s.Placement)</td>
                 </tr>

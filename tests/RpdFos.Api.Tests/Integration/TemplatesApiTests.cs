@@ -35,7 +35,9 @@ public class TemplatesApiTests(DatabaseFixture app)
         Assert.All(draft.Bookmarks, b => Assert.NotNull(b.Target));
         Assert.Empty(draft.Errors);
         Assert.True(draft.CanPublish);
-        Assert.NotEmpty(draft.Signatures);
+        // Категория подписанта — с русским названием, код остаётся для подсказки.
+        var head = Assert.Single(draft.Signatures, s => s.Role == SignatoryRoles.DepartmentHead);
+        Assert.Equal("Заведующий кафедрой", head.RoleTitle);
 
         var saved = await PostAsync(client, $"/api/templates/{draft.Template.Id}/save", draft.Template.Version);
         Assert.Equal(TemplateStatuses.SavedDraft, saved.Template.Status);
