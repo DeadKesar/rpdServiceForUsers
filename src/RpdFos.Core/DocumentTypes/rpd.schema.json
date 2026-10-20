@@ -13,50 +13,59 @@
       "properties": {
         "discipline_name": {
           "type": "string",
+          "title": "Наименование дисциплины",
           "readOnly": true,
           "x-source": "parser.discipline.name",
           "x-readonly-after": "draft"
         },
         "discipline_code": {
           "type": "string",
+          "title": "Индекс дисциплины",
           "readOnly": true,
           "x-source": "parser.discipline.ind",
           "description": "Индекс по учебному плану, например Б1.О.01"
         },
         "direction_code": {
           "type": "string",
+          "title": "Код направления подготовки",
           "readOnly": true,
           "pattern": "^\\d{2}\\.\\d{2}\\.\\d{2}$",
           "x-source": "reference.direction.code"
         },
         "direction_name": {
           "type": "string",
+          "title": "Направление подготовки",
           "readOnly": true,
           "x-source": "reference.direction.name"
         },
         "profile_name": {
           "type": "string",
+          "title": "Направленность (профиль)",
           "readOnly": true,
           "x-source": "reference.profile.name"
         },
         "education_level": {
           "type": "string",
+          "title": "Уровень высшего образования",
           "readOnly": true,
           "enum": ["Бакалавриат", "Магистратура", "Специалитет", "Аспирантура"],
           "x-source": "reference.direction.level"
         },
         "study_form": {
           "type": "string",
+          "title": "Форма обучения",
           "readOnly": true,
           "x-source": "reference.curriculum_plan.education_form"
         },
         "department_name": {
           "type": "string",
+          "title": "Кафедра",
           "readOnly": true,
           "x-source": "reference.department.name"
         },
         "academic_year": {
           "type": "string",
+          "title": "Учебный год",
           "pattern": "^\\d{4}/\\d{4}$",
           "x-source": "reference.curriculum_plan.academic_year",
           "description": "Учебный год, например 2026/2027"
@@ -71,12 +80,14 @@
       "properties": {
         "goals": {
           "type": "string",
+          "title": "Цели освоения дисциплины",
           "minLength": 50,
           "x-ui-widget": "richtext",
           "description": "Цели изучения дисциплины (заполняется преподавателем)"
         },
         "objectives": {
           "type": "array",
+          "title": "Задачи дисциплины",
           "items": { "type": "string", "minLength": 10 },
           "minItems": 1,
           "x-ui-widget": "list",
@@ -90,9 +101,9 @@
       "title": "Результаты обучения по дисциплине",
       "description": "Знать / уметь / владеть — ручной текст, дополняет выбор индикаторов",
       "properties": {
-        "knows": { "type": "string", "x-ui-widget": "richtext" },
-        "can": { "type": "string", "x-ui-widget": "richtext" },
-        "owns": { "type": "string", "x-ui-widget": "richtext" }
+        "knows": { "type": "string", "title": "Знать", "x-ui-widget": "richtext" },
+        "can": { "type": "string", "title": "Уметь", "x-ui-widget": "richtext" },
+        "owns": { "type": "string", "title": "Владеть", "x-ui-widget": "richtext" }
       }
     },
 
@@ -102,29 +113,34 @@
       "properties": {
         "index": {
           "type": "string",
+          "title": "Индекс",
           "readOnly": true,
           "x-source": "parser.discipline.ind",
           "description": "Индекс по учебному плану"
         },
         "block": {
           "type": "string",
+          "title": "Блок",
           "readOnly": true,
           "x-source": "parser.discipline.block",
           "description": "Блок учебного плана"
         },
         "part": {
           "type": "string",
+          "title": "Часть",
           "readOnly": true,
           "x-source": "parser.discipline.part_type",
           "description": "Часть блока"
         },
         "prerequisites": {
           "type": "string",
+          "title": "Входные требования",
           "x-ui-widget": "richtext",
           "description": "Входные требования: результаты обучения, приобретённые ранее"
         },
         "postrequisites": {
           "type": "string",
+          "title": "Последующие дисциплины",
           "x-ui-widget": "richtext",
           "description": "Дисциплины, использующие результаты обучения по данной дисциплине"
         }
@@ -141,23 +157,25 @@
         "type": "object",
         "required": ["code", "formulation", "indicators"],
         "properties": {
-          "code": { "type": "string", "pattern": "^(УК|ОПК|ПК)-\\d+$" },
-          "formulation": { "type": "string" },
+          "code": { "type": "string", "title": "Код компетенции", "pattern": "^(УК|ОПК|ПК)-\\d+$" },
+          "formulation": { "type": "string", "title": "Формулировка" },
           "indicators": {
             "type": "array",
+            "title": "Индикаторы",
             "items": {
               "type": "object",
               "required": ["code", "text"],
               "properties": {
                 "code": { "$ref": "#/$defs/indicator_code" },
-                "text": { "type": "string" },
+                "text": { "type": "string", "title": "Формулировка индикатора" },
                 "results": {
                   "type": "object",
+                  "title": "Результаты обучения",
                   "description": "Результаты обучения по индикатору",
                   "properties": {
-                    "knows": { "type": "string" },
-                    "can": { "type": "string" },
-                    "owns": { "type": "string" }
+                    "knows": { "type": "string", "title": "Знать" },
+                    "can": { "type": "string", "title": "Уметь" },
+                    "owns": { "type": "string", "title": "Владеть" }
                   }
                 }
               }
@@ -177,28 +195,37 @@
       "properties": {
         "semesters": {
           "type": "array",
+          "title": "Семестры",
           "x-source": "parser.discipline.details",
           "items": {
             "type": "object",
             "properties": {
-              "semester": { "type": "integer", "minimum": 1, "maximum": 12 },
-              "contact_hours": { "type": "integer", "minimum": 0 },
-              "lectures": { "type": "integer", "minimum": 0 },
-              "practice": { "type": "integer", "minimum": 0 },
-              "lab_hours": { "type": "integer", "minimum": 0 },
-              "self_study": { "type": "integer", "minimum": 0 },
-              "control": { "type": "integer", "minimum": 0 },
-              "credits": { "type": "integer", "minimum": 0 },
+              "semester": { "type": "integer", "title": "Семестр", "minimum": 1, "maximum": 12 },
+              "contact_hours": { "type": "integer", "title": "Контактная работа", "minimum": 0 },
+              "lectures": { "type": "integer", "title": "Лекции", "minimum": 0 },
+              "practice": { "type": "integer", "title": "Практические занятия", "minimum": 0 },
+              "lab_hours": { "type": "integer", "title": "Лабораторные работы", "minimum": 0 },
+              "self_study": { "type": "integer", "title": "Самостоятельная работа", "minimum": 0 },
+              "control": { "type": "integer", "title": "Контроль", "minimum": 0 },
+              "credits": { "type": "integer", "title": "Зачётных единиц", "minimum": 0 },
               "control_types": {
                 "type": "array",
+                "title": "Промежуточная аттестация",
                 "description": "Виды промежуточной аттестации в семестре (их может быть несколько)",
-                "items": { "type": "string", "enum": ["exam", "credit", "graded_credit", "course_project", "course_work"] }
+                "items": {
+                  "type": "string",
+                  "enum": ["exam", "credit", "graded_credit", "course_project", "course_work"],
+                  "x-enum-titles": {
+                    "exam": "Экзамен", "credit": "Зачёт", "graded_credit": "Зачёт с оценкой",
+                    "course_project": "Курсовой проект", "course_work": "Курсовая работа"
+                  }
+                }
               }
             }
           }
         },
-        "total_credits": { "type": "integer", "x-source": "parser.discipline.ze_total", "description": "Зачётных единиц" },
-        "total_hours": { "type": "integer", "x-source": "parser.discipline.hours_total", "description": "Академических часов по плану" }
+        "total_credits": { "type": "integer", "title": "Зачётных единиц", "x-source": "parser.discipline.ze_total", "description": "Зачётных единиц" },
+        "total_hours": { "type": "integer", "title": "Часов по плану", "x-source": "parser.discipline.hours_total", "description": "Академических часов по плану" }
       }
     },
 
@@ -211,25 +238,28 @@
         "type": "object",
         "required": ["section_number", "topic_title", "hours"],
         "properties": {
-          "section_number": { "type": "integer", "minimum": 1 },
-          "topic_title": { "type": "string", "minLength": 5 },
-          "topic_description": { "type": "string" },
+          "section_number": { "type": "integer", "title": "Раздел", "minimum": 1 },
+          "topic_title": { "type": "string", "title": "Тема", "minLength": 5 },
+          "topic_description": { "type": "string", "title": "Содержание" },
           "hours": {
             "type": "object",
+            "title": "Часы",
             "properties": {
-              "lectures": { "type": "integer", "minimum": 0 },
-              "practice": { "type": "integer", "minimum": 0 },
-              "lab_hours": { "type": "integer", "minimum": 0 },
-              "self_study": { "type": "integer", "minimum": 0 }
+              "lectures": { "type": "integer", "title": "Лекции", "minimum": 0 },
+              "practice": { "type": "integer", "title": "Практика", "minimum": 0 },
+              "lab_hours": { "type": "integer", "title": "Лабораторные", "minimum": 0 },
+              "self_study": { "type": "integer", "title": "Самостоятельная работа", "minimum": 0 }
             }
           },
           "competence_indicators": {
             "type": "array",
+            "title": "Индикаторы",
             "items": { "$ref": "#/$defs/indicator_code" },
             "description": "Какие индикаторы формируются в этом разделе"
           },
           "current_control_forms": {
             "type": "array",
+            "title": "Формы текущего контроля",
             "items": { "type": "string" },
             "description": "Формы текущего контроля по разделу — мероприятия ФОС"
           }
@@ -240,6 +270,7 @@
     "practical_classes": {
       "type": "array",
       "title": "Практические занятия (семинары)",
+      "x-ui-widget": "class_table",
       "x-visible-if": { "source": "parser.discipline.details", "any": "practice" },
       "x-stub-text": "Практические занятия учебным планом не предусмотрены.",
       "items": { "$ref": "#/$defs/class_item" }
@@ -248,6 +279,7 @@
     "lab_works": {
       "type": "array",
       "title": "Лабораторные работы",
+      "x-ui-widget": "class_table",
       "x-visible-if": { "source": "parser.discipline.details", "any": "lab_hours" },
       "x-stub-text": "Лабораторные работы учебным планом не предусмотрены.",
       "items": { "$ref": "#/$defs/class_item" }
@@ -259,9 +291,14 @@
       "x-visible-if": { "source": "parser.discipline.attestation", "includes": ["course_project", "course_work"] },
       "x-stub-text": "В учебном плане курсовое проектирование для данной дисциплины не предусмотрено.",
       "properties": {
-        "kind": { "type": "string", "enum": ["course_project", "course_work"] },
-        "topics": { "type": "array", "items": { "type": "string" }, "description": "Примерные темы" },
-        "requirements": { "type": "string", "x-ui-widget": "richtext", "description": "Требования к содержанию и оформлению" }
+        "kind": {
+          "type": "string",
+          "title": "Вид",
+          "enum": ["course_project", "course_work"],
+          "x-enum-titles": { "course_project": "Курсовой проект", "course_work": "Курсовая работа" }
+        },
+        "topics": { "type": "array", "title": "Примерные темы", "items": { "type": "string" }, "description": "Примерные темы" },
+        "requirements": { "type": "string", "title": "Требования", "x-ui-widget": "richtext", "description": "Требования к содержанию и оформлению" }
       }
     },
 
@@ -278,11 +315,13 @@
       "properties": {
         "current_control": {
           "type": "array",
+          "title": "Текущий контроль",
           "items": { "type": "string" },
           "description": "Средства текущего контроля"
         },
         "intermediate_attestation": {
           "type": "array",
+          "title": "Промежуточная аттестация",
           "items": { "type": "string" },
           "description": "Средства промежуточной аттестации"
         }
@@ -296,30 +335,37 @@
       "properties": {
         "main": {
           "type": "array",
+          "title": "Основная литература",
           "minItems": 1,
+          "x-ui-widget": "literature_list",
           "x-validation-rule": "literature_main_count",
           "items": { "$ref": "#/$defs/literature_item" },
           "description": "Основная литература"
         },
         "additional": {
           "type": "array",
+          "title": "Дополнительная литература",
+          "x-ui-widget": "literature_list",
           "items": { "$ref": "#/$defs/literature_item" },
           "description": "Дополнительная литература"
         },
         "periodicals": {
           "type": "array",
+          "title": "Периодические издания",
           "items": { "type": "string" },
           "description": "Периодические издания"
         },
         "internet_resources": {
           "type": "array",
+          "title": "Интернет-ресурсы",
+          "x-ui-widget": "literature_list",
           "items": {
             "type": "object",
             "required": ["title", "url"],
             "properties": {
-              "title": { "type": "string" },
-              "url": { "type": "string", "format": "uri" },
-              "accessed_on": { "type": "string", "format": "date", "description": "Дата обращения" }
+              "title": { "type": "string", "title": "Название" },
+              "url": { "type": "string", "title": "Адрес", "format": "uri" },
+              "accessed_on": { "type": "string", "title": "Дата обращения", "format": "date", "description": "Дата обращения" }
             }
           }
         },
@@ -329,16 +375,19 @@
           "properties": {
             "lab_works": {
               "type": "string",
+              "title": "К лабораторным работам",
               "x-ui-widget": "richtext",
               "x-visible-if": { "source": "parser.discipline.details", "any": "lab_hours" }
             },
             "practical_classes": {
               "type": "string",
+              "title": "К практическим занятиям",
               "x-ui-widget": "richtext",
               "x-visible-if": { "source": "parser.discipline.details", "any": "practice" }
             },
             "course_work": {
               "type": "string",
+              "title": "К курсовому проекту (работе)",
               "x-ui-widget": "richtext",
               "x-visible-if": { "source": "parser.discipline.attestation", "includes": ["course_project", "course_work"] }
             }
@@ -346,6 +395,7 @@
         },
         "software": {
           "type": "array",
+          "title": "Программное обеспечение",
           "items": { "type": "string" },
           "description": "Программное обеспечение, базы данных, информационно-справочные системы"
         }
@@ -374,9 +424,9 @@
             "type": "object",
             "required": ["user_id", "name_for_document"],
             "properties": {
-              "user_id": { "type": "string", "format": "uuid", "description": "Запись справочника сотрудников (users.id)" },
-              "name_for_document": { "type": "string", "description": "«И. О. Фамилия» на момент ввода" },
-              "position": { "type": "string", "description": "Должность на момент ввода" }
+              "user_id": { "type": "string", "title": "Запись справочника", "format": "uuid", "readOnly": true, "description": "Запись справочника сотрудников (users.id)" },
+              "name_for_document": { "type": "string", "title": "И. О. Фамилия", "description": "«И. О. Фамилия» на момент ввода" },
+              "position": { "type": "string", "title": "Должность", "description": "Должность на момент ввода" }
             }
           }
         },
@@ -386,8 +436,8 @@
           "x-required-for-status": "approval",
           "required": ["number", "date"],
           "properties": {
-            "number": { "type": "string", "description": "Номер протокола" },
-            "date": { "type": "string", "format": "date", "description": "Дата заседания кафедры" }
+            "number": { "type": "string", "title": "Номер протокола", "description": "Номер протокола" },
+            "date": { "type": "string", "title": "Дата заседания", "format": "date", "description": "Дата заседания кафедры" }
           }
         }
       }
@@ -397,6 +447,7 @@
   "$defs": {
     "indicator_code": {
       "type": "string",
+      "title": "Код индикатора",
       "pattern": "^(УК|ОПК|ПК)-\\d+(\\.\\d+){1,2}$",
       "description": "Код индикатора: УК-1.1, ОПК-2.3, ПК-1.1.1 (у ПК — до трёх уровней)"
     },
@@ -404,10 +455,10 @@
       "type": "object",
       "required": ["number", "title", "hours"],
       "properties": {
-        "number": { "type": "integer", "minimum": 1 },
-        "title": { "type": "string" },
-        "hours": { "type": "integer", "minimum": 0 },
-        "section_number": { "type": "integer", "minimum": 1, "description": "Раздел тематического плана" }
+        "number": { "type": "integer", "title": "№", "minimum": 1 },
+        "title": { "type": "string", "title": "Тема занятия" },
+        "hours": { "type": "integer", "title": "Часов", "minimum": 0 },
+        "section_number": { "type": "integer", "title": "Раздел", "minimum": 1, "description": "Раздел тематического плана" }
       }
     },
     "literature_item": {
@@ -416,11 +467,12 @@
       "properties": {
         "citation": {
           "type": "string",
+          "title": "Библиографическая запись",
           "minLength": 20,
           "description": "Библиографическая запись по ГОСТ Р 7.0.100-2018"
         },
-        "year": { "type": "integer", "minimum": 1900 },
-        "isbn": { "type": "string" }
+        "year": { "type": "integer", "title": "Год", "minimum": 1900 },
+        "isbn": { "type": "string", "title": "ISBN" }
       }
     }
   }

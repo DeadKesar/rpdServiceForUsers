@@ -21,8 +21,34 @@ public sealed record SectionState(
 /// и кандидаты в компетенции и индикаторы из матрицы.
 /// </summary>
 public sealed record DocumentMetadata(
-    IReadOnlyList<SectionState> Sections, IReadOnlyList<string> ReadOnlyPaths, IReadOnlyList<CompetenceCandidate> CompetenceCandidates)
+    IReadOnlyList<SectionState> Sections, IReadOnlyList<string> ReadOnlyPaths, IReadOnlyList<string> HiddenPaths,
+    IReadOnlyList<CompetenceCandidate> CompetenceCandidates)
 {
+    /// <summary>
+    /// Места, не предусмотренные учебным планом (<c>x-visible-if</c>): разделы и поля внутри разделов —
+    /// например, методические указания к лабораторным работам.
+    /// </summary>
+    public static IReadOnlyList<string> Hidden(JsonElement schema, DisciplineFacts facts, Func<string, JsonElement?> resolve)
+    {
+        var result = new List<string>();
+        var root = schema;
+        Walk(SchemaInspector.Deref(schema, ref root, resolve), root, "", 0);
+        return result;
+
+        void Walk(JsonElement? node, JsonElement currentRoot, string path, int depth)
+        {
+            if (node is not { ValueKind: JsonValueKind.Object } n || depth > 16 || !n.TryGetProperty("properties", out var props)) return;
+            foreach (var p in props.EnumerateObject())
+            {
+                var childRoot = currentRoot;
+                var child = SchemaInspector.Deref(p.Value, ref childRoot, resolve);
+                var childPath = $"{path}/{p.Name}";
+                if (child is { } c && !ConditionalSections.IsVisible(c, facts)) result.Add(childPath);
+                else Walk(child, childRoot, childPath, depth + 1);
+            }
+        }
+    }
+
     public static DocumentMetadata Build(string schemaJson, JsonElement payload, string status, DisciplineFacts facts,
         IDocumentValidator validator, Func<string, JsonElement?> resolve)
     {
@@ -44,7 +70,7 @@ public sealed record DocumentMetadata(
                     errors));
             }
 
-        return new DocumentMetadata(sections, ReadOnly(schema, status, resolve), facts.Competences);
+        return new DocumentMetadata(sections, ReadOnly(schema, status, resolve), Hidden(schema, facts, resolve), facts.Competences);
     }
 
     /// <summary>

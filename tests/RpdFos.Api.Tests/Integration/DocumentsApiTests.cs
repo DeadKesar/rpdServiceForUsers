@@ -62,6 +62,8 @@ public class DocumentsApiTests(DatabaseFixture app)
         Assert.Contains("/hours_distribution", created.Metadata.ReadOnlyPaths);
         Assert.Contains("/place_in_structure/block", created.Metadata.ReadOnlyPaths);
         Assert.DoesNotContain("/title_page/academic_year", created.Metadata.ReadOnlyPaths);
+        // Не предусмотрено планом: курсовой проект — и раздел, и методические указания к нему.
+        Assert.Equal(["/course_work", "/literature/guidelines/course_work"], created.Metadata.HiddenPaths.Order());
 
         // Предзаполненное содержимое — корректный черновик; история и нормализованные часы записаны тем же сохранением.
         await using var scope = app.Services.CreateAsyncScope();
