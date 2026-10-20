@@ -11,8 +11,10 @@
     <!-- Закладки DOCX-шаблонов оформления (DocumentTypes/DocxBookmarks), позже — генерация DOCX. -->
     <PackageReference Include="DocumentFormat.OpenXml" Version="3.5.1" />
     <!-- Проверка содержимого документа по JSON Schema 2020-12 (Documents/DocumentValidator): Apache 2.0,
-         сопровождается; выбор и сравнение — docs/journal.md, этап 4, B1. -->
-    <PackageReference Include="Corvus.Text.Json.Validator" Version="5.7.9" />
+         сопровождается; выбор и сравнение — docs/journal.md, этап 4, B1.
+         Версия закреплена точно ([5.7.9]): обновлять только осознанно — с прогоном тестов валидатора, потому что
+         сообщения об ошибках строятся по местам в схеме, которые отдаёт библиотека. -->
+    <PackageReference Include="Corvus.Text.Json.Validator" Version="[5.7.9]" />
     <!-- Санитайзер форматированного текста (Documents/RichTextSanitizer, NFR-SEC-10): MIT, AngleSharp — MIT. -->
     <PackageReference Include="HtmlSanitizer" Version="9.2.1039" />
   </ItemGroup>
