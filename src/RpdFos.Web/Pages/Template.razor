@@ -1,0 +1,382 @@
+@page "/templates/new"
+@page "/templates/{Id:guid}"
+@attribute [Authorize]
+@using System.Net
+@using System.Net.Http.Headers
+@using System.Net.Http.Json
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.WebAssembly.Authentication
+@using RpdFos.Web.Models
+@inject HttpClient Http
+@inject NavigationManager Navigation
+@inject IJSRuntime JS
+
+<PageTitle>@(details?.Template.Name ?? "Новый шаблон")</PageTitle>
+
+<p><a href="templates">← Шаблоны</a></p>
+
+@if (message is not null)
+{
+    <div class="alert @(messageIsError ? "alert-danger" : "alert-info")" role="status">
+        @message
+        @if (problems.Count > 0)
+        {
+            <ul class="mb-0 mt-2">
+                @foreach (var p in problems)
+                {
+                    <li>@p</li>
+                }
+            </ul>
+        }
+    </div>
+}
+
+@if (Id is null)
+{
+    <h1>Новый шаблон</h1>
+    <AuthorizeView Roles="methodist,admin">
+        <Authorized>
+            <div class="row g-3 mb-3" style="max-width: 720px">
+                <div class="col-md-4">
+                    <label class="form-label">Тип документа</label>
+                    <select class="form-select" @bind="newType">
+                        @foreach (var (typeCode, typeTitle) in TemplateTitles.Types)
+                        {
+                            <option value="@typeCode">@typeTitle</option>
+                        }
+                    </select>
+                </div>
+                <div class="col-md-8">
+                    <label class="form-label">Название</label>
+                    <input class="form-control" @bind="newName" @bind:event="oninput" maxlength="255" />
+                </div>
+                <div class="col-12">
+                    <label class="form-label">Учебный план</label>
+                    <select class="form-select" @bind="newPlanId">
+                        <option value="">— выберите импортированный план —</option>
+                        @foreach (var p in plans)
+                        {
+                            <option value="@p.Id">@p.Title</option>
+                        }
+                    </select>
+                    @if (plans.Count == 0)
+                    {
+                        <div class="form-text">Планов нет — сначала загрузите учебный план на странице «Импорт данных».</div>
+                    }
+                </div>
+            </div>
+            <button class="btn btn-primary" @onclick="CreateAsync"
+                    disabled="@(busy || string.IsNullOrWhiteSpace(newName) || newPlanId.Length == 0)">Создать</button>
+        </Authorized>
+        <NotAuthorized>
+            <p>Создавать шаблоны могут методист и администратор.</p>
+        </NotAuthorized>
+    </AuthorizeView>
+}
+else if (details is null)
+{
+    <p>Загрузка…</p>
+}
+else
+{
+    var t = details.Template;
+    <h1>@t.Name</h1>
+    <p class="text-muted">@t.TypeTitle · редакция @t.Revision · <strong>@t.StatusTitle</strong></p>
+
+    <dl class="row" style="max-width: 960px">
+        <dt class="col-sm-3">Учебный план</dt>
+        <dd class="col-sm-9">@(t.Plan?.Title ?? "не привязан")</dd>
+        <dt class="col-sm-3">Шаблон оформления</dt>
+        <dd class="col-sm-9">@(details.PrintTemplateName ?? "не загружен")</dd>
+        @if (t.PublishedAt is { } published)
+        {
+            <dt class="col-sm-3">Опубликован</dt>
+            <dd class="col-sm-9">@published.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</dd>
+        }
+    </dl>
+
+    <AuthorizeView Roles="methodist,admin">
+        @if (t.Status is "empty" or "draft" or "saved_draft")
+        {
+            <div class="mb-3" style="max-width: 720px">
+                <label class="form-label">DOCX-шаблон оформления с закладками Autofill</label>
+                <div class="input-group">
+                    <InputFile class="form-control" accept=".docx" OnChange="e => printTemplate = e.File" disabled="@busy" />
+                    <button class="btn btn-outline-primary" @onclick="UploadAsync" disabled="@(busy || printTemplate is null)">Загрузить</button>
+                </div>
+            </div>
+        }
+        <div class="d-flex flex-wrap gap-2 mb-3">
+            @if (t.Status == "draft")
+            {
+                <button class="btn btn-secondary" @onclick="@(() => ChangeAsync("save", "Шаблон сохранён."))" disabled="@busy">Сохранить</button>
+            }
+            @if (t.Status is "draft" or "saved_draft")
+            {
+                <button class="btn btn-success" @onclick="@(() => ChangeAsync("publish", "Шаблон опубликован."))" disabled="@busy">Опубликовать</button>
+            }
+            @if (t.Status == "published")
+            {
+                <button class="btn btn-outline-primary" @onclick="CreateRevisionAsync" disabled="@busy">Новая редакция</button>
+                <button class="btn btn-outline-secondary" @onclick="@(() => ChangeAsync("archive", "Шаблон перенесён в архив."))" disabled="@busy">Архивировать</button>
+            }
+            @if (t.Status is "empty" or "draft" or "saved_draft")
+            {
+                <button class="btn btn-outline-danger" @onclick="DeleteAsync" disabled="@busy">Удалить</button>
+            }
+        </div>
+    </AuthorizeView>
+
+    <h2 class="h4 mt-4">Проверка перед публикацией</h2>
+    @if (details.CanPublish)
+    {
+        <p class="text-success">Проверка пройдена: учебный план привязан, шаблон оформления загружен, все закладки сопоставлены.</p>
+    }
+    else
+    {
+        <ul class="text-danger">
+            @foreach (var e in details.Errors)
+            {
+                <li>@e</li>
+            }
+        </ul>
+    }
+
+    <h2 class="h4 mt-4">Закладки шаблона оформления</h2>
+    @if (details.Bookmarks.Count == 0)
+    {
+        <p>Шаблон оформления не загружен.</p>
+    }
+    else
+    {
+        <p>Закладок: @details.Bookmarks.Count, вхождений: @details.Bookmarks.Sum(b => b.Count), не сопоставлено: @details.Bookmarks.Count(b => b.Target is null).</p>
+        <table class="table table-sm">
+            <thead>
+                <tr><th>Закладка</th><th>Вхождений</th><th>Сопоставлена</th><th>Вид цели</th><th>Цель</th><th>Пояснение</th></tr>
+            </thead>
+            <tbody>
+                @foreach (var b in details.Bookmarks)
+                {
+                    <tr class="@(b.Target is null ? "table-danger" : "")">
+                        <td><code>@b.BaseName</code></td>
+                        <td>@b.Count</td>
+                        <td>@(b.Target is null ? "нет" : "да")</td>
+                        <td>@(b.Target is null ? "" : TemplateTitles.Kind(b.Target.Kind))</td>
+                        <td>
+                            @if (b.Target is { } target)
+                            {
+                                <code>@TargetText(target.Kind, target.Target, target.Part)</code>
+                                @foreach (var (name, o) in target.Occurrences ?? [])
+                                {
+                                    <div class="small text-muted">
+                                        <code>@name</code>:
+                                        @if (o.Form is not null) { <span>@TemplateTitles.Form(o.Form) </span> }
+                                        @if (o.Target is not null) { <code>@TargetText(o.Kind ?? target.Kind, o.Target, o.Part ?? target.Part)</code> }
+                                    </div>
+                                }
+                            }
+                        </td>
+                        <td class="small">
+                            @b.Target?.Note
+                            @foreach (var o in (b.Target?.Occurrences ?? []).Values.Where(o => o.Note is not null))
+                            {
+                                <div>@o.Note</div>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+
+    <h2 class="h4 mt-4">Лист согласования</h2>
+    <table class="table table-sm">
+        <thead>
+            <tr><th>Место</th><th>Категория</th><th>Правило определения</th><th>Согласование</th><th>Размещение</th></tr>
+        </thead>
+        <tbody>
+            @foreach (var s in details.Signatures)
+            {
+                <tr>
+                    <td>@s.Title</td>
+                    <td><code>@s.Role</code></td>
+                    <td>@(s.ResolverTitle ?? s.Resolver) <span class="small text-muted"><code>@s.Resolver</code></span></td>
+                    <td>@(s.Electronic ? "электронно" : "на бумаге")</td>
+                    <td>@TemplateTitles.Placement(s.Placement)</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    private const long MaxFileBytes = 10 * 1024 * 1024;
+
+    [Parameter] public Guid? Id { get; set; }
+
+    private TemplateDetails? details;
+    private List<PlanItem> plans = [];
+    private IBrowserFile? printTemplate;
+    private string newType = "rpd";
+    private string newName = "";
+    private string newPlanId = "";
+    private string? message;
+    private bool messageIsError;
+    private List<string> problems = [];
+    private bool busy;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        // Одна страница — и создание, и шаблон: после «Новой редакции» меняется только Id.
+        details = null;
+        printTemplate = null;
+        try
+        {
+            if (Id is null)
+                plans = await Http.GetFromJsonAsync<List<PlanItem>>("api/curriculum-plans") ?? [];
+            else
+                details = await Http.GetFromJsonAsync<TemplateDetails>($"api/templates/{Id}");
+        }
+        catch (AccessTokenNotAvailableException e)
+        {
+            e.Redirect();
+        }
+        catch (HttpRequestException e) when (e.StatusCode == HttpStatusCode.NotFound)
+        {
+            Show("Шаблон не найден.", true);
+        }
+    }
+
+    private async Task CreateAsync()
+    {
+        await RunAsync(async () =>
+        {
+            var response = await Http.PostAsJsonAsync("api/templates",
+                new { type = newType, name = newName.Trim(), curriculumPlanId = Guid.Parse(newPlanId) });
+            if (response.StatusCode == HttpStatusCode.Created &&
+                await response.Content.ReadFromJsonAsync<TemplateDetails>() is { } created)
+            {
+                Show("Шаблон создан. Загрузите DOCX-шаблон оформления.", false);
+                Navigation.NavigateTo($"templates/{created.Template.Id}");
+            }
+            else
+                await ShowProblemAsync(response);
+        });
+    }
+
+    private async Task UploadAsync()
+    {
+        await RunAsync(async () =>
+        {
+            using var form = new MultipartFormDataContent();
+            var file = new StreamContent(printTemplate!.OpenReadStream(MaxFileBytes));
+            file.Headers.ContentType = new MediaTypeHeaderValue(
+                string.IsNullOrEmpty(printTemplate.ContentType) ? "application/octet-stream" : printTemplate.ContentType);
+            form.Add(file, "file", printTemplate.Name);
+            form.Add(new StringContent(details!.Template.Version.ToString()), "version");
+
+            await ApplyAsync(await Http.PostAsync($"api/templates/{Id}/print-template", form), "Шаблон оформления загружен.");
+        });
+    }
+
+    private async Task ChangeAsync(string action, string done)
+    {
+        await RunAsync(async () => await ApplyAsync(
+            await Http.PostAsJsonAsync($"api/templates/{Id}/{action}", new { version = details!.Template.Version }), done));
+    }
+
+    private async Task CreateRevisionAsync()
+    {
+        await RunAsync(async () =>
+        {
+            var response = await Http.PostAsJsonAsync($"api/templates/{Id}/revisions", new { version = details!.Template.Version });
+            if (response.StatusCode == HttpStatusCode.Created &&
+                await response.Content.ReadFromJsonAsync<TemplateDetails>() is { } revision)
+            {
+                Show($"Создана редакция {revision.Template.Revision}. Прежняя остаётся опубликованной до публикации новой.", false);
+                Navigation.NavigateTo($"templates/{revision.Template.Id}");
+            }
+            else
+                await ShowProblemAsync(response);
+        });
+    }
+
+    private async Task DeleteAsync()
+    {
+        if (!await JS.InvokeAsync<bool>("confirm", $"Удалить шаблон «{details!.Template.Name}»?"))
+            return;
+        await RunAsync(async () =>
+        {
+            var response = await Http.DeleteAsync($"api/templates/{Id}?version={details!.Template.Version}");
+            if (response.StatusCode == HttpStatusCode.NoContent)
+                Navigation.NavigateTo("templates");
+            else
+                await ShowProblemAsync(response);
+        });
+    }
+
+    private async Task ApplyAsync(HttpResponseMessage response, string done)
+    {
+        if (response.IsSuccessStatusCode && await response.Content.ReadFromJsonAsync<TemplateDetails>() is { } updated)
+        {
+            details = updated;
+            printTemplate = null;
+            Show(done, false);
+        }
+        else
+            await ShowProblemAsync(response);
+    }
+
+    private async Task RunAsync(Func<Task> action)
+    {
+        busy = true;
+        message = null;
+        problems = [];
+        try
+        {
+            await action();
+        }
+        catch (AccessTokenNotAvailableException e)
+        {
+            e.Redirect();
+        }
+        catch (IOException e)
+        {
+            Show($"Файл не прочитан: {e.Message}", true);
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private async Task ShowProblemAsync(HttpResponseMessage response)
+    {
+        TemplateProblem? problem = null;
+        try
+        {
+            problem = await response.Content.ReadFromJsonAsync<TemplateProblem>();
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            // Тело не ProblemDetails — достаточно кода ответа.
+        }
+        var text = response.StatusCode switch
+        {
+            HttpStatusCode.Forbidden => "Недостаточно прав или учётная запись не связана со справочником сотрудников (403).",
+            HttpStatusCode.Conflict when problem?.Title == "Конфликт версий" =>
+                "Шаблон изменён в другой сессии. Обновите страницу и повторите действие.",
+            _ => problem is null ? $"Ответ сервера: {(int)response.StatusCode}" :
+                problem.Errors is { Count: > 0 } ? problem.Title ?? "" : $"{problem.Title}. {problem.Detail}"
+        };
+        Show(text, true);
+        problems = problem?.Errors ?? [];
+    }
+
+    private void Show(string text, bool isError) => (message, messageIsError) = (text, isError);
+
+    // Цель закладки: для подписи — место и часть, для остальных — путь, поле, построитель или текст.
+    private string TargetText(string kind, string target, string? part) => kind == "signature"
+        ? $"{details?.Signatures.FirstOrDefault(s => s.Id == target)?.Title ?? target} · {TemplateTitles.Part(part)}"
+        : target;
+}

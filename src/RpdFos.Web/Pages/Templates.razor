@@ -1,21 +1,52 @@
 @page "/templates"
 @attribute [Authorize]
-@using System.Net
 @using System.Net.Http.Json
 @using Microsoft.AspNetCore.Authorization
 @using Microsoft.AspNetCore.Components.WebAssembly.Authentication
+@using RpdFos.Web.Models
 @inject HttpClient Http
+@inject NavigationManager Navigation
 
 <PageTitle>Шаблоны</PageTitle>
 
 <h1>Шаблоны</h1>
 
-<button class="btn btn-primary mb-3" @onclick="CreateTestTemplateAsync">Создать тестовый шаблон</button>
+<AuthorizeView Roles="methodist,admin">
+    <a class="btn btn-primary mb-3" href="templates/new">Создать шаблон</a>
+</AuthorizeView>
 
-@if (message is not null)
-{
-    <p>@message</p>
-}
+<div class="row g-2 mb-3" style="max-width: 960px">
+    <div class="col-md-2">
+        <label class="form-label">Тип</label>
+        <select class="form-select" @bind="type" @bind:after="LoadAsync">
+            <option value="">Все</option>
+            @foreach (var (typeCode, typeTitle) in TemplateTitles.Types)
+            {
+                <option value="@typeCode">@typeTitle</option>
+            }
+        </select>
+    </div>
+    <div class="col-md-3">
+        <label class="form-label">Статус</label>
+        <select class="form-select" @bind="status" @bind:after="LoadAsync">
+            <option value="">Все</option>
+            @foreach (var (statusCode, statusTitle) in TemplateTitles.Statuses)
+            {
+                <option value="@statusCode">@statusTitle</option>
+            }
+        </select>
+    </div>
+    <div class="col-md-7">
+        <label class="form-label">Учебный план</label>
+        <select class="form-select" @bind="planId" @bind:after="LoadAsync">
+            <option value="">Все</option>
+            @foreach (var p in plans)
+            {
+                <option value="@p.Id">@p.Title</option>
+            }
+        </select>
+    </div>
+</div>
 
 @if (items is null)
 {
@@ -23,18 +54,24 @@
 }
 else if (items.Count == 0)
 {
-    <p>Шаблонов пока нет.</p>
+    <p>Шаблонов нет.</p>
 }
 else
 {
-    <table class="table">
+    <table class="table table-hover">
         <thead>
-            <tr><th>Название</th><th>Тип</th><th>Статус</th><th>Версия</th></tr>
+            <tr><th>Название</th><th>Тип</th><th>Учебный план</th><th>Редакция</th><th>Статус</th></tr>
         </thead>
         <tbody>
             @foreach (var t in items)
             {
-                <tr><td>@t.Name</td><td>@t.Type</td><td>@t.Status</td><td>@t.Version</td></tr>
+                <tr role="button" @onclick="@(() => Navigation.NavigateTo($"templates/{t.Id}"))">
+                    <td>@t.Name</td>
+                    <td>@t.TypeTitle</td>
+                    <td>@(t.Plan?.Title ?? "—")</td>
+                    <td>@t.Revision</td>
+                    <td>@t.StatusTitle</td>
+                </tr>
             }
         </tbody>
     </table>
@@ -42,46 +79,38 @@ else
 
 @code {
     private List<TemplateItem>? items;
-    private string? message;
+    private List<PlanItem> plans = [];
+    private string type = "";
+    private string status = "";
+    private string planId = "";
 
-    protected override async Task OnInitializedAsync() => await LoadAsync();
-
-    private async Task LoadAsync()
+    protected override async Task OnInitializedAsync()
     {
         try
         {
-            items = await Http.GetFromJsonAsync<List<TemplateItem>>("api/templates");
+            plans = await Http.GetFromJsonAsync<List<PlanItem>>("api/curriculum-plans") ?? [];
         }
         catch (AccessTokenNotAvailableException e)
         {
-            e.Redirect();
-        }
-    }
-
-    // Проверка ролей: методист и администратор получат 201, преподаватель — 403.
-    private async Task CreateTestTemplateAsync()
-    {
-        HttpResponseMessage response;
-        try
-        {
-            response = await Http.PostAsJsonAsync("api/templates",
-                new { type = "rpd", name = $"Тестовый {DateTime.Now:HH:mm:ss}", year = 2026 });
-        }
-        catch (AccessTokenNotAvailableException e)
-        {
-            // Токен истёк и не обновился — на вход, а не падение страницы.
             e.Redirect();
             return;
         }
-
-        message = response.StatusCode switch
-        {
-            HttpStatusCode.Created => "Шаблон создан.",
-            HttpStatusCode.Forbidden => "Недостаточно прав: создавать шаблоны могут методист и администратор (403).",
-            _ => $"Ответ сервера: {(int)response.StatusCode}"
-        };
         await LoadAsync();
     }
 
-    private sealed record TemplateItem(Guid Id, string Type, string Name, string Status, int Version, int Year);
+    private async Task LoadAsync()
+    {
+        var query = new List<string>();
+        if (type.Length > 0) query.Add($"type={type}");
+        if (status.Length > 0) query.Add($"status={status}");
+        if (planId.Length > 0) query.Add($"planId={planId}");
+        try
+        {
+            items = await Http.GetFromJsonAsync<List<TemplateItem>>("api/templates" + (query.Count > 0 ? "?" + string.Join("&", query) : ""));
+        }
+        catch (AccessTokenNotAvailableException e)
+        {
+            e.Redirect();
+        }
+    }
 }
