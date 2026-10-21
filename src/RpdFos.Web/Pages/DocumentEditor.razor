@@ -336,11 +336,12 @@ else
         await LoadAsync();
     }
 
-    // Текст раздела без разметки — чтобы вставить его после перезагрузки.
+    // Введённое в разделе — тексты без разметки и числа, каждое с местом в разделе («№ 1 → Лекции: 4»): после
+    // перезагрузки по этому списку всё вводится заново. Поля только для чтения (из плана, запись справочника) пропускаются.
     private async Task CopyMineAsync()
     {
         var texts = new List<string>();
-        Collect(current is null ? null : payload?[current]);
+        if (current is not null) Collect(payload?[current], SectionSchema(current), $"/{current}");
         copied = string.Join(Environment.NewLine + Environment.NewLine, texts);
         try
         {
@@ -351,21 +352,34 @@ else
             // Буфер обмена недоступен — текст остаётся в поле под кнопкой.
         }
 
-        void Collect(JsonNode? node)
+        void Collect(JsonNode? node, JsonElement schema, string path)
         {
+            if (schema.ValueKind == JsonValueKind.Object && context!.IsReadOnly(path, schema)) return;
             switch (node)
             {
-                case JsonValue v when v.TryGetValue(out string? s) && !string.IsNullOrWhiteSpace(s):
-                    texts.Add(Regex.Replace(Regex.Replace(s, "</p>|<br ?/?>|</li>", "\n"), "<[^>]*>", "").Trim());
+                case JsonValue v when v.TryGetValue(out string? s):
+                    if (!string.IsNullOrWhiteSpace(s))
+                        Add(path, Regex.Replace(Regex.Replace(s, "</p>|<br ?/?>|</li>", "\n"), "<[^>]*>", "").Trim());
+                    break;
+                case JsonValue v when v.GetValueKind() == JsonValueKind.Number:
+                    Add(path, v.ToString());
                     break;
                 case JsonObject o:
-                    foreach (var p in o) Collect(p.Value);
+                    foreach (var (key, value) in o) Collect(value, Property(schema, key), $"{path}/{key}");
                     break;
                 case JsonArray a:
-                    foreach (var item in a) Collect(item);
+                    var items = schema.ValueKind == JsonValueKind.Object && schema.TryGetProperty("items", out var i)
+                        ? context!.Resolve(i) : default;
+                    for (var k = 0; k < a.Count; k++) Collect(a[k], items, $"{path}/{k}");
                     break;
             }
         }
+
+        JsonElement Property(JsonElement schema, string key) =>
+            schema.ValueKind == JsonValueKind.Object && schema.TryGetProperty("properties", out var p) && p.TryGetProperty(key, out var s)
+                ? context!.Resolve(s) : default;
+
+        void Add(string path, string text) => texts.Add($"{context!.FieldTitle(path)}: {text}");
     }
 
     private static string FillMark(SectionState s) => s.Fill switch
