@@ -55,7 +55,7 @@ public static class ValidationRules
     };
 }
 
-/// <summary>Именованные построители таблиц DOCX (цели вида <c>table</c>). Реализация — этап 5.</summary>
+/// <summary>Именованные построители таблиц DOCX (цели вида <c>table</c>); реализация — Printing/DocxTables, fos_passport — этап 6.</summary>
 public static class TableBuilders
 {
     public static readonly IReadOnlyDictionary<string, string> All = new Dictionary<string, string>
@@ -70,8 +70,8 @@ public static class TableBuilders
 }
 
 /// <summary>
-/// Правила определения подписантов (резолверы) в листе согласования шаблона. Только имена —
-/// выполнение на этапе 6.
+/// Правила определения подписантов (резолверы) в листе согласования шаблона; выполняет их цепочка
+/// <see cref="RpdFos.Core.Documents.SignatoryResolution"/> (этап 5).
 /// </summary>
 public static class SignatureResolvers
 {

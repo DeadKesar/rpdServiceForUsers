@@ -6,6 +6,7 @@ using RpdFos.Core.Directory;
 using RpdFos.Core.Documents;
 using RpdFos.Core.DocumentTypes;
 using RpdFos.Core.Import;
+using RpdFos.Core.Printing;
 using RpdFos.Core.Templates;
 
 namespace RpdFos.Core;
@@ -45,6 +46,10 @@ public static class DependencyInjection
         services.AddScoped<DocumentEditing>();
         services.AddScoped<DocumentReview>();
         services.AddScoped<SignatoryResolution>();
+        // Печатные формы: хранилище сформированных файлов на диске, настройки — раздел Generation.
+        services.AddOptions<GenerationSettings>();
+        services.AddSingleton<GeneratedFileStore>();
+        services.AddScoped<DocumentPrinting>();
         return services;
     }
 }

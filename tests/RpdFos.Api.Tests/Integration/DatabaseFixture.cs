@@ -31,6 +31,9 @@ public class DatabaseFixture : WebApplicationFactory<Program>, IAsyncLifetime
 
     private readonly PostgreSqlContainer _db = new PostgreSqlBuilder("postgres:17-alpine").Build();
 
+    /// <summary>Каталог сформированных файлов этого хоста.</summary>
+    public string GeneratedFiles { get; } = Path.Combine(Path.GetTempPath(), "rpdfos-tests", Guid.NewGuid().ToString("N"));
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         // Testing: appsettings.Development.json не загружается, автомиграций и засева нет.
@@ -39,6 +42,8 @@ public class DatabaseFixture : WebApplicationFactory<Program>, IAsyncLifetime
         // Фоновые задачи — на той же базе в контейнере; очередь опрашивается раз в секунду, чтобы тесты не ждали.
         builder.UseSetting("Jobs:Enabled", JobsEnabled ? "true" : "false");
         builder.UseSetting("Jobs:QueuePollSeconds", "1");
+        // Сформированные файлы — во временный каталог: тесты не пишут в каталог приложения.
+        builder.UseSetting("Generation:StoragePath", GeneratedFiles);
 
         builder.ConfigureTestServices(services =>
         {
@@ -122,6 +127,7 @@ public class DatabaseFixture : WebApplicationFactory<Program>, IAsyncLifetime
     {
         await DisposeAsync();
         await _db.DisposeAsync();
+        if (System.IO.Directory.Exists(GeneratedFiles)) System.IO.Directory.Delete(GeneratedFiles, recursive: true);
     }
 }
 

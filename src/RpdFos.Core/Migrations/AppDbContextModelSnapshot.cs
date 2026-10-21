@@ -1579,6 +1579,125 @@ namespace RpdFos.Core.Migrations
                     b.ToTable("fgos", (string)null);
                 });
 
+            modelBuilder.Entity("RpdFos.Core.Data.Entities.GeneratedFile", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<DateTimeOffset>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("expires_at");
+
+                    b.Property<string>("FileName")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("file_name");
+
+                    b.Property<string>("Format")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("format");
+
+                    b.Property<Guid>("GenerationTaskId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("generation_task_id");
+
+                    b.Property<long>("SizeBytes")
+                        .HasColumnType("bigint")
+                        .HasColumnName("size_bytes");
+
+                    b.Property<string>("StoragePath")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)")
+                        .HasColumnName("storage_path");
+
+                    b.HasKey("Id")
+                        .HasName("pk_generated_files");
+
+                    b.HasIndex("ExpiresAt")
+                        .HasDatabaseName("ix_generated_files_expires_at");
+
+                    b.HasIndex("GenerationTaskId")
+                        .HasDatabaseName("ix_generated_files_generation_task_id");
+
+                    b.ToTable("generated_files", (string)null);
+                });
+
+            modelBuilder.Entity("RpdFos.Core.Data.Entities.GenerationTask", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset?>("CompletedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("completed_at");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid>("DocumentId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("document_id");
+
+                    b.Property<string>("ErrorMessage")
+                        .HasColumnType("text")
+                        .HasColumnName("error_message");
+
+                    b.Property<string>("Format")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("format");
+
+                    b.Property<string>("HangfireJobId")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("hangfire_job_id");
+
+                    b.Property<string>("Report")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("report");
+
+                    b.Property<Guid>("RequestedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("requested_by");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("status");
+
+                    b.HasKey("Id")
+                        .HasName("pk_generation_tasks");
+
+                    b.HasIndex("RequestedBy")
+                        .HasDatabaseName("ix_generation_tasks_requested_by");
+
+                    b.HasIndex("DocumentId", "CreatedAt")
+                        .IsDescending(false, true)
+                        .HasDatabaseName("ix_generation_tasks_document_id_created_at");
+
+                    b.ToTable("generation_tasks", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_generation_tasks_format", "format IN ('docx', 'pdf')");
+
+                            t.HasCheckConstraint("ck_generation_tasks_status", "status IN ('queued', 'running', 'succeeded', 'failed')");
+                        });
+                });
+
             modelBuilder.Entity("RpdFos.Core.Data.Entities.Institute", b =>
                 {
                     b.Property<Guid>("Id")
@@ -2196,6 +2315,33 @@ namespace RpdFos.Core.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_fgos_study_directions_direction_id");
+                });
+
+            modelBuilder.Entity("RpdFos.Core.Data.Entities.GeneratedFile", b =>
+                {
+                    b.HasOne("RpdFos.Core.Data.Entities.GenerationTask", null)
+                        .WithMany()
+                        .HasForeignKey("GenerationTaskId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_generated_files_generation_tasks_generation_task_id");
+                });
+
+            modelBuilder.Entity("RpdFos.Core.Data.Entities.GenerationTask", b =>
+                {
+                    b.HasOne("RpdFos.Core.Data.Entities.Document", null)
+                        .WithMany()
+                        .HasForeignKey("DocumentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_generation_tasks_documents_document_id");
+
+                    b.HasOne("RpdFos.Core.Data.Entities.Employee", null)
+                        .WithMany()
+                        .HasForeignKey("RequestedBy")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_generation_tasks_users_requested_by");
                 });
 
             modelBuilder.Entity("RpdFos.Core.Data.Entities.ParserRun", b =>

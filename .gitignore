@@ -6,3 +6,7 @@ TestResults/
 *.user
 *.suo
 appsettings.Local.json
+
+# Сформированные печатные формы (dev) и файлы для проверки автором
+src/RpdFos.Api/storage/
+out/

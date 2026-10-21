@@ -17,6 +17,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<DocumentCompetenceLink> DocumentCompetenceLinks => Set<DocumentCompetenceLink>();
     public DbSet<DocumentStatusChange> DocumentStatusHistory => Set<DocumentStatusChange>();
     public DbSet<DocumentComment> DocumentComments => Set<DocumentComment>();
+    public DbSet<GenerationTask> GenerationTasks => Set<GenerationTask>();
+    public DbSet<GeneratedFile> GeneratedFiles => Set<GeneratedFile>();
 
     // Справочники (контекст Reference) и справочник сотрудников.
     public DbSet<Institute> Institutes => Set<Institute>();

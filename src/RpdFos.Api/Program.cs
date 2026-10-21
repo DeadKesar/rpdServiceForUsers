@@ -12,6 +12,7 @@ using RpdFos.Core;
 using RpdFos.Core.Data;
 using RpdFos.Core.Data.Entities;
 using RpdFos.Core.Documents;
+using RpdFos.Core.Printing;
 using Swashbuckle.AspNetCore.SwaggerUI;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -22,6 +23,10 @@ var connectionString = builder.Configuration.GetConnectionString("Default")
 builder.Services.AddCore(connectionString);
 // Настройки правил проверки содержимого: например, предельный возраст основной литературы.
 builder.Services.Configure<ValidationRuleSettings>(builder.Configuration.GetSection("ValidationRules"));
+// Сформированные файлы: каталог и срок хранения; относительный каталог — от каталога приложения.
+builder.Services.Configure<GenerationSettings>(builder.Configuration.GetSection("Generation"));
+builder.Services.PostConfigure<GenerationSettings>(o =>
+    o.StoragePath = Path.GetFullPath(o.StoragePath, builder.Environment.ContentRootPath));
 
 // Учётные записи: ASP.NET Core Identity. Пароли хранятся только здесь, в виде хеша.
 builder.Services.AddIdentity<AppUser, IdentityRole<Guid>>(o =>

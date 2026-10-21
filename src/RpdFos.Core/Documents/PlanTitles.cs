@@ -43,6 +43,29 @@ public static class PlanTitles
         _ => form
     };
 
+    /// <summary>
+    /// Квалификация — производная от уровня: явной квалификации в разобранном плане нет. Аспирантура — без
+    /// квалификации в этом смысле, остаётся уровнем.
+    /// </summary>
+    public static string Qualification(string level) => level switch
+    {
+        EducationLevels.Bachelor => "бакалавр",
+        EducationLevels.Master => "магистр",
+        EducationLevels.Specialist => "специалист",
+        _ => EducationLevel(level)
+    };
+
+    /// <summary>Вид промежуточной аттестации — как в x-enum-titles схемы РПД.</summary>
+    public static string ControlType(string type) => type switch
+    {
+        "exam" => "Экзамен",
+        "credit" => "Зачёт",
+        "graded_credit" => "Зачёт с оценкой",
+        "course_project" => "Курсовой проект",
+        "course_work" => "Курсовая работа",
+        _ => type
+    };
+
     /// <summary>Учебный год начала изучения: год набора и первый семестр (1–2 — первый курс).</summary>
     public static string AcademicYear(int admissionYear, int firstSemester)
     {
