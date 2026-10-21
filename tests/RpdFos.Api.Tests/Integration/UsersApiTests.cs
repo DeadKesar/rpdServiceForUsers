@@ -125,6 +125,51 @@ public class UsersApiTests(DatabaseFixture app)
     }
 
     [Theory]
+    [InlineData(AppRoles.Teacher)]
+    [InlineData(AppRoles.Methodist)]
+    [InlineData(AppRoles.Admin)]
+    public async Task Author_search_finds_active_records_with_and_without_account(string role)
+    {
+        // Составителем может быть и сотрудник без входа в систему: в поиск авторов попадают обе записи, неактивная — нет.
+        var stem = "Липов" + Guid.NewGuid().ToString("N")[..6];
+        var department = new Department { Code = stem, Name = $"Кафедра {stem}", ShortName = stem };
+        Employee Record(string surname, bool linked = false, bool active = true) => new()
+        {
+            ShortName = $"{surname} Л. Л.", NameForDocument = $"Л. Л. {surname}", Position = "доцент", DepartmentId = department.Id,
+            CanLogin = linked, IsActive = active, IdentitySubject = linked ? Guid.NewGuid().ToString() : null,
+            Email = linked ? NewEmail() : null, CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow
+        };
+        var free = Record(stem + "ов");
+        var linked = Record(stem + "ин", linked: true);
+        await app.WithDbAsync(async db =>
+        {
+            db.Departments.Add(department);
+            db.Employees.AddRange(free, linked, Record(stem + "ев", active: false));
+            await db.SaveChangesAsync();
+        });
+
+        var found = await app.CreateClientFor(role)
+            .GetFromJsonAsync<List<DirectoryPersonItem>>($"/api/directory?surname={stem.ToUpperInvariant()}");
+
+        // По алфавиту: «…ин» раньше «…ов».
+        Assert.Equal(
+            [
+                new DirectoryPersonItem(linked.Id, linked.ShortName, linked.NameForDocument, "доцент", stem),
+                new DirectoryPersonItem(free.Id, free.ShortName, free.NameForDocument, "доцент", stem)
+            ],
+            found!);
+    }
+
+    [Fact]
+    public async Task Approver_cannot_search_directory()
+    {
+        // Поиск составителей нужен тому, кто пишет документ; утверждающий документов не пишет.
+        var response = await app.CreateClientFor(AppRoles.Approver).GetAsync("/api/directory?surname=А");
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Theory]
     [InlineData("/api/admin/users")]
     [InlineData("/api/admin/directory?surname=А")]
     public async Task Teacher_cannot_read_accounts_or_directory(string url)

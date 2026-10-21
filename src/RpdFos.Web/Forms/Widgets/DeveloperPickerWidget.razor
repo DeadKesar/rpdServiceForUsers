@@ -1,0 +1,139 @@
+@using System.Net.Http.Json
+@using System.Text.Json
+@using System.Text.Json.Nodes
+@using Microsoft.AspNetCore.Components.WebAssembly.Authentication
+@using RpdFos.Web.Models
+@inherits FieldBase
+@inject HttpClient Http
+
+@* Составители — по порядку в документе. Добавляются выбором из справочника сотрудников: подпись и должность
+   копируются на момент ввода, уточнить их можно в таблице. *@
+<div class="mb-3">
+    <label class="form-label">@Title</label>
+    @{ var rows = Value as JsonArray; }
+    @if ((rows?.Count ?? 0) > 0)
+    {
+        <table class="table table-sm align-middle">
+            <thead class="table-light">
+                <tr><th>№</th><th>@ColumnTitle("name_for_document")</th><th>@ColumnTitle("position")</th><th></th></tr>
+            </thead>
+            <tbody>
+                @for (var i = 0; i < rows!.Count; i++)
+                {
+                    var index = i;
+                    if (rows[index] is not JsonObject row) continue;
+                    <tr>
+                        <td>@(index + 1)</td>
+                        @foreach (var column in Columns)
+                        {
+                            <td>
+                                <ScalarInput Context="Context" Schema="Column(column)" Parent="row" Key="@column"
+                                             Path="@($"{Path}/{index}/{column}")" Compact="true" />
+                            </td>
+                        }
+                        <td class="text-end">
+                            @if (!ReadOnly)
+                            {
+                                <button class="btn btn-sm btn-outline-secondary" type="button" title="Убрать из составителей"
+                                        @onclick="() => Remove(index)">✕</button>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+    @if (!ReadOnly)
+    {
+        <div class="input-group input-group-sm" style="max-width: 32rem">
+            <input class="form-control" placeholder="Фамилия составителя" @bind="surname" @bind:event="oninput"
+                   @onkeydown="OnKeyDownAsync" />
+            <button type="button" class="btn btn-outline-primary" @onclick="SearchAsync">Найти</button>
+        </div>
+        @if (searchError is not null)
+        {
+            <div class="form-text text-danger">@searchError</div>
+        }
+        else if (found is { Count: 0 })
+        {
+            <div class="form-text">В справочнике сотрудников нет активных записей с такой фамилией.</div>
+        }
+        else if (found is not null)
+        {
+            <ul class="list-group mt-1" style="max-width: 32rem">
+                @foreach (var person in found)
+                {
+                    <li class="list-group-item d-flex justify-content-between align-items-center gap-2 py-1">
+                        <span>@person.ShortName <span class="text-muted small">@Details(person)</span></span>
+                        @if (IsAdded(person.Id))
+                        {
+                            <span class="text-muted small text-nowrap">уже в списке</span>
+                        }
+                        else
+                        {
+                            <button type="button" class="btn btn-sm btn-outline-primary" @onclick="() => Add(person)">Добавить</button>
+                        }
+                    </li>
+                }
+            </ul>
+        }
+    }
+    @if (Hint is not null)
+    {
+        <div class="form-text">@Hint</div>
+    }
+</div>
+
+@code {
+    // Запись справочника (user_id) в таблице не показывается: составитель выбирается только из поиска.
+    private static readonly string[] Columns = ["name_for_document", "position"];
+
+    private string surname = "";
+    private List<DirectoryPerson>? found;
+    private string? searchError;
+
+    private JsonElement Column(string name) =>
+        Items.TryGetProperty("properties", out var p) && p.TryGetProperty(name, out var column) ? Context.Resolve(column) : default;
+
+    private string ColumnTitle(string name) => SchemaContext.Text(Column(name), "title") ?? name;
+
+    private static string Details(DirectoryPerson person) =>
+        string.Join(", ", new[] { person.Position, person.Department }.Where(s => !string.IsNullOrWhiteSpace(s)));
+
+    private bool IsAdded(Guid id) =>
+        (Value as JsonArray ?? []).OfType<JsonObject>().Any(r => Text(r["user_id"]) == id.ToString());
+
+    private Task OnKeyDownAsync(KeyboardEventArgs e) => e.Key == "Enter" ? SearchAsync() : Task.CompletedTask;
+
+    private async Task SearchAsync()
+    {
+        searchError = null;
+        try
+        {
+            found = await Http.GetFromJsonAsync<List<DirectoryPerson>>($"api/directory?surname={Uri.EscapeDataString(surname.Trim())}");
+        }
+        catch (AccessTokenNotAvailableException e)
+        {
+            e.Redirect();
+        }
+        catch (HttpRequestException)
+        {
+            (found, searchError) = (null, "Поиск не выполнен: сервер недоступен или отказал. Попробуйте ещё раз.");
+        }
+    }
+
+    private void Add(DirectoryPerson person)
+    {
+        var developer = new JsonObject { ["user_id"] = person.Id.ToString(), ["name_for_document"] = person.NameForDocument };
+        if (!string.IsNullOrWhiteSpace(person.Position)) developer["position"] = person.Position;
+        EnsureArray().Add(developer);
+        (found, surname) = (null, "");
+        Context.Changed();
+    }
+
+    private void Remove(int index)
+    {
+        EnsureArray().RemoveAt(index);
+        Context.Changed();
+    }
+}

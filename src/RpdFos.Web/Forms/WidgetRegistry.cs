@@ -17,6 +17,7 @@ public static class WidgetRegistry
         ["hours_table"] = typeof(HoursTableWidget),
         ["topic_plan_table"] = typeof(TopicPlanWidget),
         ["competence_picker"] = typeof(CompetencePickerWidget),
+        ["developer_picker"] = typeof(DeveloperPickerWidget),
         ["class_table"] = typeof(ObjectTableWidget),
         ["literature_list"] = typeof(ObjectTableWidget)
     };

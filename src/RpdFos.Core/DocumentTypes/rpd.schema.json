@@ -419,6 +419,7 @@
           "title": "Составители",
           "description": "По порядку в документе; первый — автор документа",
           "x-source": "db.user.current",
+          "x-ui-widget": "developer_picker",
           "minItems": 1,
           "items": {
             "type": "object",

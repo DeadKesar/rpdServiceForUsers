@@ -7,9 +7,13 @@ using RpdFos.Core.Data.Entities;
 namespace RpdFos.Api.Features.Directory;
 
 /// <summary>
-/// Срез «Справочник сотрудников» (для Администратора): поиск записей без учётной записи — чтобы при создании
-/// учётной записи привязать её к существующей записи (заведующий или директор из файла должностей входит
-/// «самим собой», а не новой записью справочника).
+/// Срез «Справочник сотрудников»: поиск записей по началу фамилии.
+/// <list type="bullet">
+/// <item>Администратору — записи без учётной записи: при создании учётной записи её привязывают к существующей записи
+/// (заведующий или директор из файла должностей входит «самим собой», а не новой записью справочника).</item>
+/// <item>Авторам документов — все активные записи, с учётной записью и без: составитель РПД может и не входить
+/// в систему.</item>
+/// </list>
 /// </summary>
 public class DirectoryModule : ICarterModule
 {
@@ -17,19 +21,35 @@ public class DirectoryModule : ICarterModule
 
     public void AddRoutes(IEndpointRouteBuilder app)
     {
-        var g = app.MapGroup("/api/admin/directory").WithTags("Directory").RequireAuthorization(Policies.Admin);
+        var admin = app.MapGroup("/api/admin/directory").WithTags("Directory").RequireAuthorization(Policies.Admin);
 
-        // Поиск по началу фамилии («Фамилия И. О.»), без учёта регистра; пустой запрос — первые по алфавиту.
-        g.MapGet("/", async (string? surname, AppDbContext db, CancellationToken ct) =>
+        admin.MapGet("/", async (string? surname, AppDbContext db, CancellationToken ct) =>
         {
-            var query = db.Employees.Where(e => e.IsActive && e.IdentitySubject == null);
-            if (!string.IsNullOrWhiteSpace(surname))
-            {
-                var prefix = surname.Trim().ToLower();
-                query = query.Where(e => e.ShortName.ToLower().StartsWith(prefix));
-            }
+            var query = BySurname(db.Employees.Where(e => e.IsActive && e.IdentitySubject == null), surname);
             return await DirectoryRecordItem.Project(query.OrderBy(e => e.ShortName).Take(MaxResults), db).ToListAsync(ct);
         });
+
+        var authors = app.MapGroup("/api/directory").WithTags("Directory").RequireAuthorization(Policies.DocumentAuthors);
+
+        // Составители документа: подпись для документа и должность копируются в лист согласования, кафедра — чтобы
+        // различить однофамильцев.
+        authors.MapGet("/", async (string? surname, AppDbContext db, CancellationToken ct) =>
+        {
+            var query = BySurname(db.Employees.Where(e => e.IsActive), surname);
+            return await query.OrderBy(e => e.ShortName).Take(MaxResults)
+                .Select(e => new DirectoryPersonItem(
+                    e.Id, e.ShortName, e.NameForDocument, e.Position,
+                    db.Departments.Where(d => d.Id == e.DepartmentId).Select(d => d.ShortName).FirstOrDefault()))
+                .ToListAsync(ct);
+        });
+    }
+
+    // Поиск по началу фамилии («Фамилия И. О.»), без учёта регистра; пустой запрос — первые по алфавиту.
+    private static IQueryable<Employee> BySurname(IQueryable<Employee> query, string? surname)
+    {
+        if (string.IsNullOrWhiteSpace(surname)) return query;
+        var prefix = surname.Trim().ToLower();
+        return query.Where(e => e.ShortName.ToLower().StartsWith(prefix));
     }
 }
 
@@ -43,3 +63,6 @@ public record DirectoryRecordItem(
             db.Departments.Where(d => d.Id == e.DepartmentId).Select(d => d.ShortName).FirstOrDefault(),
             e.IsActive));
 }
+
+/// <summary>Сотрудник для выбора составителя: «Фамилия И. О.», подпись «И. О. Фамилия», должность, кафедра.</summary>
+public record DirectoryPersonItem(Guid Id, string ShortName, string NameForDocument, string? Position, string? Department);
