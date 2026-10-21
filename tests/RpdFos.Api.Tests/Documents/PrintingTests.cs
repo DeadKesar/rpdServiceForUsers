@@ -1,3 +1,6 @@
+using System.Text.Json;
+using RpdFos.Core.Data.Entities;
+using RpdFos.Core.Documents;
 using RpdFos.Core.DocumentTypes;
 using RpdFos.Core.Printing;
 using Xunit;
@@ -39,4 +42,34 @@ public class PrintingTests
 
     [Fact]
     public void Unknown_value_has_no_form() => Assert.Null(Declension.Form("Программная инженерия", WordForms.Gen));
+
+    [Fact]
+    public void Fields_print_by_schema()
+    {
+        var registry = new DocumentTypeRegistry();
+        var schema = JsonDocument.Parse(registry.Get(DocumentTypeRegistry.Rpd).SchemaJson).RootElement;
+        var payload = JsonDocument.Parse("""
+            {
+              "literature": { "main": [ { "citation": "Советов Б. Я. Моделирование систем. — М. : Юрайт, 2023. — 343 с.", "year": 2023 } ],
+                              "internet_resources": [ { "title": "ЭБС", "url": "https://example.org" } ] },
+              "approval_sheet": { "department_protocol": { "number": "3", "date": "2026-10-05" } },
+              "course_work": { "kind": "course_project" }
+            }
+            """).RootElement;
+        var facts = new DisciplineFacts(
+            new Discipline { Name = "Дисциплина", Semesters = [new DisciplineSemesterDetails { Semester = 1, Lectures = 16, ControlTypes = ["exam"] }] },
+            new CurriculumPlan(), new StudyDirection(), new StudyProfile(), null, []);
+        var context = new PrintContext(payload, schema, registry.FindSchema, facts, new SignatoryReport([], []), 2026,
+            DocumentMetadata.Hidden(schema, facts, registry.FindSchema));
+
+        // Литература — нумерованным списком, только библиографическая запись: год в ней уже есть.
+        var main = context.Field("/literature/main");
+        Assert.Equal(("Советов Б. Я. Моделирование систем. — М. : Юрайт, 2023. — 343 с.", PrintListKind.Numbered),
+            (main.Paragraphs.Single().PlainText, main.Paragraphs[0].List));
+        Assert.Equal("ЭБС // Режим доступа: https://example.org", context.Field("/literature/internet_resources").Inline);
+        Assert.Equal("«05» октября 2026 г.", context.Field("/approval_sheet/department_protocol/date").Inline);
+        // Курсового проекта по плану нет — стандартная формулировка вместо содержимого раздела.
+        Assert.Equal("В учебном плане курсовое проектирование для данной дисциплины не предусмотрено.", context.Field("/course_work").Inline);
+        Assert.True(context.Field("/goals_and_objectives/goals").IsEmpty);
+    }
 }

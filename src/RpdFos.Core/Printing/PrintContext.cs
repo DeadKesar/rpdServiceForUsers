@@ -99,23 +99,33 @@ public sealed class PrintContext(
         {
             case JsonValueKind.String when widget == "richtext":
                 return new PrintValue(RichTextBlocks.Parse(value.GetString() ?? "", NextListId));
+            case JsonValueKind.String when Text(schema, "format") == "date" && DateOnly.TryParse(value.GetString(), out var date):
+                return PrintValue.Text($"«{date.Day:00}» {MonthsGenitive[date.Month - 1]} {date.Year} г.");
             case JsonValueKind.String:
                 var text = value.GetString() ?? "";
                 return PrintValue.Text(schema.TryGetProperty("x-enum-titles", out var titles) && titles.TryGetProperty(text, out var title)
                     ? title.GetString()
                     : text);
+            // Библиографическая запись уже содержит год и издательство; интернет-ресурс — название и адрес.
+            case JsonValueKind.Array when widget == "literature_list":
+                var list = NextListId();
+                return new PrintValue(value.EnumerateArray()
+                    .Select(item => Text(item, "citation") ?? (Text(item, "title") is { } name
+                        ? Text(item, "url") is { } url ? $"{name} // Режим доступа: {url}" : name
+                        : null))
+                    .OfType<string>().Where(t => t.Trim().Length > 0)
+                    .Select(t => new PrintParagraph([new PrintRun(t.Trim())], PrintListKind.Numbered, list)).ToList());
             case JsonValueKind.Number:
                 return PrintValue.Text(value.GetRawText());
             case JsonValueKind.Array when widget == "competence_picker":
                 return Competences(value);
             case JsonValueKind.Array:
                 var items = SchemaAtItems(schema);
-                var kind = widget == "literature_list" ? PrintListKind.Numbered : PrintListKind.Bullet;
                 var id = NextListId();
                 return new PrintValue(value.EnumerateArray()
                     .Select(item => Render(item, items).Inline)
                     .Where(t => t.Length > 0)
-                    .Select(t => new PrintParagraph([new PrintRun(t)], kind, id)).ToList());
+                    .Select(t => new PrintParagraph([new PrintRun(t)], PrintListKind.Bullet, id)).ToList());
             case JsonValueKind.Object:
                 // Запись — значения её полей по порядку схемы через запятую: библиографическая запись, составитель.
                 var parts = schema.TryGetProperty("properties", out var props)
@@ -154,6 +164,10 @@ public sealed class PrintContext(
     }
 
     private static readonly JsonElement Empty = JsonDocument.Parse("{}").RootElement;
+
+    // Дата в документах МГТУ «СТАНКИН» — «15» октября 2026 г.
+    private static readonly string[] MonthsGenitive =
+        ["января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря"];
 
     private JsonElement SchemaAtItems(JsonElement schema) =>
         schema.TryGetProperty("items", out var items) ? Resolve(items) : Empty;
