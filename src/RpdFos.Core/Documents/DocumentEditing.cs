@@ -20,7 +20,7 @@ public sealed record SectionUpdateResult(SectionUpdateProblem? Problem, IReadOnl
 /// </summary>
 public sealed class DocumentEditing(
     AppDbContext db, DocumentTypeRegistry registry, IDocumentValidator validator, RichTextSanitizer sanitizer,
-    DocumentProjections projections, TimeProvider clock)
+    DocumentHistory history, TimeProvider clock)
 {
     public const string ReadOnlyChanged = "Поле из учебного плана — изменять нельзя";
 
@@ -59,59 +59,27 @@ public sealed class DocumentEditing(
         if (errors.Count > 0) return new(SectionUpdateProblem.Invalid, errors, null);
 
         var previous = document.Edit(updatedJson);
-        if (previous is not null) History(document, previous, editorId);
-        var state = await projections.SyncAsync(document, ct);
-        await SnapshotAsync(document, state, editorId, VersionTriggers.AutoSave, ct);
+        if (previous is not null) history.StatusChanged(document, previous, editorId);
+        await history.SnapshotAsync(document, editorId, VersionTriggers.AutoSave, ct);
 
         var metadata = DocumentMetadata.Build(schemaJson, element, document.Status, facts, validator, registry.FindSchema);
         return new(null, [], metadata.Sections.Single(s => s.Key == section));
     }
 
-    /// <summary>«Сохранить»: сохранённый черновик и новый снимок версии.</summary>
+    /// <summary>«Сохранить»: новый снимок версии; черновик становится сохранённым черновиком.</summary>
     public async Task SaveAsync(Document document, Guid editorId, CancellationToken ct = default)
     {
         var previous = document.Save();
-        if (previous is not null) History(document, previous, editorId);
-        var state = await projections.SyncAsync(document, ct);
-        await SnapshotAsync(document, state, editorId, VersionTriggers.ManualSave, ct);
+        if (previous is not null) history.StatusChanged(document, previous, editorId);
+        await history.SnapshotAsync(document, editorId, VersionTriggers.ManualSave, ct);
     }
 
     /// <summary>Мягкое удаление с записью в истории статусов.</summary>
     public void Delete(Document document, Guid editorId) =>
-        History(document, document.Delete(clock.GetUtcNow()), editorId);
+        history.StatusChanged(document, document.Delete(clock.GetUtcNow()), editorId);
 
     private Task<string> SchemaAsync(Document document, CancellationToken ct) =>
         db.DocumentTemplates.IgnoreQueryFilters().Where(t => t.Id == document.TemplateId).Select(t => t.Schema).SingleAsync(ct);
-
-    private void History(Document document, string from, Guid editorId) =>
-        db.DocumentStatusHistory.Add(new DocumentStatusChange
-        {
-            DocumentId = document.Id, FromStatus = from, ToStatus = document.Status, ChangedBy = editorId, ChangedAt = clock.GetUtcNow()
-        });
-
-    // Автосохранение перезаписывает последний рабочий снимок; ручное сохранение даёт новый номер.
-    private async Task SnapshotAsync(Document document, DocumentProjectionState state, Guid editorId, string trigger, CancellationToken ct)
-    {
-        var last = await db.DocumentVersions.Where(v => v.DocumentId == document.Id)
-            .OrderByDescending(v => v.VersionNumber).FirstOrDefaultAsync(ct);
-        var version = trigger == VersionTriggers.AutoSave && last is { TriggerEvent: VersionTriggers.AutoSave }
-            ? last
-            : db.DocumentVersions.Add(new DocumentVersion
-            {
-                DocumentId = document.Id, VersionNumber = (last?.VersionNumber ?? 0) + 1, TriggerEvent = trigger
-            }).Entity;
-
-        version.Snapshot = document.Payload;
-        version.HoursSnapshot = JsonSerializer.Serialize(state.Hours.Select(h => new
-        {
-            semester = h.Semester, lectures = h.Lectures, practice = h.Practice, lab_hours = h.LabHours,
-            self_study = h.SelfStudy, control = h.Control
-        }), Json);
-        version.CompetencesSnapshot = JsonSerializer.Serialize(
-            state.Links.Select(l => new { competence_id = l.CompetenceId, indicator_id = l.IndicatorId }), Json);
-        version.SavedBy = editorId;
-        version.SavedAt = clock.GetUtcNow();
-    }
 
     // Строки с x-ui-widget: richtext — через санитайзер (NFR-SEC-10); клиенту не доверяем.
     private JsonNode? Sanitize(JsonNode? node, JsonElement schema, JsonElement root, int depth)

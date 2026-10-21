@@ -9,6 +9,9 @@ public static class Policies
     /// <summary>Авторы документов: преподаватель создаёт РПД, методист и администратор — тоже (за кафедру).</summary>
     public const string DocumentAuthors = "document-authors";
 
+    /// <summary>Проверяющие: возврат, приём и замечания — только методист (этап 5).</summary>
+    public const string Reviewers = "reviewers";
+
     /// <summary>
     /// Панель фоновых задач — только администратору. Её открывают в браузере переходом по адресу,
     /// без токена доступа, поэтому вход проверяется по cookie страницы входа.

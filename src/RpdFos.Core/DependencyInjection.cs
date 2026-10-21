@@ -35,7 +35,9 @@ public static class DependencyInjection
         services.AddSingleton<RichTextSanitizer>();
         services.AddScoped<DocumentProjections>();
         services.AddScoped<DocumentCreation>();
+        services.AddScoped<DocumentHistory>();
         services.AddScoped<DocumentEditing>();
+        services.AddScoped<DocumentReview>();
         return services;
     }
 }

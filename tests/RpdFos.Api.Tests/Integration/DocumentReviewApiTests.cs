@@ -1,0 +1,171 @@
+using System.Net;
+using System.Net.Http.Json;
+using System.Text.Json;
+using System.Text.Json.Nodes;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using RpdFos.Api.Features.Documents;
+using RpdFos.Core.Data.Entities;
+using RpdFos.Core.Documents;
+using Xunit;
+
+namespace RpdFos.Api.Tests.Integration;
+
+/// <summary>Проверка РПД (этап 5, B1, B3): отправка с полной проверкой, замечания, возврат, доработка, приём.</summary>
+[Collection(DatabaseCollection.Name)]
+public class DocumentReviewApiTests(DatabaseFixture app)
+{
+    [Fact]
+    public async Task Incomplete_document_is_not_submitted()
+    {
+        var (client, _) = await DocumentData.UserAsync(app);
+        var created = await DocumentData.CreateAsync(app, client, (await DocumentData.PublishedTemplateAsync(app)).Id, "Б1.О.10");
+
+        var response = await client.PostAsJsonAsync(Url(created, "submit"), new DocumentVersionRequest(created.Document.Version));
+
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, response.StatusCode);
+        var paths = (await ErrorsAsync(response)).Select(e => e.GetProperty("path").GetString()).ToList();
+        Assert.Contains("/goals_and_objectives", paths);
+        Assert.Contains("/thematic_plan", paths);
+        await app.WithDbAsync(async db =>
+            Assert.Equal(DocumentStatuses.Draft, (await db.Documents.SingleAsync(d => d.Id == created.Document.Id)).Status));
+    }
+
+    [Fact]
+    public async Task Review_cycle_with_comments()
+    {
+        var (author, _) = await DocumentData.UserAsync(app);
+        var (methodist, _) = await DocumentData.UserAsync(app, AppRoles.Methodist);
+        var created = await DocumentData.CreateAsync(app, author, (await DocumentData.PublishedTemplateAsync(app)).Id, "Б1.О.10");
+        var version = await DocumentData.FillForSubmissionAsync(author, created);
+
+        version = await ExpectAsync(author.PostAsJsonAsync(Url(created, "submit"), new DocumentVersionRequest(version)), DocumentStatuses.UnderReview);
+
+        // На проверке документ закрыт для автора.
+        var closed = await author.PatchAsJsonAsync(Url(created, "sections/goals_and_objectives"), Section(version, Goals("Правка на проверке")));
+        Assert.Equal(HttpStatusCode.Conflict, closed.StatusCode);
+
+        // Без замечаний не вернуть, пустое и чужое место — 422.
+        Assert.Equal(HttpStatusCode.Conflict, (await methodist.PostAsJsonAsync(Url(created, "return"), new ReturnRequest(version, null))).StatusCode);
+        Assert.Equal(HttpStatusCode.UnprocessableEntity,
+            (await methodist.PostAsJsonAsync(Url(created, "comments"), new CommentRequest("/no_such_section", "Текст"))).StatusCode);
+        Assert.Equal(HttpStatusCode.UnprocessableEntity,
+            (await methodist.PostAsJsonAsync(Url(created, "comments"), new CommentRequest("/thematic_plan/0/hours", " "))).StatusCode);
+
+        var added = await methodist.PostAsJsonAsync(Url(created, "comments"),
+            new CommentRequest("/thematic_plan/0/hours", "Разбейте часы по темам"));
+        Assert.Equal(HttpStatusCode.Created, added.StatusCode);
+        var comment = (await added.Content.ReadFromJsonAsync<CommentItem>())!;
+
+        // С неразрешённым замечанием не принять — только вернуть.
+        Assert.Equal(HttpStatusCode.Conflict, (await methodist.PostAsJsonAsync(Url(created, "accept"), new DocumentVersionRequest(version))).StatusCode);
+        version = await ExpectAsync(methodist.PostAsJsonAsync(Url(created, "return"), new ReturnRequest(version, null)), DocumentStatuses.Returned);
+
+        // Доработка: правка и «Сохранить» статус не меняют.
+        var edited = await DocumentData.PatchAsync(author, created.Document.Id, "goals_and_objectives", version, Goals("Исправленная задача дисциплины"));
+        Assert.Equal(DocumentStatuses.Returned, edited.Status);
+        var saved = (await (await author.PostAsJsonAsync(Url(created, "save"), new DocumentVersionRequest(edited.Version)))
+            .Content.ReadFromJsonAsync<DocumentSaved>())!;
+        Assert.Equal(DocumentStatuses.Returned, saved.Status);
+
+        // Замечание видит автор и отмечает разрешённым — один раз.
+        var comments = (await author.GetFromJsonAsync<List<CommentItem>>(Url(created, "comments")))!;
+        Assert.Equal(("/thematic_plan/0/hours", false), (Assert.Single(comments).FieldPath, comments[0].IsResolved));
+        var resolved = await author.PostAsync(Url(created, $"comments/{comment.Id}/resolve"), null);
+        Assert.True((await resolved.Content.ReadFromJsonAsync<CommentItem>())!.IsResolved);
+        Assert.Equal(HttpStatusCode.Conflict, (await author.PostAsync(Url(created, $"comments/{comment.Id}/resolve"), null)).StatusCode);
+
+        version = await ExpectAsync(author.PostAsJsonAsync(Url(created, "submit"), new DocumentVersionRequest(saved.Version)), DocumentStatuses.UnderReview);
+        await ExpectAsync(methodist.PostAsJsonAsync(Url(created, "accept"), new DocumentVersionRequest(version)), DocumentStatuses.Accepted);
+
+        await app.WithDbAsync(async db =>
+        {
+            var history = await db.DocumentStatusHistory.Where(h => h.DocumentId == created.Document.Id).OrderBy(h => h.ChangedAt).ToListAsync();
+            Assert.Equal(
+                [
+                    (null, DocumentStatuses.Draft), (DocumentStatuses.Draft, DocumentStatuses.UnderReview),
+                    (DocumentStatuses.UnderReview, DocumentStatuses.Returned), (DocumentStatuses.Returned, DocumentStatuses.UnderReview),
+                    (DocumentStatuses.UnderReview, DocumentStatuses.Accepted)
+                ],
+                history.Select(h => (h.FromStatus, h.ToStatus)));
+            Assert.Equal(string.Format(DocumentReview.ReturnedWithComments, 1), history[2].Comment);
+
+            // Каждая смена статуса проверки — снимок версии status_change.
+            var triggers = await db.DocumentVersions.Where(v => v.DocumentId == created.Document.Id)
+                .OrderBy(v => v.VersionNumber).Select(v => v.TriggerEvent).ToListAsync();
+            Assert.Equal(4, triggers.Count(t => t == VersionTriggers.StatusChange));
+            Assert.Contains(VersionTriggers.ManualSave, triggers);
+        });
+    }
+
+    [Fact]
+    public async Task Methodist_edits_document_under_review_and_the_edit_is_recorded()
+    {
+        var (author, _) = await DocumentData.UserAsync(app);
+        var (methodist, reviewer) = await DocumentData.UserAsync(app, AppRoles.Methodist);
+        var created = await DocumentData.CreateAsync(app, author, (await DocumentData.PublishedTemplateAsync(app)).Id, "Б1.О.11");
+        var version = await DocumentData.FillForSubmissionAsync(author, created);
+        version = await ExpectAsync(author.PostAsJsonAsync(Url(created, "submit"), new DocumentVersionRequest(version)), DocumentStatuses.UnderReview);
+
+        var details = (await methodist.GetFromJsonAsync<DocumentDetails>(Url(created, "")))!;
+        Assert.True(details.Editable);
+        Assert.Equal(new DocumentActions(Submit: false, Review: true, ResolveComments: false), details.Actions);
+
+        var edited = await DocumentData.PatchAsync(methodist, created.Document.Id, "goals_and_objectives", version, Goals("Задача, уточнённая методистом"));
+
+        // Правка методиста статус не меняет и попадает в историю версий с его именем.
+        Assert.Equal(DocumentStatuses.UnderReview, edited.Status);
+        await app.WithDbAsync(async db =>
+        {
+            var last = await db.DocumentVersions.Where(v => v.DocumentId == created.Document.Id)
+                .OrderByDescending(v => v.VersionNumber).FirstAsync();
+            Assert.Equal((reviewer.Id, VersionTriggers.AutoSave), (last.SavedBy, last.TriggerEvent));
+        });
+    }
+
+    [Fact]
+    public async Task Only_methodist_reviews()
+    {
+        var (author, _) = await DocumentData.UserAsync(app);
+        var (admin, _) = await DocumentData.UserAsync(app, AppRoles.Admin);
+        var created = await DocumentData.CreateAsync(app, author, (await DocumentData.PublishedTemplateAsync(app)).Id, "Б1.О.12");
+        var version = await DocumentData.FillForSubmissionAsync(author, created);
+        version = await ExpectAsync(author.PostAsJsonAsync(Url(created, "submit"), new DocumentVersionRequest(version)), DocumentStatuses.UnderReview);
+
+        foreach (var client in new[] { author, admin })
+        {
+            Assert.Equal(HttpStatusCode.Forbidden, (await client.PostAsJsonAsync(Url(created, "return"), new ReturnRequest(version, null))).StatusCode);
+            Assert.Equal(HttpStatusCode.Forbidden, (await client.PostAsJsonAsync(Url(created, "accept"), new DocumentVersionRequest(version))).StatusCode);
+            Assert.Equal(HttpStatusCode.Forbidden,
+                (await client.PostAsJsonAsync(Url(created, "comments"), new CommentRequest("/thematic_plan", "Текст"))).StatusCode);
+        }
+    }
+
+    private static string Url(DocumentDetails document, string action) =>
+        $"/api/documents/{document.Document.Id}" + (action.Length > 0 ? $"/{action}" : "");
+
+    private static SectionUpdateRequest Section(int version, JsonNode value) =>
+        new(version, JsonDocument.Parse(value.ToJsonString()).RootElement);
+
+    private static JsonObject Goals(string objective) => new()
+    {
+        ["goals"] = "<p>Сформировать у обучающихся умения строить и исследовать математические модели систем.</p>",
+        ["objectives"] = new JsonArray(objective)
+    };
+
+    // Ответ на смену статуса: ожидаемый статус; возвращает новую версию.
+    private static async Task<int> ExpectAsync(Task<HttpResponseMessage> request, string status)
+    {
+        var response = await request;
+        Assert.True(response.IsSuccessStatusCode, $"{(int)response.StatusCode} {await response.Content.ReadAsStringAsync()}");
+        var reviewed = (await response.Content.ReadFromJsonAsync<DocumentReviewed>())!;
+        Assert.Equal(status, reviewed.Status);
+        return reviewed.Version;
+    }
+
+    private static async Task<List<JsonElement>> ErrorsAsync(HttpResponseMessage response)
+    {
+        var problem = (await response.Content.ReadFromJsonAsync<ProblemDetails>())!;
+        return ((JsonElement)problem.Extensions["errors"]!).EnumerateArray().ToList();
+    }
+}

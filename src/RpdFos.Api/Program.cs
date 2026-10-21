@@ -79,6 +79,9 @@ builder.Services.AddAuthorizationBuilder()
     .AddPolicy(Policies.DocumentAuthors, p => p
         .AddAuthenticationSchemes(OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme)
         .RequireRole(AppRoles.Teacher, AppRoles.Methodist, AppRoles.Admin))
+    .AddPolicy(Policies.Reviewers, p => p
+        .AddAuthenticationSchemes(OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme)
+        .RequireRole(AppRoles.Methodist))
     .AddPolicy(Policies.JobsDashboard, p => p
         .AddAuthenticationSchemes(IdentityConstants.ApplicationScheme)
         .RequireRole(AppRoles.Admin));

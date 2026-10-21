@@ -102,3 +102,17 @@ internal sealed class DocumentStatusChangeConfiguration : IEntityTypeConfigurati
         e.HasOne<Employee>().WithMany().HasForeignKey(x => x.ChangedBy).OnDelete(DeleteBehavior.Restrict);
     }
 }
+
+internal sealed class DocumentCommentConfiguration : IEntityTypeConfiguration<DocumentComment>
+{
+    public void Configure(EntityTypeBuilder<DocumentComment> e)
+    {
+        e.ToTable("document_comments", t => t.HasCheckConstraint("ck_document_comments_resolved",
+            "is_resolved = (resolved_at IS NOT NULL) AND is_resolved = (resolved_by IS NOT NULL)"));
+        e.Property(x => x.FieldPath).HasMaxLength(500);
+        e.HasIndex(x => new { x.DocumentId, x.IsResolved });
+        e.HasOne<Document>().WithMany().HasForeignKey(x => x.DocumentId).OnDelete(DeleteBehavior.Cascade);
+        e.HasOne<Employee>().WithMany().HasForeignKey(x => x.AuthorId).OnDelete(DeleteBehavior.Restrict);
+        e.HasOne<Employee>().WithMany().HasForeignKey(x => x.ResolvedBy).OnDelete(DeleteBehavior.Restrict);
+    }
+}

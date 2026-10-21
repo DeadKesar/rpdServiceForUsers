@@ -1,5 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using Microsoft.EntityFrameworkCore;
 using RpdFos.Api.Features.Documents;
 using RpdFos.Core.Data.Entities;
@@ -41,5 +43,76 @@ public static class DocumentData
             new CreateDocumentRequest(templateId, await DisciplineAsync(app, code)));
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         return (await response.Content.ReadFromJsonAsync<DocumentDetails>())!;
+    }
+
+    public static async Task<SectionSaved> PatchAsync(HttpClient client, Guid documentId, string section, int version, JsonNode? value)
+    {
+        var response = await client.PatchAsJsonAsync($"/api/documents/{documentId}/sections/{section}",
+            new SectionUpdateRequest(version, JsonDocument.Parse(value?.ToJsonString() ?? "null").RootElement));
+        Assert.True(response.IsSuccessStatusCode, $"{section}: {(int)response.StatusCode} {await response.Content.ReadAsStringAsync()}");
+        return (await response.Content.ReadFromJsonAsync<SectionSaved>())!;
+    }
+
+    /// <summary>
+    /// Заполняет созданную РПД так, чтобы она прошла полную проверку: цели и задачи, по индикатору у каждой
+    /// компетенции матрицы, тема с часами плана, по записи в видимых условных разделах, основная литература.
+    /// Возвращает текущую версию документа.
+    /// </summary>
+    public static async Task<int> FillForSubmissionAsync(HttpClient client, DocumentDetails created)
+    {
+        var id = created.Document.Id;
+        var version = created.Document.Version;
+        var plan = Sums(created.Payload);
+        var visible = created.Metadata.Sections.Where(s => s.Visible).Select(s => s.Key).ToHashSet();
+
+        var sections = new Dictionary<string, JsonNode>
+        {
+            ["goals_and_objectives"] = new JsonObject
+            {
+                ["goals"] = "<p>Сформировать у обучающихся умения строить и исследовать математические модели систем.</p>",
+                ["objectives"] = new JsonArray("Освоить методы построения моделей систем")
+            },
+            ["competences"] = new JsonArray(created.Metadata.CompetenceCandidates.Where(c => c.Indicators.Count > 0)
+                .Select(c => (JsonNode)new JsonObject
+                {
+                    ["code"] = c.Code, ["formulation"] = c.Formulation,
+                    ["indicators"] = new JsonArray(new JsonObject { ["code"] = c.Indicators[0].Code, ["text"] = c.Indicators[0].Text })
+                }).ToArray()),
+            ["thematic_plan"] = new JsonArray(new JsonObject
+            {
+                ["section_number"] = 1, ["topic_title"] = "Основы моделирования систем",
+                ["hours"] = new JsonObject
+                {
+                    ["lectures"] = plan.Lectures, ["practice"] = plan.Practice, ["lab_hours"] = plan.Labs, ["self_study"] = plan.SelfStudy
+                }
+            }),
+            ["literature"] = new JsonObject
+            {
+                ["main"] = new JsonArray(new JsonObject
+                {
+                    ["citation"] = "Петров П. П. Моделирование систем : учебник. — Москва : Наука, 2024. — 320 с.",
+                    ["year"] = DateTime.Today.Year - 1
+                }),
+                ["additional"] = new JsonArray()
+            }
+        };
+        if (visible.Contains("practical_classes"))
+            sections["practical_classes"] = new JsonArray(new JsonObject { ["number"] = 1, ["title"] = "Построение модели", ["hours"] = plan.Practice });
+        if (visible.Contains("lab_works"))
+            sections["lab_works"] = new JsonArray(new JsonObject { ["number"] = 1, ["title"] = "Исследование модели", ["hours"] = plan.Labs });
+        if (visible.Contains("course_work"))
+            sections["course_work"] = new JsonObject { ["kind"] = "course_project", ["topics"] = new JsonArray("Модель системы массового обслуживания") };
+
+        foreach (var (section, value) in sections)
+            version = (await PatchAsync(client, id, section, version, value)).Version;
+        return version;
+    }
+
+    /// <summary>Часы плана по видам занятий — сумма по семестрам трудоёмкости документа.</summary>
+    public static (int Lectures, int Practice, int Labs, int SelfStudy) Sums(JsonElement payload)
+    {
+        var semesters = payload.GetProperty("hours_distribution").GetProperty("semesters").EnumerateArray().ToList();
+        int Sum(string key) => semesters.Sum(s => s.TryGetProperty(key, out var v) ? v.GetInt32() : 0);
+        return (Sum("lectures"), Sum("practice"), Sum("lab_hours"), Sum("self_study"));
     }
 }

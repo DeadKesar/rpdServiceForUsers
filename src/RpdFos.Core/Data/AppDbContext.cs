@@ -16,6 +16,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<DocumentHours> DocumentHours => Set<DocumentHours>();
     public DbSet<DocumentCompetenceLink> DocumentCompetenceLinks => Set<DocumentCompetenceLink>();
     public DbSet<DocumentStatusChange> DocumentStatusHistory => Set<DocumentStatusChange>();
+    public DbSet<DocumentComment> DocumentComments => Set<DocumentComment>();
 
     // Справочники (контекст Reference) и справочник сотрудников.
     public DbSet<Institute> Institutes => Set<Institute>();

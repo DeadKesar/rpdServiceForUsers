@@ -1037,6 +1037,66 @@ namespace RpdFos.Core.Migrations
                         });
                 });
 
+            modelBuilder.Entity("RpdFos.Core.Data.Entities.DocumentComment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("AuthorId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("author_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid>("DocumentId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("document_id");
+
+                    b.Property<string>("FieldPath")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("field_path");
+
+                    b.Property<bool>("IsResolved")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_resolved");
+
+                    b.Property<DateTimeOffset?>("ResolvedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("resolved_at");
+
+                    b.Property<Guid?>("ResolvedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("resolved_by");
+
+                    b.Property<string>("Text")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("text");
+
+                    b.HasKey("Id")
+                        .HasName("pk_document_comments");
+
+                    b.HasIndex("AuthorId")
+                        .HasDatabaseName("ix_document_comments_author_id");
+
+                    b.HasIndex("ResolvedBy")
+                        .HasDatabaseName("ix_document_comments_resolved_by");
+
+                    b.HasIndex("DocumentId", "IsResolved")
+                        .HasDatabaseName("ix_document_comments_document_id_is_resolved");
+
+                    b.ToTable("document_comments", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_document_comments_resolved", "is_resolved = (resolved_at IS NOT NULL) AND is_resolved = (resolved_by IS NOT NULL)");
+                        });
+                });
+
             modelBuilder.Entity("RpdFos.Core.Data.Entities.DocumentCompetenceLink", b =>
                 {
                     b.Property<Guid>("Id")
@@ -2001,6 +2061,29 @@ namespace RpdFos.Core.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_documents_document_templates_template_id");
+                });
+
+            modelBuilder.Entity("RpdFos.Core.Data.Entities.DocumentComment", b =>
+                {
+                    b.HasOne("RpdFos.Core.Data.Entities.Employee", null)
+                        .WithMany()
+                        .HasForeignKey("AuthorId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_document_comments_employees_author_id");
+
+                    b.HasOne("RpdFos.Core.Data.Entities.Document", null)
+                        .WithMany()
+                        .HasForeignKey("DocumentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_document_comments_documents_document_id");
+
+                    b.HasOne("RpdFos.Core.Data.Entities.Employee", null)
+                        .WithMany()
+                        .HasForeignKey("ResolvedBy")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_document_comments_employees_resolved_by");
                 });
 
             modelBuilder.Entity("RpdFos.Core.Data.Entities.DocumentCompetenceLink", b =>
