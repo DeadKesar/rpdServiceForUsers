@@ -32,6 +32,19 @@
     </div>
     <script src="_content/Microsoft.AspNetCore.Components.WebAssembly.Authentication/AuthenticationService.js"></script>
     <script src="_content/Radzen.Blazor/Radzen.Blazor.js"></script>
+    <script>
+        // Переход к полю из списка замечаний и ошибок: первый найденный элемент — само поле или виджет, внутри которого оно.
+        window.rpdfosScrollToField = (ids) => {
+            for (const id of ids) {
+                const el = document.getElementById(id);
+                if (!el) continue;
+                el.scrollIntoView({ behavior: "smooth", block: "center" });
+                el.classList.add("field-flash");
+                setTimeout(() => el.classList.remove("field-flash"), 1600);
+                return;
+            }
+        };
+    </script>
     <script src="_framework/blazor.webassembly#[.{fingerprint}].js"></script>
 </body>
 

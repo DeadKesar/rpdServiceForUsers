@@ -1,0 +1,58 @@
+@page "/review"
+@attribute [Authorize(Roles = "methodist")]
+@using System.Net.Http.Json
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.WebAssembly.Authentication
+@using RpdFos.Web.Models
+@inject HttpClient Http
+
+<PageTitle>Проверка</PageTitle>
+
+@* Очередь проверки (S-30): документы на проверке — от отправленных раньше к отправленным позже. *@
+<h1 class="h3">Документы на проверке</h1>
+
+@if (documents is null)
+{
+    <p>Загрузка…</p>
+}
+else if (documents.Count == 0)
+{
+    <p class="text-muted">Документов на проверке нет.</p>
+}
+else
+{
+    <table class="table table-sm align-middle">
+        <thead>
+            <tr><th>Отправлен</th><th>Дисциплина</th><th>Тип</th><th>Автор</th><th>План</th></tr>
+        </thead>
+        <tbody>
+            @foreach (var d in documents)
+            {
+                <tr>
+                    <td class="text-nowrap">@(d.SubmittedAt?.ToLocalTime().ToString("dd.MM.yyyy HH:mm") ?? "—")</td>
+                    <td><a href="documents/@d.Id">@d.DisciplineCode @d.DisciplineName</a></td>
+                    <td>@(d.Type == "fos" ? "ФОС" : "РПД")</td>
+                    <td>@d.AuthorName</td>
+                    <td class="small text-muted">@d.Plan?.Title</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    private List<DocumentListItem>? documents;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var list = await Http.GetFromJsonAsync<List<DocumentListItem>>("api/documents?status=under_review") ?? [];
+            documents = list.OrderBy(d => d.SubmittedAt).ToList();
+        }
+        catch (AccessTokenNotAvailableException e)
+        {
+            e.Redirect();
+        }
+    }
+}

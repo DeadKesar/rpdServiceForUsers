@@ -18,6 +18,27 @@ public sealed class SchemaContext(JsonElement root, JsonObject payload, Document
     /// <summary>Документ целиком только для чтения: статус не позволяет правку или пользователь — не автор.</summary>
     public bool Locked { get; set; }
 
+    /// <summary>Замечания методиста к документу — показываются у полей.</summary>
+    public List<CommentItem> Comments { get; set; } = [];
+
+    /// <summary>Методист на проверке оставляет замечания к полям.</summary>
+    public bool CanComment { get; set; }
+
+    /// <summary>Автор на доработке отмечает замечания разрешёнными.</summary>
+    public bool CanResolve { get; set; }
+
+    /// <summary>Добавить замечание к полю (место, текст); false — не добавлено, причину покажет страница.</summary>
+    public Func<string, string, Task<bool>>? AddComment { get; set; }
+
+    public Func<CommentItem, Task>? ResolveComment { get; set; }
+
+    /// <summary>Замечания к самому месту, а для <paramref name="subtree"/> — и к вложенным в него полям.</summary>
+    public IEnumerable<CommentItem> CommentsAt(string path, bool subtree) =>
+        Comments.Where(c => c.FieldPath == path || subtree && c.FieldPath.StartsWith(path + "/", StringComparison.Ordinal));
+
+    /// <summary>id элемента поля на странице — для перехода к полю из списка замечаний и ошибок.</summary>
+    public static string Anchor(string path) => "field" + path.Replace('/', '-');
+
     /// <summary>Правка завершена (уход из поля, кнопка, флажок): форма перерисовывается целиком — итоги, заполненность.</summary>
     public void Changed() => changed();
 

@@ -5,23 +5,32 @@ namespace RpdFos.Web.Models;
 // Контракт API документов (Features/Documents) на стороне клиента.
 
 public sealed record DocumentListItem(Guid Id, string Title, string Type, string Status, string StatusTitle, bool IsOutdated,
-    string DisciplineCode, string DisciplineName, PlanItem? Plan, int TemplateRevision, string AuthorName, DateTimeOffset UpdatedAt);
+    string DisciplineCode, string DisciplineName, PlanItem? Plan, int TemplateRevision, string AuthorName, DateTimeOffset UpdatedAt,
+    DateTimeOffset? SubmittedAt);
 
 public sealed record DisciplineOption(Guid Id, string Code, string Name, Guid? DocumentId, string? DocumentAuthor, bool CanOpen);
 
 public sealed record DocumentItem(Guid Id, string Type, string Title, string Status, string StatusTitle, bool IsOutdated, int Version,
     Guid TemplateId, int TemplateRevision, Guid DisciplineId, string DisciplineCode, string DisciplineName, Guid AuthorId,
-    DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt);
+    DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, DateTimeOffset? SubmittedAt);
+
+/// <summary>Что пользователь может сделать с документом: отправить, проверить (вернуть, принять, замечания), разрешать замечания.</summary>
+public sealed record DocumentActions(bool Submit, bool Review, bool ResolveComments);
 
 public sealed record DocumentDetails(DocumentItem Document, JsonElement Payload, JsonElement Schema, DocumentMetadata Metadata,
-    bool Editable);
+    bool Editable, DocumentActions Actions);
 
 public sealed record DocumentMetadata(List<SectionState> Sections, List<string> ReadOnlyPaths, List<string> HiddenPaths,
     List<CompetenceCandidate> CompetenceCandidates);
 
-public sealed record SectionState(string Key, string Title, bool Visible, string? StubText, string Fill, List<FieldError> Missing);
+public sealed record SectionState(string Key, string Title, bool Visible, string? StubText, string Fill, List<FieldError> Missing,
+    List<FieldError> Warnings);
 
-public sealed record FieldError(string Path, string Message);
+/// <summary>Замечание проверки: место, сообщение и уровень — ошибка блокирует отправку, предупреждение нет.</summary>
+public sealed record FieldError(string Path, string Message, string Level = "error")
+{
+    public bool IsWarning => Level == "warning";
+}
 
 public sealed record CompetenceCandidate(Guid Id, string Code, string Formulation, string Category, List<IndicatorCandidate> Indicators);
 
@@ -48,3 +57,10 @@ public static class DocumentTitles
         ("archived", "Архивный")
     ];
 }
+
+/// <summary>Статус сменился: новая версия и статус; при отправке — предупреждения полной проверки.</summary>
+public sealed record DocumentReviewed(int Version, string Status, string StatusTitle, List<FieldError> Warnings);
+
+/// <summary>Замечание методиста к полю: кто и когда оставил, разрешено ли и кем.</summary>
+public sealed record CommentItem(Guid Id, string FieldPath, string Text, Guid AuthorId, string AuthorName, DateTimeOffset CreatedAt,
+    bool IsResolved, string? ResolvedByName, DateTimeOffset? ResolvedAt);

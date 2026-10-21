@@ -1,0 +1,56 @@
+@using RpdFos.Web.Models
+
+@* Замечания методиста у поля. Методист на проверке добавляет замечание, автор на доработке отмечает его разрешённым. *@
+@foreach (var c in Context.CommentsAt(Path, Subtree))
+{
+    <div class="alert @(c.IsResolved ? "alert-light text-muted" : "alert-warning") py-1 px-2 small mb-1 d-flex justify-content-between align-items-start gap-2">
+        <span>
+            <span class="fw-semibold">Замечание@(c.FieldPath != Path ? $" ({Context.FieldTitle(c.FieldPath)})" : ""):</span>
+            @c.Text
+            <span class="text-muted">— @c.AuthorName, @c.CreatedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</span>
+            @if (c.IsResolved)
+            {
+                <span class="badge text-bg-success ms-1">разрешено</span>
+            }
+        </span>
+        @if (!c.IsResolved && Context.CanResolve && Context.ResolveComment is { } resolve)
+        {
+            <button type="button" class="btn btn-sm btn-outline-success text-nowrap" @onclick="() => resolve(c)">Разрешено</button>
+        }
+    </div>
+}
+@if (Context.CanComment && Context.AddComment is not null)
+{
+    @if (open)
+    {
+        <div class="mb-2">
+            <textarea class="form-control form-control-sm" rows="2" placeholder="Что нужно исправить" @bind="text" @bind:event="oninput"></textarea>
+            <div class="mt-1 d-flex gap-2">
+                <button type="button" class="btn btn-sm btn-warning" disabled="@string.IsNullOrWhiteSpace(text)" @onclick="AddAsync">
+                    Добавить замечание
+                </button>
+                <button type="button" class="btn btn-sm btn-link" @onclick="() => open = false">Отмена</button>
+            </div>
+        </div>
+    }
+    else
+    {
+        <button type="button" class="btn btn-sm btn-link p-0 mb-2" @onclick="() => open = true">+ замечание</button>
+    }
+}
+
+@code {
+    [Parameter, EditorRequired] public SchemaContext Context { get; set; } = default!;
+    [Parameter, EditorRequired] public string Path { get; set; } = "";
+
+    /// <summary>Виджет рисует вложенные поля сам — замечания к ним показываются у него.</summary>
+    [Parameter] public bool Subtree { get; set; }
+
+    private bool open;
+    private string text = "";
+
+    private async Task AddAsync()
+    {
+        if (await Context.AddComment!(Path, text)) (open, text) = (false, "");
+    }
+}

@@ -113,3 +113,10 @@ code {
 .form-floating > .form-control-plaintext:focus::placeholder, .form-floating > .form-control:focus::placeholder {
     text-align: start;
 }
+/* Поле, к которому перешли из списка замечаний или ошибок. */
+.field-flash {
+    outline: 2px solid #ffc107;
+    outline-offset: 4px;
+    border-radius: 4px;
+    transition: outline-color 1.5s;
+}

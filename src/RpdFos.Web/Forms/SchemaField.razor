@@ -2,45 +2,51 @@
 @using System.Text.Json.Nodes
 @inherits FieldBase
 
-@* Универсальный обработчик поля: виджет из реестра, вложенный объект или простое значение — по схеме. *@
+@* Универсальный обработчик поля: виджет из реестра, вложенный объект или простое значение — по схеме.
+   У каждого поля — его замечания; id элемента — для перехода к полю из списка замечаний и ошибок. *@
 @if (!Context.IsHidden(Path))
 {
     var widget = WidgetRegistry.Find(Schema, Context);
-    if (widget is not null)
-    {
-        <DynamicComponent Type="widget" Parameters="Parameters" />
-    }
-    else if (SchemaContext.Type(Schema) == "object")
-    {
-        <fieldset class="mb-3 @(Nested ? "border rounded p-2" : "")">
-            @if (Nested)
-            {
-                <legend class="fs-6 fw-semibold w-auto px-1">@Title</legend>
-            }
-            @foreach (var property in Properties)
-            {
-                <SchemaField Context="Context" Schema="property.Schema" Parent="Node" Key="@property.Name"
-                             Path="@($"{Path}/{property.Name}")" EnsureParent="AttachNode" Nested="true" />
-            }
-        </fieldset>
-    }
-    else
-    {
-        <div class="mb-3">
-            <label class="form-label">
-                @Title
-                @if (FromPlan)
+    <div id="@SchemaContext.Anchor(Path)">
+        @if (widget is not null)
+        {
+            <DynamicComponent Type="widget" Parameters="Parameters" />
+            <FieldComments Context="Context" Path="@Path" Subtree="true" />
+        }
+        else if (SchemaContext.Type(Schema) == "object")
+        {
+            <fieldset class="mb-3 @(Nested ? "border rounded p-2" : "")">
+                @if (Nested)
                 {
-                    <span class="badge text-bg-light border ms-1" title="Заполняется из учебного плана и справочников">из учебного плана</span>
+                    <legend class="fs-6 fw-semibold w-auto px-1">@Title</legend>
                 }
-            </label>
-            <ScalarInput Context="Context" Schema="Schema" Parent="Parent" Key="@Key" Path="@Path" EnsureParent="EnsureParent" />
-            @if (Hint is not null)
-            {
-                <div class="form-text">@Hint</div>
-            }
-        </div>
-    }
+                <FieldComments Context="Context" Path="@Path" />
+                @foreach (var property in Properties)
+                {
+                    <SchemaField Context="Context" Schema="property.Schema" Parent="Node" Key="@property.Name"
+                                 Path="@($"{Path}/{property.Name}")" EnsureParent="AttachNode" Nested="true" />
+                }
+            </fieldset>
+        }
+        else
+        {
+            <div class="mb-3">
+                <label class="form-label">
+                    @Title
+                    @if (FromPlan)
+                    {
+                        <span class="badge text-bg-light border ms-1" title="Заполняется из учебного плана и справочников">из учебного плана</span>
+                    }
+                </label>
+                <ScalarInput Context="Context" Schema="Schema" Parent="Parent" Key="@Key" Path="@Path" EnsureParent="EnsureParent" />
+                @if (Hint is not null)
+                {
+                    <div class="form-text">@Hint</div>
+                }
+                <FieldComments Context="Context" Path="@Path" />
+            </div>
+        }
+    </div>
 }
 
 @code {

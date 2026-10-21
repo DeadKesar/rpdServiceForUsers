@@ -42,11 +42,25 @@ else
         }
     </p>
 
-    @if (details.Editable)
-    {
-        <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+        @if (details.Editable)
+        {
             <button class="btn btn-primary" disabled="@(busy || conflict)" @onclick="() => SaveDocumentAsync(false)">Сохранить</button>
             <button class="btn btn-outline-primary" disabled="@(busy || conflict)" @onclick="() => SaveDocumentAsync(true)">Сохранить и выйти</button>
+        }
+        @if (details.Actions.Submit)
+        {
+            <button class="btn btn-success" disabled="@(busy || conflict)" @onclick="SubmitAsync">
+                @(d.Status == "returned" ? "Отправить на проверку повторно" : "Отправить на проверку")
+            </button>
+        }
+        @if (details.Actions.Review)
+        {
+            <button class="btn btn-success" disabled="@(busy || conflict)" @onclick="AcceptAsync">Принять</button>
+            <button class="btn btn-warning" disabled="@(busy || conflict)" @onclick="() => returning = !returning">Вернуть на доработку</button>
+        }
+        @if (details.Editable)
+        {
             <span class="small @(dirty ? "text-warning" : "text-muted")">
                 @if (busy)
                 {
@@ -61,11 +75,54 @@ else
                     <span>Сохранено в @at.ToLocalTime().ToString("HH:mm")</span>
                 }
             </span>
+        }
+    </div>
+
+    @if (returning && details.Actions.Review)
+    {
+        <div class="card mb-3">
+            <div class="card-body py-2">
+                <div class="small mb-1">
+                    Неразрешённых замечаний к полям: <strong>@OpenComments</strong>.
+                    @if (OpenComments == 0)
+                    {
+                        <span class="text-danger">Чтобы вернуть документ, оставьте замечание у поля, которое нужно исправить.</span>
+                    }
+                </div>
+                <textarea class="form-control form-control-sm" rows="2" placeholder="Общий комментарий (необязательно)" @bind="returnComment"></textarea>
+                <div class="mt-2 d-flex gap-2">
+                    <button class="btn btn-sm btn-warning" disabled="@(busy || OpenComments == 0)" @onclick="ReturnAsync">Вернуть автору</button>
+                    <button class="btn btn-sm btn-link" @onclick="() => returning = false">Отмена</button>
+                </div>
+            </div>
         </div>
     }
-    else
+
+    @if (!details.Editable)
     {
-        <div class="alert alert-secondary py-2">Документ открыт только для просмотра: изменяет его автор, пока документ в работе.</div>
+        <div class="alert alert-secondary py-2">@ReadOnlyReason(d.Status)</div>
+    }
+
+    @if (comments.Count > 0)
+    {
+        <div class="card mb-3">
+            <div class="card-body py-2 small">
+                <div class="fw-semibold mb-1">Замечания методиста: неразрешённых @OpenComments из @comments.Count</div>
+                <ul class="mb-0">
+                    @foreach (var c in comments)
+                    {
+                        <li class="@(c.IsResolved ? "text-muted" : "")">
+                            <a href="" @onclick="() => GoToAsync(c.FieldPath)" @onclick:preventDefault>@PlaceTitle(c.FieldPath)</a>:
+                            @c.Text
+                            @if (c.IsResolved)
+                            {
+                                <span class="badge text-bg-success ms-1">разрешено</span>
+                            }
+                        </li>
+                    }
+                </ul>
+            </div>
+        </div>
     }
 
     @if (conflict)
@@ -94,7 +151,14 @@ else
                 <ul class="mb-0 mt-1">
                     @foreach (var e in fieldErrors)
                     {
-                        <li>@context.FieldTitle(e.Path): @e.Message</li>
+                        <li>
+                            @if (e.IsWarning)
+                            {
+                                <span class="badge text-bg-warning me-1">предупреждение</span>
+                            }
+                            <a href="" class="alert-link fw-normal" @onclick="() => GoToAsync(e.Path)" @onclick:preventDefault>@PlaceTitle(e.Path)</a>:
+                            @e.Message
+                        </li>
                     }
                 </ul>
             }
@@ -109,7 +173,13 @@ else
                     <button type="button" class="list-group-item list-group-item-action d-flex justify-content-between align-items-start @(s.Key == current ? "active" : "")"
                             @onclick="() => SelectSectionAsync(s.Key)">
                         <span class="@(s.Visible ? "" : "text-muted")">@s.Title</span>
-                        <span title="@FillTitle(s)" class="ms-2 text-nowrap">@FillMark(s)</span>
+                        <span class="ms-2 text-nowrap">
+                            @if (OpenCommentsIn(s.Key) is > 0 and var open)
+                            {
+                                <span class="badge text-bg-warning me-1" title="Неразрешённые замечания">💬 @open</span>
+                            }
+                            <span title="@FillTitle(s)">@FillMark(s)</span>
+                        </span>
                     </button>
                 }
             </div>
@@ -137,6 +207,18 @@ else
                                 @foreach (var m in section.Missing)
                                 {
                                     <li>@context.FieldTitle(m.Path): @m.Message</li>
+                                }
+                            </ul>
+                        </div>
+                    }
+                    @if (section.Warnings.Count > 0)
+                    {
+                        <div class="alert alert-warning small py-2">
+                            Предупреждения (отправку не блокируют):
+                            <ul class="mb-0">
+                                @foreach (var w in section.Warnings)
+                                {
+                                    <li>@context.FieldTitle(w.Path): @w.Message</li>
                                 }
                             </ul>
                         </div>
@@ -173,6 +255,15 @@ else
     private List<FieldError> fieldErrors = [];
     private string? copied;
     private Timer? timer;
+    private List<CommentItem> comments = [];
+    private bool returning;
+    private string? returnComment;
+    private string? scrollTo;
+
+    private int OpenComments => comments.Count(c => !c.IsResolved);
+
+    private int OpenCommentsIn(string section) =>
+        comments.Count(c => !c.IsResolved && c.FieldPath.TrimStart('/').Split('/')[0] == section);
 
     private SectionState? Current => sections.FirstOrDefault(s => s.Key == current);
 
@@ -201,12 +292,146 @@ else
         }
 
         payload = JsonNode.Parse(details.Payload.GetRawText())!.AsObject();
-        context = new SchemaContext(details.Schema, payload, details.Metadata, OnChanged, OnEdited) { Locked = !details.Editable };
+        comments = await Http.GetFromJsonAsync<List<CommentItem>>($"api/documents/{Id}/comments") ?? [];
+        context = new SchemaContext(details.Schema, payload, details.Metadata, OnChanged, OnEdited)
+        {
+            Locked = !details.Editable, Comments = comments, CanComment = details.Actions.Review,
+            CanResolve = details.Actions.ResolveComments, AddComment = AddCommentAsync, ResolveComment = ResolveCommentAsync
+        };
         sections = details.Metadata.Sections.ToList();
         version = details.Document.Version;
         statusTitle = details.Document.StatusTitle;
         current = sections.Any(s => s.Key == current) ? current : sections.FirstOrDefault(s => s.Visible)?.Key;
-        (dirty, conflict, copied, fieldErrors) = (false, false, null, []);
+        (dirty, conflict, copied, fieldErrors, returning, returnComment) = (false, false, null, [], false, null);
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (scrollTo is not { } path) return;
+        scrollTo = null;
+        // Само поле или ближайший нарисованный предок: поля внутри виджета своего id не имеют.
+        var segments = path.TrimStart('/').Split('/');
+        var ids = Enumerable.Range(1, segments.Length).Reverse()
+            .Select(n => SchemaContext.Anchor("/" + string.Join('/', segments.Take(n)))).ToArray();
+        await JS.InvokeVoidAsync("rpdfosScrollToField", (object)ids);
+    }
+
+    // Переход к полю из списка замечаний или ошибок: открыть его раздел (с сохранением текущего) и прокрутить к полю.
+    private async Task GoToAsync(string path)
+    {
+        var section = path.TrimStart('/').Split('/')[0];
+        if (section != current) await SelectSectionAsync(section);
+        if (section == current) scrollTo = path;
+    }
+
+    private string PlaceTitle(string path)
+    {
+        var section = path.TrimStart('/').Split('/')[0];
+        var title = sections.FirstOrDefault(s => s.Key == section)?.Title ?? section;
+        return path.Trim('/').Contains('/') ? $"{title} → {context!.FieldTitle(path)}" : title;
+    }
+
+    private static string ReadOnlyReason(string status) => status switch
+    {
+        "under_review" => "Документ на проверке у методиста — изменить его можно после возврата на доработку.",
+        "accepted" => "Документ принят методистом.",
+        "returned" => "Документ на доработке у автора.",
+        _ => "Документ открыт только для просмотра: изменяет его автор, пока документ в работе."
+    };
+
+    /// <summary>Отправка: сначала сохраняется открытый раздел; ошибки полной проверки — списком со ссылками на поля.</summary>
+    private async Task SubmitAsync()
+    {
+        if (!await SaveSectionAsync()) return;
+        var done = await ChangeStatusAsync("submit", new { version }, "Документ отправлен на проверку.");
+        if (done is { Warnings.Count: > 0 })
+            (message, fieldErrors) = ("Документ отправлен на проверку. Предупреждения — отправку не блокируют:", done.Warnings);
+    }
+
+    private async Task AcceptAsync()
+    {
+        if (!await SaveSectionAsync()) return;
+        await ChangeStatusAsync("accept", new { version }, "Документ принят.");
+    }
+
+    private async Task ReturnAsync()
+    {
+        if (!await SaveSectionAsync()) return;
+        await ChangeStatusAsync("return", new { version, comment = returnComment }, "Документ возвращён автору на доработку.");
+    }
+
+    // Смена статуса: при успехе документ перечитывается — права и доступные действия зависят от нового статуса.
+    private async Task<DocumentReviewed?> ChangeStatusAsync(string action, object body, string done)
+    {
+        busy = true;
+        try
+        {
+            var response = await Http.PostAsJsonAsync($"api/documents/{Id}/{action}", body);
+            if (response.IsSuccessStatusCode && await response.Content.ReadFromJsonAsync<DocumentReviewed>() is { } reviewed)
+            {
+                await LoadAsync();
+                (messageIsError, message) = (false, done);
+                return reviewed;
+            }
+
+            var problem = await ReadProblemAsync(response);
+            if (response.StatusCode == HttpStatusCode.Conflict && problem?.Title == "Конфликт версий")
+            {
+                conflict = true;
+                return null;
+            }
+            messageIsError = true;
+            message = problem?.Detail is { } detail ? $"{problem.Title}. {detail}" : problem?.Title ?? $"Не выполнено (код ответа {(int)response.StatusCode}).";
+            fieldErrors = problem?.Errors ?? [];
+            return null;
+        }
+        catch (AccessTokenNotAvailableException e)
+        {
+            e.Redirect();
+            return null;
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private async Task<bool> AddCommentAsync(string path, string text)
+    {
+        try
+        {
+            var response = await Http.PostAsJsonAsync($"api/documents/{Id}/comments", new { fieldPath = path, text });
+            if (response.IsSuccessStatusCode && await response.Content.ReadFromJsonAsync<CommentItem>() is { } comment)
+            {
+                comments.Add(comment);
+                StateHasChanged();
+                return true;
+            }
+            (messageIsError, message, fieldErrors) = (true, await ProblemTextAsync(response, "Замечание не добавлено"), []);
+        }
+        catch (AccessTokenNotAvailableException e)
+        {
+            e.Redirect();
+        }
+        StateHasChanged();
+        return false;
+    }
+
+    private async Task ResolveCommentAsync(CommentItem comment)
+    {
+        try
+        {
+            var response = await Http.PostAsync($"api/documents/{Id}/comments/{comment.Id}/resolve", null);
+            if (response.IsSuccessStatusCode && await response.Content.ReadFromJsonAsync<CommentItem>() is { } resolved)
+                comments[comments.FindIndex(c => c.Id == comment.Id)] = resolved;
+            else
+                (messageIsError, message, fieldErrors) = (true, await ProblemTextAsync(response, "Замечание не отмечено"), []);
+        }
+        catch (AccessTokenNotAvailableException e)
+        {
+            e.Redirect();
+        }
+        StateHasChanged();
     }
 
     private void OnChanged()
