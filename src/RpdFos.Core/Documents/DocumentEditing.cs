@@ -20,7 +20,7 @@ public sealed record SectionUpdateResult(SectionUpdateProblem? Problem, IReadOnl
 /// </summary>
 public sealed class DocumentEditing(
     AppDbContext db, DocumentTypeRegistry registry, IDocumentValidator validator, RichTextSanitizer sanitizer,
-    DocumentHistory history, TimeProvider clock)
+    ValidationRuleSet rules, DocumentHistory history, TimeProvider clock)
 {
     public const string ReadOnlyChanged = "Поле из учебного плана — изменять нельзя";
 
@@ -62,7 +62,7 @@ public sealed class DocumentEditing(
         if (previous is not null) history.StatusChanged(document, previous, editorId);
         await history.SnapshotAsync(document, editorId, VersionTriggers.AutoSave, ct);
 
-        var metadata = DocumentMetadata.Build(schemaJson, element, document.Status, facts, validator, registry.FindSchema);
+        var metadata = DocumentMetadata.Build(schemaJson, element, document.Status, facts, validator, rules, registry.FindSchema);
         return new(null, [], metadata.Sections.Single(s => s.Key == section));
     }
 

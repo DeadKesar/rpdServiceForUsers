@@ -16,8 +16,16 @@ namespace RpdFos.Core.Documents;
 /// </summary>
 public enum ValidationMode { Draft, Submit }
 
-/// <summary>Ошибка проверки содержимого: место (JSON Pointer поля) и сообщение для пользователя.</summary>
-public sealed record DocumentValidationError(string Path, string Message);
+/// <summary>
+/// Замечание проверки содержимого: место (JSON Pointer поля), сообщение для пользователя и уровень. Ошибка
+/// блокирует отправку; предупреждение показывается автору и методисту, но отправку не блокирует.
+/// </summary>
+public sealed record DocumentValidationError(string Path, string Message, string Level = IssueLevels.Error);
+
+public static class IssueLevels
+{
+    public const string Error = "error", Warning = "warning";
+}
 
 /// <summary>Проверка содержимого документа по JSON Schema его шаблона (FR-VAL-01).</summary>
 public interface IDocumentValidator

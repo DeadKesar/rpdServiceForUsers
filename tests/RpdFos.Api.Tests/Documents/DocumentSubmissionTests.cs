@@ -11,6 +11,7 @@ public class DocumentSubmissionTests
 {
     private static readonly DocumentTypeRegistry Registry = new();
     private static readonly DocumentValidator Validator = new(Registry);
+    private static readonly ValidationRuleSet Rules = new([], TimeProvider.System);
     private static readonly string Rpd = Registry.Get(DocumentTypeRegistry.Rpd).SchemaJson;
 
     [Theory]
@@ -24,7 +25,7 @@ public class DocumentSubmissionTests
     {
         var facts = Facts(new DisciplineSemesterDetails { Semester = 1, Lectures = 16, LabHours = labHours, ControlTypes = [controlType] });
 
-        var errors = DocumentSubmission.Check(Rpd, JsonDocument.Parse(payload).RootElement, facts, Validator, Registry.FindSchema)
+        var errors = DocumentSubmission.Check(Rpd, JsonDocument.Parse(payload).RootElement, facts, Validator, Rules, Registry.FindSchema)
             .Where(e => e.Message == DocumentSubmission.EmptyVisibleSection).Select(e => e.Path);
 
         Assert.Equal(missing is null ? [] : [missing], errors);
@@ -37,7 +38,7 @@ public class DocumentSubmissionTests
         var facts = Facts(new DisciplineSemesterDetails { Semester = 1, Lectures = 16, ControlTypes = ["exam"] });
 
         var errors = DocumentSubmission.Check(Rpd, JsonDocument.Parse("""{ "course_work": { "kind": "essay" } }""").RootElement,
-            facts, Validator, Registry.FindSchema);
+            facts, Validator, Rules, Registry.FindSchema);
 
         Assert.DoesNotContain(errors, e => e.Path.StartsWith("/course_work"));
     }

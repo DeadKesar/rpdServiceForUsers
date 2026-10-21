@@ -17,7 +17,8 @@ public enum ReviewProblem { NoUnresolvedComments, UnresolvedComments, UnknownFie
 /// проверяет вызывающий; сохраняет тоже он — с версией клиента.
 /// </summary>
 public sealed class DocumentReview(
-    AppDbContext db, DocumentTypeRegistry registry, IDocumentValidator validator, DocumentHistory history, TimeProvider clock)
+    AppDbContext db, DocumentTypeRegistry registry, IDocumentValidator validator, ValidationRuleSet rules, DocumentHistory history,
+    TimeProvider clock)
 {
     public const string ReturnedWithComments = "Замечаний: {0}";
 
@@ -26,7 +27,7 @@ public sealed class DocumentReview(
     {
         var schemaJson = await SchemaAsync(document, ct);
         var facts = (await DisciplineFacts.LoadAsync(db, document.DisciplineId, ct))!;
-        return DocumentSubmission.Check(schemaJson, JsonDocument.Parse(document.Payload).RootElement, facts, validator,
+        return DocumentSubmission.Check(schemaJson, JsonDocument.Parse(document.Payload).RootElement, facts, validator, rules,
             registry.FindSchema);
     }
 
@@ -34,7 +35,7 @@ public sealed class DocumentReview(
     public async Task<SubmissionResult> SubmitAsync(Document document, Guid authorId, CancellationToken ct = default)
     {
         var issues = await CheckAsync(document, ct);
-        if (issues.Count > 0) return new(false, issues);
+        if (DocumentSubmission.HasErrors(issues)) return new(false, issues);
 
         history.StatusChanged(document, document.Submit(clock.GetUtcNow()), authorId);
         await history.SnapshotAsync(document, authorId, VersionTriggers.StatusChange, ct);

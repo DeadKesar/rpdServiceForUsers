@@ -33,6 +33,12 @@ public static class DependencyInjection
         // Скомпилированные схемы и настроенный санитайзер — общие на приложение.
         services.AddSingleton<IDocumentValidator, DocumentValidator>();
         services.AddSingleton<RichTextSanitizer>();
+        // Правила проверки (x-validation-rule): реестр собирает все реализации IValidationRule.
+        services.AddOptions<ValidationRuleSettings>();
+        services.AddSingleton<IValidationRule, TopicHoursMatchTotal>();
+        services.AddSingleton<IValidationRule, CompetencesMatchMatrix>();
+        services.AddSingleton<IValidationRule, LiteratureMainRecent>();
+        services.AddSingleton<ValidationRuleSet>();
         services.AddScoped<DocumentProjections>();
         services.AddScoped<DocumentCreation>();
         services.AddScoped<DocumentHistory>();

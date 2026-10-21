@@ -11,6 +11,7 @@ using RpdFos.Api.Infrastructure;
 using RpdFos.Core;
 using RpdFos.Core.Data;
 using RpdFos.Core.Data.Entities;
+using RpdFos.Core.Documents;
 using Swashbuckle.AspNetCore.SwaggerUI;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -19,6 +20,8 @@ var builder = WebApplication.CreateBuilder(args);
 var connectionString = builder.Configuration.GetConnectionString("Default")
     ?? throw new InvalidOperationException("Не задана строка подключения ConnectionStrings:Default");
 builder.Services.AddCore(connectionString);
+// Настройки правил проверки содержимого: например, предельный возраст основной литературы.
+builder.Services.Configure<ValidationRuleSettings>(builder.Configuration.GetSection("ValidationRules"));
 
 // Учётные записи: ASP.NET Core Identity. Пароли хранятся только здесь, в виде хеша.
 builder.Services.AddIdentity<AppUser, IdentityRole<Guid>>(o =>

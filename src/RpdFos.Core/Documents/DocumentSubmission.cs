@@ -4,16 +4,20 @@ using RpdFos.Core.DocumentTypes;
 namespace RpdFos.Core.Documents;
 
 /// <summary>
-/// Проверка документа к отправке: схема шаблона в режиме отправки и условные разделы по данным дисциплины.
-/// Видимый условный раздел (лабораторные, практические, курсовой проект) обязателен — хотя бы одна запись;
-/// скрытый не проверяется: в печатной форме вместо него стандартная заглушка.
+/// Полная проверка документа к отправке: схема шаблона в режиме отправки, условные разделы по данным дисциплины
+/// и именованные правила (<c>x-validation-rule</c>). Видимый условный раздел (лабораторные, практические, курсовой
+/// проект) обязателен — хотя бы одна запись; скрытый не проверяется: в печатной форме вместо него стандартная
+/// заглушка. Результат — ошибки и предупреждения; отправку блокируют только ошибки.
 /// </summary>
 public static class DocumentSubmission
 {
     public const string EmptyVisibleSection = "Раздел предусмотрен учебным планом — добавьте хотя бы одну запись";
 
+    public static bool HasErrors(IEnumerable<DocumentValidationError> issues) => issues.Any(i => i.Level == IssueLevels.Error);
+
     public static IReadOnlyList<DocumentValidationError> Check(string schemaJson, JsonElement payload, DisciplineFacts facts,
-        IDocumentValidator validator, Func<string, JsonElement?> resolve, string targetStatus = DocumentStatuses.UnderReview)
+        IDocumentValidator validator, ValidationRuleSet rules, Func<string, JsonElement?> resolve,
+        string targetStatus = DocumentStatuses.UnderReview)
     {
         var schema = JsonDocument.Parse(schemaJson).RootElement;
         var hidden = new HashSet<string>();
@@ -33,6 +37,7 @@ public static class DocumentSubmission
 
         errors.AddRange(validator.Validate(schemaJson, payload, ValidationMode.Submit, targetStatus)
             .Where(e => !hidden.Contains(Section(e.Path))));
+        errors.AddRange(rules.Run(schema, payload, facts, resolve, hidden));
         return errors.Distinct().OrderBy(e => e.Path, StringComparer.Ordinal).ToList();
     }
 

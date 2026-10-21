@@ -152,7 +152,7 @@
       "title": "Компетенции и индикаторы",
       "x-source": "db.competence_matrix.by_discipline",
       "x-ui-widget": "competence_picker",
-      "x-validation-rule": "unique_competence_codes",
+      "x-validation-rule": ["unique_competence_codes", "competences_match_matrix"],
       "items": {
         "type": "object",
         "required": ["code", "formulation", "indicators"],
@@ -338,7 +338,7 @@
           "title": "Основная литература",
           "minItems": 1,
           "x-ui-widget": "literature_list",
-          "x-validation-rule": "literature_main_count",
+          "x-validation-rule": ["literature_main_count", "literature_main_recent"],
           "items": { "$ref": "#/$defs/literature_item" },
           "description": "Основная литература"
         },

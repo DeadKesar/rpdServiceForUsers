@@ -32,6 +32,47 @@ public class DocumentReviewApiTests(DatabaseFixture app)
     }
 
     [Fact]
+    public async Task Hours_mismatch_blocks_submission_and_old_literature_only_warns()
+    {
+        var (client, _) = await DocumentData.UserAsync(app);
+        var created = await DocumentData.CreateAsync(app, client, (await DocumentData.PublishedTemplateAsync(app)).Id, "Б1.О.10");
+        var version = await DocumentData.FillForSubmissionAsync(client, created);
+        var plan = DocumentData.Sums(created.Payload);
+
+        // Лекций по темам на 2 часа меньше плана — ошибка правила, отправка не проходит.
+        var topic = new JsonObject
+        {
+            ["section_number"] = 1, ["topic_title"] = "Основы моделирования систем",
+            ["hours"] = new JsonObject
+            {
+                ["lectures"] = plan.Lectures - 2, ["practice"] = plan.Practice, ["lab_hours"] = plan.Labs, ["self_study"] = plan.SelfStudy
+            }
+        };
+        var saved = await DocumentData.PatchAsync(client, created.Document.Id, "thematic_plan", version, new JsonArray(topic.DeepClone()));
+        Assert.Equal(SectionFill.Incomplete, saved.Section.Fill);
+        var refused = await client.PostAsJsonAsync(Url(created, "submit"), new DocumentVersionRequest(saved.Version));
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, refused.StatusCode);
+        var error = Assert.Single(await ErrorsAsync(refused));
+        Assert.Equal(("/thematic_plan", IssueLevels.Error), (error.GetProperty("path").GetString(), error.GetProperty("level").GetString()));
+        Assert.StartsWith("Лекции: по темам", error.GetProperty("message").GetString());
+
+        // Часы сходятся, литература старая — предупреждение приходит, но документ отправлен.
+        topic["hours"]!["lectures"] = plan.Lectures;
+        version = (await DocumentData.PatchAsync(client, created.Document.Id, "thematic_plan", saved.Version, new JsonArray(topic.DeepClone()))).Version;
+        var literature = new JsonObject
+        {
+            ["main"] = new JsonArray(new JsonObject { ["citation"] = "Сидоров С. С. Теория систем. — М. : Наука, 1995. — 200 с.", ["year"] = 1995 }),
+            ["additional"] = new JsonArray()
+        };
+        version = (await DocumentData.PatchAsync(client, created.Document.Id, "literature", version, literature)).Version;
+        var submitted = await client.PostAsJsonAsync(Url(created, "submit"), new DocumentVersionRequest(version));
+        Assert.Equal(HttpStatusCode.OK, submitted.StatusCode);
+        var reviewed = (await submitted.Content.ReadFromJsonAsync<DocumentReviewed>())!;
+        Assert.Equal(DocumentStatuses.UnderReview, reviewed.Status);
+        Assert.Equal(("/literature/main/0", IssueLevels.Warning), (Assert.Single(reviewed.Warnings).Path, reviewed.Warnings[0].Level));
+    }
+
+    [Fact]
     public async Task Review_cycle_with_comments()
     {
         var (author, _) = await DocumentData.UserAsync(app);

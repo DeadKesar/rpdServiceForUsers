@@ -11,10 +11,11 @@ public static class SectionFill
 
 /// <summary>
 /// Раздел документа для редактора: видимость по данным дисциплины (<c>x-visible-if</c>, FR-TPL-14), заглушка для
-/// скрытого раздела, заполненность и чего не хватает для отправки.
+/// скрытого раздела, заполненность, чего не хватает для отправки (ошибки) и предупреждения правил.
 /// </summary>
 public sealed record SectionState(
-    string Key, string Title, bool Visible, string? StubText, string Fill, IReadOnlyList<DocumentValidationError> Missing);
+    string Key, string Title, bool Visible, string? StubText, string Fill, IReadOnlyList<DocumentValidationError> Missing,
+    IReadOnlyList<DocumentValidationError> Warnings);
 
 /// <summary>
 /// Метаданные документа для редактора: разделы, поля только для чтения при текущем статусе (JSON Pointer поддеревьев)
@@ -50,11 +51,12 @@ public sealed record DocumentMetadata(
     }
 
     public static DocumentMetadata Build(string schemaJson, JsonElement payload, string status, DisciplineFacts facts,
-        IDocumentValidator validator, Func<string, JsonElement?> resolve)
+        IDocumentValidator validator, ValidationRuleSet rules, Func<string, JsonElement?> resolve)
     {
         var schema = JsonDocument.Parse(schemaJson).RootElement;
-        var missing = DocumentSubmission.Check(schemaJson, payload, facts, validator, resolve)
-            .ToLookup(e => DocumentSubmission.Section(e.Path));
+        var issues = DocumentSubmission.Check(schemaJson, payload, facts, validator, rules, resolve);
+        var missing = issues.Where(e => e.Level == IssueLevels.Error).ToLookup(e => DocumentSubmission.Section(e.Path));
+        var warnings = issues.Where(e => e.Level == IssueLevels.Warning).ToLookup(e => DocumentSubmission.Section(e.Path));
 
         var sections = new List<SectionState>();
         if (schema.TryGetProperty("properties", out var properties))
@@ -67,7 +69,7 @@ public sealed record DocumentMetadata(
                 sections.Add(new SectionState(p.Name, Text(section, "title") ?? p.Name, visible,
                     visible ? null : Text(section, "x-stub-text"),
                     !visible ? SectionFill.NotApplicable : errors.Count == 0 ? SectionFill.Complete : SectionFill.Incomplete,
-                    errors));
+                    errors, visible ? warnings[p.Name].ToList() : []));
             }
 
         return new DocumentMetadata(sections, ReadOnly(schema, status, resolve), Hidden(schema, facts, resolve), facts.Competences);

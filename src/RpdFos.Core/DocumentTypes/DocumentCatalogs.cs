@@ -41,7 +41,7 @@ public static class DocumentSources
 
 /// <summary>
 /// Каталог правил валидации (<c>x-validation-rule</c>), раздел 2.x.5 и правки по сверке.
-/// Сами правила реализуются на этапе 5; здесь — только имена.
+/// Здесь — только имена; реализации — <see cref="RpdFos.Core.Documents.IValidationRule"/>, с этапа 5.
 /// </summary>
 public static class ValidationRules
 {
@@ -49,7 +49,9 @@ public static class ValidationRules
     {
         "hours_match_curriculum", "topic_hours_match_total", "all_indicators_covered",
         "linked_rpd_must_be_approved_or_under_review", "all_indicators_have_means", "scale_matches_control_type",
-        "unique_competence_codes", "literature_main_count", "fos_passport_consistent", "control_forms_match"
+        "unique_competence_codes", "literature_main_count", "fos_passport_consistent", "control_forms_match",
+        // Этап 5: покрытие компетенций матрицы и возраст основной литературы — имён для них в каталоге проекта не было.
+        "competences_match_matrix", "literature_main_recent"
     };
 }
 

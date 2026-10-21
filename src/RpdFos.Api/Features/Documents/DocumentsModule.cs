@@ -105,16 +105,16 @@ public class DocumentsModule : ICarterModule
 
     private static async Task<IResult> Get(
         Guid id, HttpContext http, AppDbContext db, DirectoryAccounts directory, IDocumentValidator validator,
-        DocumentTypeRegistry registry, CancellationToken ct)
+        ValidationRuleSet rules, DocumentTypeRegistry registry, CancellationToken ct)
     {
         var (document, me, refusal) = await VisibleDocumentAsync(id, http, db, directory, ct);
         if (refusal is not null) return refusal;
-        return Results.Ok(await DetailsAsync(document!, db, validator, registry, ct, document!.AuthorId == me, IsReviewer(http.User)));
+        return Results.Ok(await DetailsAsync(document!, db, validator, rules, registry, ct, document!.AuthorId == me, IsReviewer(http.User)));
     }
 
     private static async Task<IResult> Create(
         CreateDocumentRequest rq, HttpContext http, DirectoryAccounts directory, DocumentCreation creation, AppDbContext db,
-        IDocumentValidator validator, DocumentTypeRegistry registry, CancellationToken ct)
+        IDocumentValidator validator, ValidationRuleSet rules, DocumentTypeRegistry registry, CancellationToken ct)
     {
         // Автор — запись справочника текущего пользователя: она же первый составитель.
         var authorId = await directory.FindIdAsync(http.User, ct);
@@ -124,7 +124,7 @@ public class DocumentsModule : ICarterModule
         return result switch
         {
             { Document: { } document } => Results.Created($"/api/documents/{document.Id}",
-                await DetailsAsync(document, db, validator, registry, ct, isAuthor: true, IsReviewer(http.User))),
+                await DetailsAsync(document, db, validator, rules, registry, ct, isAuthor: true, IsReviewer(http.User))),
             { Problem: DocumentCreationProblem.Duplicate } => Results.Problem(statusCode: StatusCodes.Status409Conflict,
                 title: "Документ уже есть", detail: result.Detail,
                 extensions: new Dictionary<string, object?>
@@ -371,7 +371,8 @@ public class DocumentsModule : ICarterModule
     }
 
     private static async Task<DocumentDetails> DetailsAsync(
-        Document document, AppDbContext db, IDocumentValidator validator, DocumentTypeRegistry registry, CancellationToken ct,
+        Document document, AppDbContext db, IDocumentValidator validator, ValidationRuleSet rules, DocumentTypeRegistry registry,
+        CancellationToken ct,
         bool isAuthor, bool isReviewer)
     {
         var schemaJson = await db.DocumentTemplates.IgnoreQueryFilters().Where(t => t.Id == document.TemplateId)
@@ -384,7 +385,7 @@ public class DocumentsModule : ICarterModule
             DocumentItem.From(document, facts.Discipline),
             payload,
             JsonDocument.Parse(schemaJson).RootElement,
-            DocumentMetadata.Build(schemaJson, payload, status, facts, validator, registry.FindSchema),
+            DocumentMetadata.Build(schemaJson, payload, status, facts, validator, rules, registry.FindSchema),
             // Остальным редактор показывает документ только для чтения.
             isAuthor && DocumentTransitions.CanEdit(status, DocumentRole.Author) ||
             isReviewer && DocumentTransitions.CanEdit(status, DocumentRole.Reviewer),

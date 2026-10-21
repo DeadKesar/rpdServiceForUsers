@@ -52,7 +52,7 @@ public class DocumentTypeSchemaTests
     [Fact]
     public void Rpd_and_fos_use_every_rule_of_the_catalog()
     {
-        // Каталог из 10 правил (8 + 2 по сверке) целиком привязан к полям схем.
+        // Каталог из 12 правил (8 + 2 по сверке + 2 этапа 5) целиком привязан к полям схем.
         var used = Registry.All.SelectMany(t => SchemaInspector.Extensions(t.Schema))
             .Where(e => e.Keyword == "x-validation-rule").Select(e => e.Value).ToHashSet();
 
