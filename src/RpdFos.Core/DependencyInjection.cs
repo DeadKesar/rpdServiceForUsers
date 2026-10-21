@@ -44,6 +44,7 @@ public static class DependencyInjection
         services.AddScoped<DocumentHistory>();
         services.AddScoped<DocumentEditing>();
         services.AddScoped<DocumentReview>();
+        services.AddScoped<SignatoryResolution>();
         return services;
     }
 }
