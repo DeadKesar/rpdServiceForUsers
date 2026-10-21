@@ -33,6 +33,21 @@ public abstract class FieldBase : ComponentBase
 
     protected void SetValue(JsonNode? value)
     {
+        Assign(value);
+        Context.Changed();
+    }
+
+    /// <summary>
+    /// Значение по мере ввода (oninput) — сразу в содержимое: автосохранение во время набора сохранит то, что на экране.
+    /// </summary>
+    protected void InputValue(JsonNode? value)
+    {
+        Assign(value);
+        Context.Edited();
+    }
+
+    private void Assign(JsonNode? value)
+    {
         EnsureParent?.Invoke();
         switch (Parent)
         {
@@ -40,7 +55,6 @@ public abstract class FieldBase : ComponentBase
             case JsonObject o: o[Key] = value; break;
             case JsonArray a when int.TryParse(Key, out var i) && i < a.Count: a[i] = value; break;
         }
-        Context.Changed();
     }
 
     protected bool ReadOnly => Context.IsReadOnly(Path, Schema);

@@ -6,9 +6,10 @@ namespace RpdFos.Web.Forms;
 
 /// <summary>
 /// Общее для полей формы документа: схема из шаблона, редактируемое содержимое, метаданные (поля только для чтения,
-/// скрытые планом места, кандидаты в компетенции) и уведомление об изменении — от него зависит автосохранение.
+/// скрытые планом места, кандидаты в компетенции) и уведомления о правках — от них зависят автосохранение
+/// и подтверждение ухода со страницы.
 /// </summary>
-public sealed class SchemaContext(JsonElement root, JsonObject payload, DocumentMetadata metadata, Action changed)
+public sealed class SchemaContext(JsonElement root, JsonObject payload, DocumentMetadata metadata, Action changed, Action edited)
 {
     public JsonElement Root { get; } = root;
     public JsonObject Payload { get; } = payload;
@@ -17,7 +18,14 @@ public sealed class SchemaContext(JsonElement root, JsonObject payload, Document
     /// <summary>Документ целиком только для чтения: статус не позволяет правку или пользователь — не автор.</summary>
     public bool Locked { get; set; }
 
+    /// <summary>Правка завершена (уход из поля, кнопка, флажок): форма перерисовывается целиком — итоги, заполненность.</summary>
     public void Changed() => changed();
+
+    /// <summary>
+    /// Ввод в поле, из которого пользователь ещё не ушёл (oninput): правка сразу отмечается несохранённой — иначе
+    /// закрытие вкладки или переход на другой сайт не спросили бы подтверждения. Форма на каждую клавишу не перерисовывается.
+    /// </summary>
+    public void Edited() => edited();
 
     // Поле из плана или закрытое статусом: само место или вложенное в такое место.
     public bool IsReadOnly(string path, JsonElement schema) =>

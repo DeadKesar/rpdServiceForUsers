@@ -163,6 +163,8 @@ else
     private int version;
     private string statusTitle = "";
     private bool dirty;
+    // Счётчик правок: сохранение снимает признак, только если за время запроса не было новых.
+    private int edits;
     private bool busy;
     private bool conflict;
     private DateTimeOffset? savedAt;
@@ -199,7 +201,7 @@ else
         }
 
         payload = JsonNode.Parse(details.Payload.GetRawText())!.AsObject();
-        context = new SchemaContext(details.Schema, payload, details.Metadata, OnChanged) { Locked = !details.Editable };
+        context = new SchemaContext(details.Schema, payload, details.Metadata, OnChanged, OnEdited) { Locked = !details.Editable };
         sections = details.Metadata.Sections.ToList();
         version = details.Document.Version;
         statusTitle = details.Document.StatusTitle;
@@ -209,6 +211,17 @@ else
 
     private void OnChanged()
     {
+        edits++;
+        dirty = true;
+        StateHasChanged();
+    }
+
+    // Ввод без ухода из поля: признак — сразу, по нему NavigationLock спрашивает подтверждение при закрытии вкладки
+    // и переходе на другой сайт. Страница перерисовывается только при первой правке, а не на каждую клавишу.
+    private void OnEdited()
+    {
+        edits++;
+        if (dirty) return;
         dirty = true;
         StateHasChanged();
     }
@@ -230,6 +243,7 @@ else
         busy = true;
         try
         {
+            var at = edits;
             var value = JsonDocument.Parse(payload![current]?.ToJsonString() ?? "null").RootElement;
             var response = await Http.PatchAsJsonAsync($"api/documents/{Id}/sections/{current}", new { version, value });
             if (response.IsSuccessStatusCode && await response.Content.ReadFromJsonAsync<SectionSaved>() is { } saved)
@@ -238,7 +252,8 @@ else
                 statusTitle = saved.StatusTitle;
                 savedAt = saved.SavedAt;
                 sections = sections.Select(s => s.Key == saved.Section.Key ? saved.Section : s).ToList();
-                (dirty, message, fieldErrors) = (false, null, []);
+                // Введённое во время запроса в сохранённое значение не попало — признак остаётся.
+                (dirty, message, fieldErrors) = (edits != at, null, []);
                 return true;
             }
 

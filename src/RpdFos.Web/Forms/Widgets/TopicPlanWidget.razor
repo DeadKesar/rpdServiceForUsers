@@ -48,6 +48,7 @@
             <div class="mt-2">
                 <label class="form-label small">Содержание</label>
                 <textarea class="form-control form-control-sm" rows="2" readonly="@ReadOnly"
+                          @oninput='e => InputText(topic, "topic_description", e.Value as string)'
                           @onchange='e => SetText(topic, "topic_description", e.Value as string)'>@Text(topic["topic_description"])</textarea>
             </div>
             <div class="row g-2 mt-1">
@@ -141,6 +142,14 @@
         if (string.IsNullOrWhiteSpace(text)) topic.Remove(key);
         else topic[key] = text.Trim();
         Context.Changed();
+    }
+
+    // По мере ввода — как есть (см. ScalarInput); пробелы по краям снимает уход из поля.
+    private void InputText(JsonObject topic, string key, string? text)
+    {
+        if (string.IsNullOrEmpty(text)) topic.Remove(key);
+        else topic[key] = text;
+        Context.Edited();
     }
 
     private void Add()

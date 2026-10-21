@@ -11,7 +11,8 @@
     }
     else
     {
-        <RadzenHtmlEditor Value="@(Text(Value) ?? "")" ValueChanged="@((string html) => OnChanged(html))" Style="height: 220px;">
+        <RadzenHtmlEditor Value="@(Text(Value) ?? "")" Input="@((string html) => OnInput(html))"
+                          ValueChanged="@((string html) => OnChanged(html))" Style="height: 220px;">
             <RadzenHtmlEditorBold Title="Полужирный" />
             <RadzenHtmlEditorItalic Title="Курсив" />
             <RadzenHtmlEditorUnorderedList Title="Маркированный список" />
@@ -25,7 +26,12 @@
 </div>
 
 @code {
+    private void OnChanged(string? html) => SetValue(Html(html));
+
+    // Input — каждая правка в редакторе: признак несохранённых правок не ждёт ухода из него.
+    private void OnInput(string? html) => InputValue(Html(html));
+
     // Пустой редактор отдаёт «<br>» или пустой абзац — это не текст: поле удаляется из содержимого.
-    private void OnChanged(string? html) =>
-        SetValue(string.IsNullOrWhiteSpace(Regex.Replace(html ?? "", "<[^>]*>|&nbsp;", "")) ? null : JsonValue.Create(html));
+    private static JsonValue? Html(string? html) =>
+        string.IsNullOrWhiteSpace(Regex.Replace(html ?? "", "<[^>]*>|&nbsp;", "")) ? null : JsonValue.Create(html);
 }

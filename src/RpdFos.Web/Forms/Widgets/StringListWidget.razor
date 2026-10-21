@@ -11,7 +11,7 @@
         <div class="input-group input-group-sm mb-1">
             <span class="input-group-text">@(index + 1)</span>
             <input type="text" class="form-control" readonly="@ReadOnly" value="@Text(items![index])"
-                   @onchange="e => Change(index, e.Value as string)" />
+                   @oninput="e => Input(index, e.Value as string)" @onchange="e => Change(index, e.Value as string)" />
             @if (!ReadOnly)
             {
                 <button class="btn btn-outline-secondary" type="button" title="Удалить" @onclick="() => Remove(index)">✕</button>
@@ -33,6 +33,13 @@
     {
         EnsureArray().Add(JsonValue.Create(""));
         Context.Changed();
+    }
+
+    // По мере ввода — как есть (см. ScalarInput); пробелы по краям снимает уход из поля.
+    private void Input(int index, string? text)
+    {
+        EnsureArray()[index] = JsonValue.Create(text ?? "");
+        Context.Edited();
     }
 
     private void Change(int index, string? text)

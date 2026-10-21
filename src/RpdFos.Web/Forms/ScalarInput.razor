@@ -21,16 +21,19 @@
         break;
     case "integer" or "number":
         <input type="number" class="form-control @Size" readonly="@ReadOnly" value="@Current"
-               step="@(Kind == "integer" ? "1" : "any")" @onchange="e => SetNumber(e.Value as string)" />
+               step="@(Kind == "integer" ? "1" : "any")" @oninput="e => InputNumber(e.Value as string)" @onchange="e => SetNumber(e.Value as string)" />
         break;
     case "date":
-        <input type="date" class="form-control @Size" readonly="@ReadOnly" value="@Current" @onchange="e => SetText(e.Value as string)" />
+        <input type="date" class="form-control @Size" readonly="@ReadOnly" value="@Current"
+               @oninput="e => InputText(e.Value as string)" @onchange="e => SetText(e.Value as string)" />
         break;
     case "textarea":
-        <textarea class="form-control @Size" rows="3" readonly="@ReadOnly" @onchange="e => SetText(e.Value as string)">@Current</textarea>
+        <textarea class="form-control @Size" rows="3" readonly="@ReadOnly"
+                  @oninput="e => InputText(e.Value as string)" @onchange="e => SetText(e.Value as string)">@Current</textarea>
         break;
     default:
-        <input type="text" class="form-control @Size" readonly="@ReadOnly" value="@Current" @onchange="e => SetText(e.Value as string)" />
+        <input type="text" class="form-control @Size" readonly="@ReadOnly" value="@Current"
+               @oninput="e => InputText(e.Value as string)" @onchange="e => SetText(e.Value as string)" />
         break;
 }
 
@@ -49,10 +52,24 @@
 
     private void SetText(string? text) => SetValue(string.IsNullOrWhiteSpace(text) ? null : JsonValue.Create(text.Trim()));
 
+    // При вводе текст идёт в содержимое как есть: обрезка на каждой клавише не дала бы набрать пробел между словами.
+    // Пробелы по краям снимает уход из поля (SetText).
+    private void InputText(string? text) => InputValue(string.IsNullOrEmpty(text) ? null : JsonValue.Create(text));
+
     // Число, которое не разбирается, остаётся строкой — его отклонит проверка черновика с понятным сообщением.
     private void SetNumber(string? text) => SetValue(
-        string.IsNullOrWhiteSpace(text) ? null
-        : Kind == "integer" && int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var i) ? JsonValue.Create(i)
+        string.IsNullOrWhiteSpace(text) ? null : ParseNumber(text) ?? JsonValue.Create(text));
+
+    // Недонабранное число («-», «1.») в содержимое не пишется, правка только отмечается: перерисовка с разобранным
+    // значением стёрла бы набранное. Значение установит уход из поля.
+    private void InputNumber(string? text)
+    {
+        if (ParseNumber(text) is { } number && number.ToString() == text) InputValue(number);
+        else Context.Edited();
+    }
+
+    private JsonValue? ParseNumber(string? text) =>
+        Kind == "integer" && int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var i) ? JsonValue.Create(i)
         : decimal.TryParse(text, NumberStyles.Number, CultureInfo.InvariantCulture, out var d) ? JsonValue.Create(d)
-        : JsonValue.Create(text));
+        : null;
 }
