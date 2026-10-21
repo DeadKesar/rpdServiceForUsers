@@ -365,7 +365,11 @@ else
                     Add(path, v.ToString());
                     break;
                 case JsonObject o:
-                    foreach (var (key, value) in o) Collect(value, Property(schema, key), $"{path}/{key}");
+                    // Порядок — как в форме (по схеме), а не порядок ввода.
+                    var order = schema.ValueKind == JsonValueKind.Object && schema.TryGetProperty("properties", out var props)
+                        ? props.EnumerateObject().Select(p => p.Name).ToList() : [];
+                    foreach (var (key, value) in o.OrderBy(p => order.IndexOf(p.Key) is var n and >= 0 ? n : int.MaxValue))
+                        Collect(value, Property(schema, key), $"{path}/{key}");
                     break;
                 case JsonArray a:
                     var items = schema.ValueKind == JsonValueKind.Object && schema.TryGetProperty("items", out var i)
