@@ -23,11 +23,21 @@ docs/                   проект, задания этапов, runbook-и, �
 
 ```
 dotnet dev-certs https --trust          # один раз: OpenIddict принимает только HTTPS
-docker compose up -d db
+docker compose up -d db converter       # база и конвертер DOCX -> PDF
 dotnet user-secrets set "Seed:AdminEmail" "admin@rpdfos.local" --project src/RpdFos.Api
 dotnet user-secrets set "Seed:AdminPassword" '<пароль>' --project src/RpdFos.Api
 dotnet run --project src/RpdFos.Api
 ```
+
+Порядок: сначала сервисы `docker compose` (база нужна для миграций при старте, конвертер — для PDF), затем хост.
+Без конвертера всё работает, кроме PDF: задача формирования PDF завершится с причиной «Конвертер PDF недоступен».
+
+Сервисы `docker-compose.yml`:
+
+| Сервис | Образ | Назначение |
+| --- | --- | --- |
+| `db` | `postgres:17-alpine` | База данных, порт 5432 |
+| `converter` | `gotenberg/gotenberg:8.38.1` (MIT, ~2,5 ГБ) | DOCX → PDF: LibreOffice в режиме headless за HTTP API, порт 3000. Times New Roman в образе нет — подставляется метрически совместимый Liberation Serif |
 
 - https://localhost:5081 — веб-клиент, https://localhost:5081/swagger — Swagger UI, `/health` — проверка.
 - Профиль `https` из `Properties/launchSettings.json` включает окружение Development: при старте
@@ -71,8 +81,13 @@ dotnet ef migrations add <Имя> -p src/RpdFos.Core -s src/RpdFos.Api
 | `Seed:AdminEmail`, `Seed:AdminPassword` | Первый администратор — только в user-secrets |
 | `Jobs:Enabled` | Сервер фоновых задач Hangfire и панель `/hangfire` (выключено в окружении Testing) |
 | `Jobs:QueuePollSeconds` | Как часто сервер задач опрашивает очередь (по умолчанию 15 с) |
+| `Jobs:GenerationWorkers` | Сколько документов формируется одновременно (по умолчанию 2) |
+| `Converter:Url`, `Converter:TimeoutSeconds` | Адрес конвертера DOCX → PDF (по умолчанию `http://localhost:3000`) и предел ожидания (120 с) |
+| `Generation:StoragePath`, `Generation:RetentionDays` | Каталог сформированных файлов (по умолчанию `storage/generated` у хоста) и срок их хранения (30 дней) |
+| `ValidationRules:LiteratureMaxAgeYears` | Основная литература старше этого числа лет — предупреждение при проверке (10) |
 
-Фоновые задачи (импорт исходных файлов) — Hangfire, хранилище в той же базе, схема `hangfire`.
+Фоновые задачи — Hangfire, хранилище в той же базе, схема `hangfire`: импорт исходных файлов (очередь `parsing`),
+формирование DOCX и PDF и ежедневная очистка файлов с истёкшим сроком хранения (очередь `generation`).
 Панель задач — https://localhost:5081/hangfire, только для администратора: вход — через страницу входа системы.
 
 ## Документация
