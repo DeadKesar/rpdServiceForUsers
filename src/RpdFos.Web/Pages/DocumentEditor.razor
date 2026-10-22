@@ -78,6 +78,11 @@ else
         }
     </div>
 
+    @if (details.Actions.Print)
+    {
+        <PrintPanel DocumentId="Id" BeforePrint="SaveSectionAsync" />
+    }
+
     @if (returning && details.Actions.Review)
     {
         <div class="card mb-3">

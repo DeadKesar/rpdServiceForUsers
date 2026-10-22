@@ -15,7 +15,7 @@ public sealed record DocumentItem(Guid Id, string Type, string Title, string Sta
     DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, DateTimeOffset? SubmittedAt);
 
 /// <summary>Что пользователь может сделать с документом: отправить, проверить (вернуть, принять, замечания), разрешать замечания.</summary>
-public sealed record DocumentActions(bool Submit, bool Review, bool ResolveComments);
+public sealed record DocumentActions(bool Submit, bool Review, bool ResolveComments, bool Print);
 
 public sealed record DocumentDetails(DocumentItem Document, JsonElement Payload, JsonElement Schema, DocumentMetadata Metadata,
     bool Editable, DocumentActions Actions);
@@ -64,3 +64,11 @@ public sealed record DocumentReviewed(int Version, string Status, string StatusT
 /// <summary>Замечание методиста к полю: кто и когда оставил, разрешено ли и кем.</summary>
 public sealed record CommentItem(Guid Id, string FieldPath, string Text, Guid AuthorId, string AuthorName, DateTimeOffset CreatedAt,
     bool IsResolved, string? ResolvedByName, DateTimeOffset? ResolvedAt);
+
+/// <summary>Задача формирования печатной формы: статус, файл (если сформирован) и отчёт.</summary>
+public sealed record GenerationItem(Guid TaskId, string Format, string Status, string? ErrorMessage, DateTimeOffset CreatedAt,
+    DateTimeOffset? CompletedAt, Guid? FileId, string? FileName, long? SizeBytes, DateTimeOffset? ExpiresAt, List<string> Warnings,
+    List<string> Unfilled)
+{
+    public bool InProgress => Status is "queued" or "running";
+}

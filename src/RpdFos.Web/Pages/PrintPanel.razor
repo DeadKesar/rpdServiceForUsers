@@ -1,0 +1,216 @@
+@using System.Net
+@using System.Net.Http.Json
+@using Microsoft.AspNetCore.Components.WebAssembly.Authentication
+@using RpdFos.Web.Models
+@implements IAsyncDisposable
+@inject HttpClient Http
+@inject IJSRuntime JS
+
+@* Печатная форма (S-15, S-16): DOCX и PDF формируются в фоне, статус опрашивается; файлы, отчёт о формировании
+   и предпросмотр PDF во встроенном просмотрщике браузера. Файл получается запросом с токеном — прямая ссылка
+   без токена не откроется. *@
+<div class="card mb-3">
+    <div class="card-body py-2">
+        <div class="d-flex flex-wrap align-items-center gap-2">
+            <span class="fw-semibold me-2">Печатная форма</span>
+            <button class="btn btn-sm btn-outline-secondary" disabled="@Busy" @onclick='() => PrintAsync("docx")'>Сформировать DOCX</button>
+            <button class="btn btn-sm btn-outline-secondary" disabled="@Busy" @onclick='() => PrintAsync("pdf")'>Сформировать PDF</button>
+            @if (current is { InProgress: true })
+            {
+                <span class="small text-muted">
+                    <span class="spinner-border spinner-border-sm me-1" role="status"></span>
+                    @current.Format.ToUpperInvariant(): @StatusTitle(current.Status)…
+                </span>
+            }
+        </div>
+        @if (message is not null)
+        {
+            <div class="alert alert-danger py-1 small mt-2 mb-0">@message</div>
+        }
+        @if (items.Count > 0)
+        {
+            <table class="table table-sm small mt-2 mb-0 align-middle">
+                <tbody>
+                    @foreach (var item in items)
+                    {
+                        <tr>
+                            <td class="text-nowrap">@item.CreatedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</td>
+                            <td>@item.Format.ToUpperInvariant()</td>
+                            <td class="@(item.Status == "failed" ? "text-danger" : "")">
+                                @StatusTitle(item.Status)
+                                @if (item.ErrorMessage is not null)
+                                {
+                                    <div>@item.ErrorMessage</div>
+                                }
+                            </td>
+                            <td>
+                                @if (item.FileId is not null)
+                                {
+                                    <button class="btn btn-link btn-sm p-0 me-2" @onclick="() => DownloadAsync(item)">Скачать</button>
+                                    @if (item.Format == "pdf")
+                                    {
+                                        <button class="btn btn-link btn-sm p-0 me-2" @onclick="() => PreviewAsync(item)">Просмотреть</button>
+                                    }
+                                    <span class="text-muted">@Size(item.SizeBytes), хранится до @item.ExpiresAt?.ToLocalTime().ToString("dd.MM.yyyy")</span>
+                                }
+                            </td>
+                            <td>
+                                @if (item.Warnings.Count + item.Unfilled.Count > 0)
+                                {
+                                    <details>
+                                        <summary>Отчёт: предупреждений @item.Warnings.Count, незаполненных мест @item.Unfilled.Count</summary>
+                                        <ul class="mb-0">
+                                            @foreach (var w in item.Warnings)
+                                            {
+                                                <li class="text-warning-emphasis">@w</li>
+                                            }
+                                            @foreach (var u in item.Unfilled)
+                                            {
+                                                <li>@u</li>
+                                            }
+                                        </ul>
+                                    </details>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+        @if (previewUrl is not null)
+        {
+            <div class="mt-2">
+                <div class="d-flex justify-content-between small">
+                    <span>Предпросмотр: @previewName</span>
+                    <button class="btn btn-link btn-sm p-0" @onclick="ClosePreviewAsync">Закрыть</button>
+                </div>
+                <iframe src="@previewUrl" title="Предпросмотр PDF" class="border w-100" style="height: 80vh"></iframe>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public Guid DocumentId { get; set; }
+
+    /// <summary>Перед формированием — сохранить открытый раздел: печатается сохранённый документ.</summary>
+    [Parameter] public Func<Task<bool>>? BeforePrint { get; set; }
+
+    private List<GenerationItem> items = [];
+    private GenerationItem? current;
+    private string? message;
+    private string? previewUrl;
+    private string? previewName;
+    private readonly CancellationTokenSource stop = new();
+
+    private bool Busy => current is { InProgress: true };
+
+    protected override async Task OnParametersSetAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            items = await Http.GetFromJsonAsync<List<GenerationItem>>($"api/documents/{DocumentId}/generations") ?? [];
+        }
+        catch (AccessTokenNotAvailableException e)
+        {
+            e.Redirect();
+        }
+    }
+
+    private async Task PrintAsync(string format)
+    {
+        message = null;
+        if (BeforePrint is not null && !await BeforePrint()) return;
+        try
+        {
+            var response = await Http.PostAsync($"api/documents/{DocumentId}/print/{format}", null);
+            if (response.StatusCode != HttpStatusCode.Accepted || await response.Content.ReadFromJsonAsync<GenerationItem>() is not { } queued)
+            {
+                message = $"Документ не поставлен на формирование (код ответа {(int)response.StatusCode}).";
+                return;
+            }
+            current = queued;
+            var location = response.Headers.Location!;
+            // Опрос статуса фоновой задачи, пока она не завершится (FR-GEN-04).
+            while (current.InProgress && !stop.IsCancellationRequested)
+            {
+                StateHasChanged();
+                await Task.Delay(1000, stop.Token);
+                current = await Http.GetFromJsonAsync<GenerationItem>(location, stop.Token) ?? current;
+            }
+            await LoadAsync();
+            if (current is { Status: "succeeded", Format: "pdf" }) await PreviewAsync(current);
+        }
+        catch (AccessTokenNotAvailableException e)
+        {
+            e.Redirect();
+        }
+        catch (TaskCanceledException)
+        {
+            // Ушли со страницы — опрос больше не нужен.
+        }
+    }
+
+    private async Task<byte[]?> FileAsync(GenerationItem item)
+    {
+        var response = await Http.GetAsync($"api/documents/{DocumentId}/files/{item.FileId}");
+        if (response.IsSuccessStatusCode) return await response.Content.ReadAsByteArrayAsync();
+        message = response.StatusCode == HttpStatusCode.NotFound
+            ? "Файл удалён по сроку хранения — сформируйте документ заново."
+            : $"Файл не получен (код ответа {(int)response.StatusCode}).";
+        return null;
+    }
+
+    private async Task DownloadAsync(GenerationItem item)
+    {
+        message = null;
+        if (await FileAsync(item) is { } bytes)
+            await JS.InvokeVoidAsync("rpdfosDownload", bytes, item.FileName, ContentType(item.Format));
+    }
+
+    private async Task PreviewAsync(GenerationItem item)
+    {
+        message = null;
+        if (await FileAsync(item) is not { } bytes) return;
+        await ClosePreviewAsync();
+        previewUrl = await JS.InvokeAsync<string>("rpdfosObjectUrl", bytes, "application/pdf");
+        previewName = item.FileName;
+    }
+
+    private async Task ClosePreviewAsync()
+    {
+        if (previewUrl is not null) await JS.InvokeVoidAsync("rpdfosRevokeUrl", previewUrl);
+        (previewUrl, previewName) = (null, null);
+    }
+
+    private static string ContentType(string format) => format == "pdf"
+        ? "application/pdf"
+        : "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+
+    private static string StatusTitle(string status) => status switch
+    {
+        "queued" => "в очереди",
+        "running" => "формируется",
+        "succeeded" => "готово",
+        "failed" => "ошибка",
+        _ => status
+    };
+
+    private static string Size(long? bytes) => bytes is { } b ? $"{Math.Max(1, b / 1024)} КБ" : "";
+
+    public async ValueTask DisposeAsync()
+    {
+        stop.Cancel();
+        stop.Dispose();
+        try
+        {
+            await ClosePreviewAsync();
+        }
+        catch (JSDisconnectedException)
+        {
+            // Страница закрыта — освобождать нечего.
+        }
+    }
+}

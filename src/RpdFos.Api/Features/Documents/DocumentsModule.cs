@@ -392,7 +392,9 @@ public class DocumentsModule : ICarterModule
             new DocumentActions(
                 Submit: isAuthor && DocumentTransitions.CanSubmit(status),
                 Review: isReviewer && DocumentTransitions.CanReview(status),
-                ResolveComments: isAuthor && DocumentTransitions.CanResolveComments(status)));
+                ResolveComments: isAuthor && DocumentTransitions.CanResolveComments(status),
+                // Печать: автор — в любом статусе, методист — на проверке и после приёма (как в срезе «Печать»).
+                Print: isAuthor || isReviewer && status is DocumentStatuses.UnderReview or DocumentStatuses.Accepted));
     }
 
     private static IResult NotFound() =>
@@ -447,8 +449,11 @@ public record DocumentItem(
             d.TemplateRevision, d.DisciplineId, discipline.Code, discipline.Name, d.AuthorId, d.CreatedAt, d.UpdatedAt, d.SubmittedAt);
 }
 
-/// <summary>Что пользователь может сделать с документом сейчас: отправить, проверить (вернуть, принять, замечания), разрешать замечания.</summary>
-public record DocumentActions(bool Submit, bool Review, bool ResolveComments);
+/// <summary>
+/// Что пользователь может сделать с документом сейчас: отправить, проверить (вернуть, принять, замечания), разрешать
+/// замечания, формировать печатную форму.
+/// </summary>
+public record DocumentActions(bool Submit, bool Review, bool ResolveComments, bool Print);
 
 /// <summary>Документ для редактора: содержимое, схема из шаблона, метаданные и доступные действия.</summary>
 public record DocumentDetails(
