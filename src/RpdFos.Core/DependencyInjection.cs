@@ -50,6 +50,8 @@ public static class DependencyInjection
         services.AddOptions<GenerationSettings>();
         services.AddSingleton<GeneratedFileStore>();
         services.AddScoped<DocumentPrinting>();
+        services.AddScoped<GenerationJob>();
+        services.AddScoped<GeneratedFilesCleanup>();
         return services;
     }
 }

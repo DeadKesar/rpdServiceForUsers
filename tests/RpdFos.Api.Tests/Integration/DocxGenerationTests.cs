@@ -6,10 +6,12 @@ using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Validation;
 using DocumentFormat.OpenXml.Wordprocessing;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using RpdFos.Api.Features.Documents;
 using RpdFos.Api.Features.Printing;
 using RpdFos.Core.Data.Entities;
 using RpdFos.Core.Documents;
+using RpdFos.Core.Printing;
 using Xunit;
 
 namespace RpdFos.Api.Tests.Integration;
@@ -180,15 +182,83 @@ public class DocxGenerationTests(DatabaseFixture app)
         var version = await DocumentData.FillForSubmissionAsync(author, created);
         var submitted = await author.PostAsJsonAsync($"/api/documents/{created.Document.Id}/submit", new DocumentVersionRequest(version));
         Assert.Equal(HttpStatusCode.OK, submitted.StatusCode);
-        Assert.Equal(HttpStatusCode.OK, (await methodist.PostAsync(url, null)).StatusCode);
+        Assert.Equal(HttpStatusCode.Accepted, (await methodist.PostAsync(url, null)).StatusCode);
     }
 
-    private static async Task<GenerationItem> PrintAsync(HttpClient client, DocumentDetails document)
+    [Fact]
+    public async Task Pdf_is_converted_from_generated_docx_in_background()
     {
-        var response = await client.PostAsync($"/api/documents/{document.Document.Id}/print/docx", null);
-        Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
+        var (client, _) = await DocumentData.UserAsync(app);
+        var created = await DocumentData.CreateAsync(app, client, (await DocumentData.PublishedTemplateAsync(app)).Id, "Б1.О.12");
+        await DocumentData.FillForSubmissionAsync(client, created);
+
+        var item = await PrintAsync(client, created, GenerationFormats.Pdf);
+        var response = await client.GetAsync($"/api/documents/{created.Document.Id}/files/{item.FileId}");
+
+        Assert.Equal("application/pdf", response.Content.Headers.ContentType?.MediaType);
+        Assert.StartsWith("%PDF", System.Text.Encoding.ASCII.GetString(await response.Content.ReadAsByteArrayAsync()));
+        Assert.EndsWith(".pdf", item.FileName);
+        // Конвертеру ушёл сформированный DOCX — тот же, что скачивается в формате DOCX.
+        using var sent = WordprocessingDocument.Open(new MemoryStream(FakePdfConverter.LastDocx!), false);
+        Assert.Contains("Основы моделирования систем", sent.MainDocumentPart!.Document!.Body!.InnerText);
+
+        // История формирования — от новых к старым.
+        var history = (await client.GetFromJsonAsync<List<GenerationItem>>($"/api/documents/{created.Document.Id}/generations"))!;
+        Assert.Equal(item.TaskId, history[0].TaskId);
+    }
+
+    [Fact]
+    public async Task Unavailable_converter_fails_the_task_with_reason()
+    {
+        var (client, _) = await DocumentData.UserAsync(app);
+        var created = await DocumentData.CreateAsync(app, client, (await DocumentData.PublishedTemplateAsync(app)).Id, "Б1.О.13");
+        FakePdfConverter.FailNext = true;
+
+        var item = await PrintAsync(client, created, GenerationFormats.Pdf, GenerationStatuses.Failed);
+
+        Assert.Contains("Конвертер PDF недоступен", item.ErrorMessage);
+        Assert.Null(item.FileId);
+    }
+
+    [Fact]
+    public async Task Expired_files_are_removed_by_cleanup()
+    {
+        var (client, _) = await DocumentData.UserAsync(app);
+        var created = await DocumentData.CreateAsync(app, client, (await DocumentData.PublishedTemplateAsync(app)).Id, "Б1.О.11");
+        var item = await PrintAsync(client, created);
+        string? path = null;
+        await app.WithDbAsync(async db =>
+        {
+            var file = await db.GeneratedFiles.SingleAsync(f => f.Id == item.FileId);
+            path = Path.Combine(app.GeneratedFiles, file.StoragePath);
+            file.ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(-1);
+            await db.SaveChangesAsync();
+        });
+
+        await using (var scope = app.Services.CreateAsyncScope())
+            Assert.True(await scope.ServiceProvider.GetRequiredService<GeneratedFilesCleanup>().RunAsync(CancellationToken.None) >= 1);
+
+        Assert.False(File.Exists(path));
+        Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/api/documents/{created.Document.Id}/files/{item.FileId}")).StatusCode);
+        await app.WithDbAsync(async db => Assert.False(await db.GeneratedFiles.AnyAsync(f => f.Id == item.FileId)));
+    }
+
+    /// <summary>Постановка в очередь (202) и опрос статуса, пока фоновая задача не завершится.</summary>
+    private static async Task<GenerationItem> PrintAsync(HttpClient client, DocumentDetails document,
+        string format = GenerationFormats.Docx, string expected = GenerationStatuses.Succeeded)
+    {
+        var response = await client.PostAsync($"/api/documents/{document.Document.Id}/print/{format}", null);
+        Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
         var item = (await response.Content.ReadFromJsonAsync<GenerationItem>())!;
-        Assert.Equal(GenerationStatuses.Succeeded, item.Status);
+        Assert.Equal(GenerationStatuses.Queued, item.Status);
+
+        var deadline = DateTime.UtcNow.AddSeconds(60);
+        while (item.Status is GenerationStatuses.Queued or GenerationStatuses.Running && DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(300);
+            item = (await client.GetFromJsonAsync<GenerationItem>(response.Headers.Location!))!;
+        }
+        Assert.Equal(expected, item.Status);
         return item;
     }
 

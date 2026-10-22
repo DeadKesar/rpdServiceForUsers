@@ -136,6 +136,7 @@ builder.Services.AddSingleton<JobActivator>(sp =>
     return new Hangfire.AspNetCore.AspNetCoreJobActivator(sp.GetRequiredService<IServiceScopeFactory>());
 });
 if (jobsEnabled)
+{
     builder.Services.AddHangfireServer(o =>
     {
         // Отдельная очередь разбора с одним исполнителем: импорты выполняются по одному.
@@ -143,6 +144,21 @@ if (jobsEnabled)
         o.Queues = [JobQueues.Parsing];
         o.WorkerCount = 1;
     });
+    builder.Services.AddHangfireServer(o =>
+    {
+        // Формирование документов — параллельно, но не больше, чем выдержит конвертер.
+        o.ServerName = $"{Environment.MachineName}:{JobQueues.Generation}";
+        o.Queues = [JobQueues.Generation];
+        o.WorkerCount = jobs.GetValue("GenerationWorkers", 2);
+    });
+}
+
+// Конвертер DOCX -> PDF — отдельный сервис (docker-compose: converter); LibreOffice на большом документе небыстр.
+builder.Services.AddHttpClient<IPdfConverter, GotenbergPdfConverter>(c =>
+{
+    c.BaseAddress = new Uri(builder.Configuration.GetValue("Converter:Url", "http://localhost:3000")!.TrimEnd('/') + "/");
+    c.Timeout = TimeSpan.FromSeconds(builder.Configuration.GetValue("Converter:TimeoutSeconds", 120));
+});
 
 var app = builder.Build();
 
@@ -174,9 +190,14 @@ app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 app.MapRazorPages();
 app.MapCarter();
 if (jobsEnabled)
+{
     // Проверку доступа делает политика конечной точки; фильтры самой панели отключены.
     app.MapHangfireDashboard("/hangfire", new DashboardOptions { Authorization = [], DashboardTitle = "Фоновые задачи" })
        .RequireAuthorization(Policies.JobsDashboard);
+    // Сформированные файлы с истёкшим сроком хранения удаляются раз в сутки (FR-GEN-06).
+    app.Services.GetRequiredService<IRecurringJobManager>().AddOrUpdate<GeneratedFilesCleanup>(
+        "generated-files-cleanup", JobQueues.Generation, job => job.RunAsync(CancellationToken.None), Cron.Daily());
+}
 app.MapFallbackToFile("index.html");
 
 await app.RunAsync();

@@ -24,4 +24,7 @@ public static class JobQueues
 {
     /// <summary>Разбор и импорт исходных файлов — один исполнитель: импорты не идут параллельно.</summary>
     public const string Parsing = "parsing";
+
+    /// <summary>Формирование DOCX и PDF (FR-GEN-04) и очистка сформированных файлов по сроку хранения.</summary>
+    public const string Generation = "generation";
 }

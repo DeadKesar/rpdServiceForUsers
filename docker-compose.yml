@@ -15,7 +15,12 @@ services:
       timeout: 3s
       retries: 10
 
-  # Этап 5: здесь появится конвертер DOCX -> PDF (LibreOffice в режиме headless).
+  # Конвертер DOCX -> PDF: Gotenberg (MIT) — LibreOffice в режиме headless за HTTP API (/forms/libreoffice/convert).
+  # Образ ~2,5 ГБ; Times New Roman в нём нет — LibreOffice подставляет метрически совместимый Liberation Serif.
+  converter:
+    image: gotenberg/gotenberg:8.38.1
+    ports:
+      - "3000:3000"   # хост API ходит по адресу Converter:Url (по умолчанию http://localhost:3000)
 
 volumes:
   dbdata:

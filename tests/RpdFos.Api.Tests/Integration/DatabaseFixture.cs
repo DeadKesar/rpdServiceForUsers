@@ -12,6 +12,7 @@ using Microsoft.Extensions.DependencyInjection;
 using OpenIddict.Validation.AspNetCore;
 using RpdFos.Core.Data;
 using RpdFos.Core.Data.Entities;
+using RpdFos.Core.Printing;
 using Testcontainers.PostgreSql;
 using Xunit;
 
@@ -47,6 +48,9 @@ public class DatabaseFixture : WebApplicationFactory<Program>, IAsyncLifetime
 
         builder.ConfigureTestServices(services =>
         {
+            // Конвертер PDF — отдельный сервис (Gotenberg); в тестах — заглушка.
+            services.AddSingleton<IPdfConverter, FakePdfConverter>();
+
             services.AddAuthentication()
                 .AddScheme<AuthenticationSchemeOptions, TestAuthHandler>(TestAuthHandler.SchemeName, null);
 
