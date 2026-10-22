@@ -30,22 +30,83 @@ public class DocxGenerationTests(DatabaseFixture app)
         var (client, author) = await DocumentData.UserAsync(app);
         var created = await DocumentData.CreateAsync(app, client, (await DocumentData.PublishedTemplateAsync(app)).Id, "Б1.О.10");
         var version = await DocumentData.FillForSubmissionAsync(client, created);
+        var plan = DocumentData.Sums(created.Payload);
         var place = JsonNode.Parse(created.Payload.GetProperty("place_in_structure").GetRawText())!;
         place["prerequisites"] = Prerequisites;
-        await DocumentData.PatchAsync(client, created.Document.Id, "place_in_structure", version, place);
+        place["prior_outcomes"] = new JsonObject { ["knows"] = "<p>основы линейной алгебры</p>" };
+        var sections = new Dictionary<string, JsonNode>
+        {
+            ["place_in_structure"] = place,
+            ["learning_outcomes"] = new JsonObject { ["knows"] = "<p>методы моделирования систем</p>" },
+            ["thematic_plan"] = new JsonArray(new JsonObject
+            {
+                ["section_number"] = 1, ["topic_title"] = "Основы моделирования систем",
+                ["topic_description"] = "Понятие модели и моделирования. Классификация моделей.",
+                ["hours"] = new JsonObject
+                {
+                    ["lectures"] = plan.Lectures, ["practice"] = plan.Practice, ["lab_hours"] = plan.Labs, ["self_study"] = plan.SelfStudy
+                }
+            }),
+            ["literature"] = new JsonObject
+            {
+                ["main"] = new JsonArray(new JsonObject { ["citation"] = "Петров П. П. Моделирование систем : учебник. — Москва : Наука, 2024. — 320 с." }),
+                ["additional"] = new JsonArray(),
+                ["internet_resources"] = new JsonArray(new JsonObject { ["title"] = "Портал моделирования", ["url"] = "https://example.org/models" }),
+                ["guidelines"] = new JsonObject { ["lab_works"] = "https://edu.example.org/labs" },
+                ["software"] = new JsonArray("Среда имитационного моделирования")
+            },
+            ["material_support"] = "<p>Компьютерный класс со средой моделирования.</p>",
+            // Один составитель: строка второго и протокол кафедры остаются бланками.
+            ["approval_sheet"] = new JsonObject
+            {
+                ["developers"] = new JsonArray(new JsonObject
+                {
+                    ["user_id"] = author.Id.ToString(), ["name_for_document"] = "М. М. Методист", ["position"] = "доцент"
+                })
+            }
+        };
+        foreach (var (section, value) in sections)
+            version = (await DocumentData.PatchAsync(client, created.Document.Id, section, version, value)).Version;
 
         var item = await PrintAsync(client, created);
         using var docx = await DownloadAsync(client, created, item);
         var body = docx.MainDocumentPart!.Document!.Body!;
         var text = body.InnerText;
+        string Line(string start) => body.Elements<Paragraph>().First(p => p.InnerText.StartsWith(start)).InnerText;
 
         Assert.DoesNotContain("Autofill", text);
         Assert.Contains("Математическое и компьютерное моделирование", text);
-        Assert.Contains("Основы моделирования систем", text);                         // тематический план
+        Assert.Contains("Сформировать у обучающихся умения", text);                   // цели
+        Assert.Contains("Освоить методы построения моделей систем", text);            // задачи
+        Assert.Contains("основы линейной алгебры", text);                              // 2.1
+        Assert.Contains("методы моделирования систем", text);                          // 2.2
+        Assert.Contains("Основы моделирования систем", text);                          // тематический план
         Assert.Contains(created.Metadata.CompetenceCandidates[0].Indicators[0].Code, text); // таблица компетенций
-        Assert.Contains("относится к обязательной части", text);                      // форма слова: дательный падеж
-        Assert.Contains("Сотрудник", text);                                           // подписанты из справочника
-        Assert.Contains("В учебном плане курсовое проектирование для данной дисциплины не предусмотрено.", text);
+        Assert.Contains("относится к обязательной части", text);                       // форма слова: дательный падеж
+        Assert.Contains("Сотрудник", text);                                            // подписанты из справочника
+        Assert.Contains("Ответственный исполнитель, заведующий", text);                // должность внутри фразы — со строчной
+        Assert.Equal("По дисциплине Математическое и компьютерное моделирование курсовое проектирование учебным планом не предусмотрено.",
+            Line("По дисциплине"));
+
+        // 3.2: строка на тему, образцы шаблона убраны.
+        var contents = body.Descendants<Table>().Single(t => t.InnerText.StartsWith("№ раздела"));
+        Assert.Equal(2, contents.Elements<TableRow>().Count());
+        Assert.Contains("Понятие модели и моделирования", contents.InnerText);
+
+        // 4.3: ресурс дисциплины — элемент списка шаблона перед постоянными ресурсами вуза.
+        var resource = body.Elements<Paragraph>().Single(p => p.InnerText == "Портал моделирования // Режим доступа: https://example.org/models");
+        var constant = body.Elements<Paragraph>().First(p => p.InnerText.StartsWith("Электронная образовательная среда"));
+        Assert.Equal(constant.ParagraphProperties!.NumberingProperties!.NumberingId!.Val!.Value,
+            resource.ParagraphProperties!.NumberingProperties!.NumberingId!.Val!.Value);
+        Assert.Contains("https://edu.example.org/labs", text);                         // 4.4 — ссылка
+        Assert.Contains("Компьютерный класс со средой моделирования.", text);          // 5
+
+        // Пустые необязательные значения не стирают бланк: протокол и строка второго составителя — для ручного заполнения.
+        Assert.Equal("протокол № ________ от \"___\" __________ 20__г.", Line("протокол №"));
+        Assert.StartsWith("доцент", Line("доцент"));
+        Assert.Contains("М. М. Методист", Line("доцент"));
+        Assert.Contains(item.Unfilled, u => u.StartsWith("AutofillProtocolNumber1") && u.EndsWith("оставлен бланк"));
+        Assert.Contains(item.Unfilled, u => u.StartsWith("AutofillDeveloperName2") && u.EndsWith("оставлен бланк"));
 
         // Форматированный текст: полужирный фрагмент и список с нумерацией Word.
         Assert.Contains(body.Descendants<Run>(), r => r.InnerText == "высшей математики" && r.RunProperties?.Bold is not null);
@@ -81,10 +142,27 @@ public class DocxGenerationTests(DatabaseFixture app)
         using var docx = await DownloadAsync(client, created, await PrintAsync(client, created));
         var body = docx.MainDocumentPart!.Document!.Body!;
 
-        Assert.Contains("Лабораторные работы учебным планом не предусмотрены.", body.InnerText);
+        // 3.3 и 4.4: формулировка вместо таблицы и вместо фразы о методических указаниях с ссылкой.
+        Assert.Equal(2, body.Elements<Paragraph>().Count(p => p.InnerText == "Лабораторные работы учебным планом не предусмотрены."));
+        Assert.DoesNotContain(body.Elements<Paragraph>(), p => p.InnerText.StartsWith("Методические указания к лабораторным занятиям по данной"));
+        Assert.Contains(body.Elements<Paragraph>(), p => p.InnerText.StartsWith("Методические указания к практическим занятиям по данной"));
         Assert.DoesNotContain(body.Descendants<Table>(), t => t.InnerText.Contains("№ ЛР"));
         Assert.Contains(body.Descendants<Table>(), t => t.InnerText.Contains("№ занятия") && t.InnerText.Contains("Построение модели"));
         Assert.Empty(new OpenXmlValidator(FileFormatVersions.Office2019).Validate(docx));
+    }
+
+    [Fact]
+    public async Task Course_project_phrase_reads_as_a_sentence()
+    {
+        // Б1.В.01: курсовой проект по плану — вид раздела из плана, фраза с родом: «предусмотрен курсовой проект».
+        var (client, _) = await DocumentData.UserAsync(app);
+        var created = await DocumentData.CreateAsync(app, client, (await DocumentData.PublishedTemplateAsync(app)).Id, "Б1.В.01");
+        await DocumentData.FillForSubmissionAsync(client, created);
+
+        using var docx = await DownloadAsync(client, created, await PrintAsync(client, created));
+        var line = docx.MainDocumentPart!.Document!.Body!.Elements<Paragraph>().First(p => p.InnerText.StartsWith("По дисциплине")).InnerText;
+
+        Assert.EndsWith(" предусмотрен курсовой проект. Примерные темы: Модель системы массового обслуживания.", line);
     }
 
     [Fact]

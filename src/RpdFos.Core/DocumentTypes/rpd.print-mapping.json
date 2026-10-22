@@ -23,7 +23,55 @@
   "AutofillSemester": { "kind": "source", "target": "parser.discipline.semesters" },
   "AutofillKurs": {
     "kind": "field", "target": "/course_work",
-    "note": "Фраза раздела «3.5 Курсовой проект (курсовая работа)»: «По дисциплине … AutofillKurs». Без курсового проекта по плану — стандартная заглушка раздела (x-stub-text, FR-TPL-14)."
+    "note": "Фраза раздела «3.5 Курсовой проект (курсовая работа)»: «По дисциплине … AutofillKurs» — «предусмотрен курсовой проект» или «предусмотрена курсовая работа» и содержание раздела; без курсового по плану — своя формулировка вхождения, чтобы фраза читалась целиком.",
+    "occurrences": { "AutofillKurs1": { "stub": "курсовое проектирование учебным планом не предусмотрено." } }
+  },
+  "AutofillGoals": { "kind": "field", "target": "/goals_and_objectives/goals" },
+  "AutofillObjectives": { "kind": "field", "target": "/goals_and_objectives/objectives" },
+  "AutofillPriorKnow": { "kind": "field", "target": "/place_in_structure/prior_outcomes/knows" },
+  "AutofillPriorCan": { "kind": "field", "target": "/place_in_structure/prior_outcomes/can" },
+  "AutofillPriorOwn": { "kind": "field", "target": "/place_in_structure/prior_outcomes/owns" },
+  "AutofillOutcomesKnow": { "kind": "field", "target": "/learning_outcomes/knows" },
+  "AutofillOutcomesCan": { "kind": "field", "target": "/learning_outcomes/can" },
+  "AutofillOutcomesOwn": { "kind": "field", "target": "/learning_outcomes/owns" },
+  "AutofillDisciplineContentsTable": { "kind": "table", "target": "discipline_contents" },
+  "AutofillLiteratureMain": { "kind": "field", "target": "/literature/main" },
+  "AutofillLiteratureAdditional": { "kind": "field", "target": "/literature/additional" },
+  "AutofillPeriodicals": { "kind": "field", "target": "/literature/periodicals" },
+  "AutofillInternetResources": {
+    "kind": "field", "target": "/literature/internet_resources",
+    "note": "Ресурсы дисциплины — элементами списка шаблона, перед постоянными ресурсами вуза."
+  },
+  "AutofillGuidelinesLab": {
+    "kind": "field", "target": "/literature/guidelines/lab_works",
+    "note": "Закладка — от фразы о методических указаниях до ссылки: без лабораторных по плану формулировка заменяет и фразу."
+  },
+  "AutofillGuidelinesPractice": {
+    "kind": "field", "target": "/literature/guidelines/practical_classes",
+    "note": "Как AutofillGuidelinesLab — для практических занятий."
+  },
+  "AutofillGuidelinesIndependent": { "kind": "field", "target": "/literature/guidelines/independent_work" },
+  "AutofillSoftware": {
+    "kind": "field", "target": "/literature/software",
+    "note": "ПО дисциплины — элементами списка шаблона, перед постоянным ПО вуза."
+  },
+  "AutofillMaterialSupport": { "kind": "field", "target": "/material_support" },
+  "AutofillProtocolNumber": {
+    "kind": "field", "target": "/approval_sheet/department_protocol/number",
+    "note": "Закладка вокруг бланка «________»: до заседания кафедры бланк остаётся для ручного заполнения."
+  },
+  "AutofillProtocolDate": {
+    "kind": "field", "target": "/approval_sheet/department_protocol/date",
+    "note": "Закладка вокруг бланка даты — как у номера протокола."
+  },
+  "AutofillDeveloperPosition": {
+    "kind": "field", "target": "/approval_sheet/developers/0/position",
+    "note": "Строки «Исполнители» — бланки: первый составитель — вхождение 1, второй — вхождение 2.",
+    "occurrences": { "AutofillDeveloperPosition2": { "target": "/approval_sheet/developers/1/position" } }
+  },
+  "AutofillDeveloperName": {
+    "kind": "field", "target": "/approval_sheet/developers/0/name_for_document",
+    "occurrences": { "AutofillDeveloperName2": { "target": "/approval_sheet/developers/1/name_for_document" } }
   },
   "AutofillZeAtAll": { "kind": "field", "target": "/hours_distribution/total_credits" },
   "AutofillByPlan": { "kind": "source", "target": "parser.discipline.hours_total" },
@@ -38,7 +86,11 @@
   "AutofillPredWay": { "kind": "signature", "target": "umk_chair", "part": "name" },
   "AutofillPositionOdimp": { "kind": "signature", "target": "vice_rector_edu", "part": "position" },
   "AutofillPositionOdimpName": { "kind": "signature", "target": "vice_rector_edu", "part": "name" },
-  "AutofillPositionKaf": { "kind": "signature", "target": "department_head", "part": "position" },
+  "AutofillPositionKaf": {
+    "kind": "signature", "target": "department_head", "part": "position",
+    "note": "«Ответственный исполнитель, заведующий кафедрой» — должность внутри фразы, со строчной буквы.",
+    "occurrences": { "AutofillPositionKaf1": { "form": "lower" } }
+  },
   "AutofillPositionKafName": { "kind": "signature", "target": "department_head", "part": "name" },
   "AutofillPositionKafForDoc": {
     "kind": "signature", "target": "department_head", "part": "document_title",

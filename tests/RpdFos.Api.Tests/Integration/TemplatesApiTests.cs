@@ -18,7 +18,7 @@ namespace RpdFos.Api.Tests.Integration;
 public class TemplatesApiTests(DatabaseFixture app)
 {
     [Theory]
-    [InlineData(DocumentTypeRegistry.Rpd, DocxBookmarksTests.Rpd, 35)]
+    [InlineData(DocumentTypeRegistry.Rpd, DocxBookmarksTests.Rpd, 57)]
     [InlineData(DocumentTypeRegistry.Fos, DocxBookmarksTests.Fos, 24)]
     public async Task Methodist_creates_uploads_print_template_and_publishes(string type, string file, int bookmarks)
     {

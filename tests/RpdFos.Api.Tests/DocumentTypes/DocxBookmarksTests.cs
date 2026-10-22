@@ -11,14 +11,16 @@ public class DocxBookmarksTests
 {
     public static byte[] Template(string name) => File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "fixtures", name));
 
-    public const string Rpd = "DWP_TemplateBookmarks.docx", Fos = "FOS_TemplateBookmarks.docx";
+    // Действующий шаблон РПД — новая версия файла оформления (этап 5); исходный остаётся для истории и проверки каталога.
+    public const string Rpd = "DWP_TemplateBookmarks_v2.docx", RpdOriginal = "DWP_TemplateBookmarks.docx", Fos = "FOS_TemplateBookmarks.docx";
 
     [Theory]
-    [InlineData(Rpd, 52, 35)]
+    [InlineData(RpdOriginal, 52, 35)]
+    [InlineData(Rpd, 76, 57)] // новая версия: +24 вхождения, +22 закладки — методическое содержимое, бланки протокола и составителей
     [InlineData(Fos, 46, 24)]
     public void Real_templates_match_bookmark_catalog(string file, int bookmarks, int baseNames)
     {
-        // Каталог закладок (docs/design/ВКР_2_Карта_закладок_DOCX.md): 52 в РПД и 46 в ФОС.
+        // Каталог закладок (docs/design/ВКР_2_Карта_закладок_DOCX.md): 52 в исходном шаблоне РПД и 46 в ФОС.
         var groups = DocxBookmarks.Read(Template(file));
 
         Assert.Equal(bookmarks, groups.Sum(g => g.Count));
