@@ -55,6 +55,15 @@ public static class PlanTitles
         _ => EducationLevel(level)
     };
 
+    /// <summary>Курсовой проект или курсовая работа по видам аттестации плана; ни того ни другого — null.</summary>
+    public static string? CourseWorkKind(IEnumerable<string> controlTypes)
+    {
+        var types = controlTypes.ToHashSet();
+        return types.Contains(ControlTypeCodes.CourseProject) ? ControlTypeCodes.CourseProject
+            : types.Contains(ControlTypeCodes.CourseWork) ? ControlTypeCodes.CourseWork
+            : null;
+    }
+
     /// <summary>Вид промежуточной аттестации — как в x-enum-titles схемы РПД.</summary>
     public static string ControlType(string type) => type switch
     {

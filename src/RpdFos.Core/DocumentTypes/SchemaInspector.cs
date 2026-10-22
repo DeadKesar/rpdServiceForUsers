@@ -55,20 +55,9 @@ public static class SchemaInspector
     /// Есть ли в схеме поле содержимого документа с таким JSON Pointer (/title_page/discipline_name).
     /// <paramref name="resolve"/> находит схему по её <c>$id</c> — для ссылок на другой тип документа.
     /// </summary>
-    public static bool FieldExists(JsonElement schema, string pointer, Func<string, JsonElement?> resolve)
-    {
-        if (!pointer.StartsWith('/')) return false;
-        var root = schema;
-        var node = Deref(schema, ref root, resolve);
-        foreach (var segment in pointer[1..].Split('/'))
-        {
-            if (node is not { } n || !n.TryGetProperty("properties", out var props) ||
-                !props.TryGetProperty(segment.Replace("~1", "/").Replace("~0", "~"), out var next))
-                return false;
-            node = Deref(next, ref root, resolve);
-        }
-        return node is not null;
-    }
+    public static bool FieldExists(JsonElement schema, string pointer, Func<string, JsonElement?> resolve) =>
+        // Номер элемента списка допустим: составитель № 2 — /approval_sheet/developers/1/position.
+        pointer.StartsWith('/') && SubschemaAt(schema, pointer, resolve) is not null;
 
     /// <summary>
     /// Подсхема места в содержимом документа (JSON Pointer экземпляра: /competences/0/code) — по properties,

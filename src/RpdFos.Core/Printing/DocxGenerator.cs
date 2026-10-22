@@ -32,6 +32,8 @@ public static partial class DocxGenerator
     [GeneratedRegex(@"\{(?<source>[^{}]+)\}")]
     private static partial Regex Placeholder();
 
+    private static readonly System.Globalization.CultureInfo Ru = System.Globalization.CultureInfo.GetCultureInfo("ru-RU");
+
     private sealed class Filler(
         WordprocessingDocument document, IReadOnlyDictionary<string, BookmarkTarget> mapping, PrintContext context,
         List<string> warnings, List<string> unfilled)
@@ -65,18 +67,27 @@ public static partial class DocxGenerator
             var goal = occurrence?.Target ?? target.Target;
             var part = occurrence?.Part ?? target.Part;
             var form = occurrence?.Form ?? WordForms.Nom;
+            var stub = occurrence?.Stub ?? target.Stub;
             var range = Range(root, bookmark);
 
             if (kind == BookmarkTargetKinds.Table)
             {
-                if (range.OfType<Table>().FirstOrDefault() is { } table) DocxTables.Build(goal, table, range, context, warnings, unfilled, name);
+                if (range.OfType<Table>().FirstOrDefault() is { } table)
+                    DocxTables.Build(goal, table, context, warnings, unfilled, name, stub);
                 else warnings.Add($"Закладка {name}: внутри нет таблицы для построителя «{goal}».");
                 return;
             }
 
+            // Место не предусмотрено планом: формулировка заменяет всё содержимое закладки — своя у вхождения или общая
+            // заглушка раздела.
+            if (kind == BookmarkTargetKinds.Field && context.Stub(goal) is { } sectionStub)
+            {
+                ReplaceRange(range, bookmark, stub ?? sectionStub);
+                return;
+            }
+
             var value = Value(kind, goal, part, form, name);
-            if (value.IsEmpty) unfilled.Add($"{name} — {Describe(kind, goal, part)}");
-            Place(range, bookmark, baseName, value, name);
+            Place(range, bookmark, baseName, value, name, Describe(kind, goal, part));
         }
 
         private PrintValue Value(string kind, string goal, string? part, string form, string name)
@@ -90,13 +101,13 @@ public static partial class DocxGenerator
                     return form == WordForms.Nom || value.IsMultiline ? value : PrintValue.Text(Declined(value.Inline, form, name));
                 case BookmarkTargetKinds.Signature:
                     var seat = context.Signatories.Seat(goal);
-                    return PrintValue.Text(part switch
+                    return PrintValue.Text(Declined(part switch
                     {
                         SignatureParts.Name => seat?.Name,
                         SignatureParts.Position => seat?.Position,
                         SignatureParts.DocumentTitle => seat?.Department,
                         _ => null
-                    });
+                    }, form, name));
                 case BookmarkTargetKinds.Text:
                     return PrintValue.Text(Placeholder().Replace(goal, m => context.Source(m.Groups["source"].Value) ?? ""));
                 default:
@@ -108,6 +119,7 @@ public static partial class DocxGenerator
         private string? Declined(string? value, string form, string name)
         {
             if (string.IsNullOrEmpty(value) || form == WordForms.Nom) return value;
+            if (form == WordForms.Lower) return char.ToLower(value[0], Ru) + value[1..];
             if (Declension.Form(value, form) is { } declined) return declined;
             warnings.Add($"Закладка {name}: нет формы «{form}» для «{value}» — напечатано как есть.");
             return value;
@@ -135,20 +147,21 @@ public static partial class DocxGenerator
             return result;
         }
 
-        private void Place(List<OpenXmlElement> range, BookmarkStart bookmark, string baseName, PrintValue value, string name)
+        private void Place(List<OpenXmlElement> range, BookmarkStart bookmark, string baseName, PrintValue value, string name, string missing)
         {
             // Заглушка — имя закладки без номера; «AutofillPositionKaf» не должна совпасть внутри «AutofillPositionKafName».
             var token = new Regex(Regex.Escape(baseName) + "(?![A-Za-z])");
             var text = range.OfType<Text>().FirstOrDefault(t => token.IsMatch(t.Text));
             if (text is null)
             {
-                // Закладка без текста-заглушки: значение — сразу после её начала.
-                if (bookmark.Parent is Paragraph)
-                    bookmark.InsertAfterSelf(new Run(new Text(value.Inline) { Space = SpaceProcessingModeValues.Preserve }));
-                else warnings.Add($"Закладка {name}: нет текста-заглушки — значение не подставлено.");
+                // Закладка вокруг бланка («________», «"___" ______ 20__ г.»): пустое значение бланк не стирает —
+                // его заполнят вручную; значение заменяет бланк.
+                if (value.IsEmpty) unfilled.Add($"{name} — {missing}, оставлен бланк");
+                else ReplaceRange(range, bookmark, value.Inline);
                 return;
             }
 
+            if (value.IsEmpty) unfilled.Add($"{name} — {missing}");
             var paragraph = text.Ancestors<Paragraph>().FirstOrDefault();
             var whole = paragraph is not null && paragraph.Descendants<Text>().Count() == 1 && text.Text.Trim() == baseName;
             if (whole && (value.IsMultiline || value.Paragraphs.Any(p => p.Runs.Any(r => r.Bold || r.Italic))))
@@ -157,6 +170,36 @@ public static partial class DocxGenerator
             {
                 text.Text = token.Replace(text.Text, _ => value.Inline, 1);
                 text.Space = SpaceProcessingModeValues.Preserve;
+            }
+        }
+
+        /// <summary>
+        /// Всё содержимое закладки — одной строкой: текст — в первый текстовый элемент (с его оформлением), остальной
+        /// текст закладки очищается, абзацы, начатые внутри закладки, удаляются (их метки закладок переносятся).
+        /// Так заполняется бланк и печатается формулировка вместо раздела, не предусмотренного планом.
+        /// </summary>
+        private static void ReplaceRange(List<OpenXmlElement> range, BookmarkStart bookmark, string value)
+        {
+            var texts = range.OfType<Text>().ToList();
+            if (texts.Count == 0)
+            {
+                if (bookmark.Parent is Paragraph)
+                    bookmark.InsertAfterSelf(new Run(new Text(value) { Space = SpaceProcessingModeValues.Preserve }));
+                return;
+            }
+            texts[0].Text = value;
+            texts[0].Space = SpaceProcessingModeValues.Preserve;
+            foreach (var text in texts.Skip(1)) text.Text = "";
+
+            var first = texts[0].Ancestors<Paragraph>().FirstOrDefault();
+            foreach (var paragraph in range.OfType<Paragraph>().Where(p => p != first).ToList())
+            {
+                foreach (var mark in paragraph.ChildElements.Where(c => c is BookmarkStart or BookmarkEnd).ToList())
+                {
+                    mark.Remove();
+                    first?.AppendChild(mark);
+                }
+                paragraph.Remove();
             }
         }
 
@@ -186,7 +229,8 @@ public static partial class DocxGenerator
 
         private void Write(Paragraph paragraph, PrintParagraph content, RunProperties? runProperties)
         {
-            if (content.List != PrintListKind.None)
+            // Заглушка — элемент списка шаблона: значения продолжают его список (4.3 с постоянными ресурсами вуза).
+            if (content.List != PrintListKind.None && paragraph.ParagraphProperties?.NumberingProperties is null)
             {
                 var properties = paragraph.ParagraphProperties ??= new ParagraphProperties();
                 // Отступы задаёт уровень списка; отступ первой строки абзаца-заглушки списку мешает.

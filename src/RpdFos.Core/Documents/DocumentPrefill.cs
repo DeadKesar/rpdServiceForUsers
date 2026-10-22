@@ -52,6 +52,7 @@ public static class DocumentPrefill
             "parser.discipline.block" => PlanTitles.Block(d.Block),
             "parser.discipline.part_type" => PlanTitles.Part(d.PartType),
             "parser.discipline.hours_total" => d.TotalHours,
+            "parser.discipline.course_work_kind" => PlanTitles.CourseWorkKind(facts.Semesters.SelectMany(s => s.ControlTypes)),
             "parser.discipline.ze_total" => d.TotalCredits,
             "parser.discipline.semesters" => new JsonArray(facts.Semesters.Select(s => (JsonNode)s.Semester).ToArray()),
             "parser.discipline.details" => new JsonArray(facts.Semesters.Select(s => (JsonNode)new JsonObject

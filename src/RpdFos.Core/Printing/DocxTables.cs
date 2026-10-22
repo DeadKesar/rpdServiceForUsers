@@ -12,8 +12,9 @@ namespace RpdFos.Core.Printing;
 /// </summary>
 internal static class DocxTables
 {
-    public static void Build(string builder, Table table, IReadOnlyList<OpenXmlElement> range, PrintContext context,
-        List<string> warnings, List<string> unfilled, string bookmark)
+    /// <param name="stub">Своя формулировка закладки вместо заглушки раздела, не предусмотренного планом.</param>
+    public static void Build(string builder, Table table, PrintContext context, List<string> warnings, List<string> unfilled,
+        string bookmark, string? stub)
     {
         switch (builder)
         {
@@ -26,8 +27,11 @@ internal static class DocxTables
             case "discipline_partition":
                 Partition(table, context, unfilled, bookmark);
                 break;
+            case "discipline_contents":
+                Contents(table, context, unfilled, bookmark);
+                break;
             case "lab_works" or "practical_classes":
-                Classes(table, builder, context, unfilled, bookmark);
+                Classes(table, builder, context, unfilled, bookmark, stub);
                 break;
             default:
                 warnings.Add($"Закладка {bookmark}: построитель таблицы «{builder}» ещё не реализован.");
@@ -150,11 +154,32 @@ internal static class DocxTables
         }
     }
 
-    // Лабораторные работы и практические занятия: № | № раздела | тема | часы | форма контроля; затем «Итого».
-    private static void Classes(Table table, string section, PrintContext context, List<string> unfilled, string bookmark)
+    // Содержание разделов (3.2): номер раздела, наименование и содержание — из тематического плана.
+    private static void Contents(Table table, PrintContext context, List<string> unfilled, string bookmark)
     {
-        if (context.Stub($"/{section}") is { } stub)
+        var rows = table.Elements<TableRow>().ToList();
+        var prototype = rows.Count > 1 ? rows[1] : rows[0];
+        foreach (var sample in rows.Skip(1)) sample.Remove();
+
+        var topics = Items(context.At("/thematic_plan"));
+        if (topics.Count == 0) unfilled.Add($"{bookmark} — тематический план не заполнен");
+        foreach (var topic in topics)
         {
+            var row = DataRow(prototype);
+            var cells = row.Elements<TableCell>().ToList();
+            string[] values = [Number(topic, "section_number"), Text(topic, "topic_title") ?? "", Text(topic, "topic_description") ?? ""];
+            for (var i = 0; i < cells.Count && i < values.Length; i++)
+                SetCell(cells[i], [values[i]], bold: false, i == 0 ? JustificationValues.Center : JustificationValues.Left);
+            table.AppendChild(row);
+        }
+    }
+
+    // Лабораторные работы и практические занятия: № | № раздела | тема | часы | форма контроля; затем «Итого».
+    private static void Classes(Table table, string section, PrintContext context, List<string> unfilled, string bookmark, string? ownStub)
+    {
+        if (context.Stub($"/{section}") is { } sectionStub)
+        {
+            var stub = ownStub ?? sectionStub;
             var paragraph = new Paragraph(new Run(PlainRun(table), new Text(stub) { Space = SpaceProcessingModeValues.Preserve }));
             if (table.NextSibling<Paragraph>()?.ParagraphProperties?.CloneNode(true) is ParagraphProperties properties)
                 paragraph.ParagraphProperties = properties;
@@ -170,7 +195,8 @@ internal static class DocxTables
         var items = Items(context.At($"/{section}"));
         if (items.Count == 0) unfilled.Add($"{bookmark} — раздел {section} не заполнен");
         foreach (var item in items)
-            Add(false, Number(item, "number"), Number(item, "section_number"), Text(item, "title") ?? "", Number(item, "hours"), "");
+            Add(false, Number(item, "number"), Number(item, "section_number"), Text(item, "title") ?? "", Number(item, "hours"),
+                Text(item, "control_form") ?? "");
         Add(true, "", "", "Итого:", items.Sum(i => int.TryParse(Number(i, "hours"), out var n) ? n : 0).ToString(), "");
 
         void Add(bool bold, params string[] values)

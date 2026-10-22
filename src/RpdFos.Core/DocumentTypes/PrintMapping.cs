@@ -10,18 +10,19 @@ namespace RpdFos.Core.DocumentTypes;
 /// Цель закладки DOCX-шаблона: <see cref="Kind"/> — вид, <see cref="Target"/> — путь источника, JSON Pointer
 /// поля, место подписанта, имя построителя таблицы или текст с подстановками; <see cref="Part"/> — для места
 /// подписанта: должность, ФИО или формулировка для документа; <see cref="Note"/> — пояснение к цели;
-/// <see cref="Occurrences"/> — переопределения для отдельных вхождений по полному имени закладки.
+/// <see cref="Occurrences"/> — переопределения для отдельных вхождений по полному имени закладки; <see cref="Stub"/> —
+/// своя формулировка, когда место не предусмотрено планом, вместо общей заглушки раздела (<c>x-stub-text</c>).
 /// </summary>
 public sealed record BookmarkTarget(
     string Kind, string Target, string? Part = null, string? Note = null,
-    IReadOnlyDictionary<string, BookmarkOccurrence>? Occurrences = null);
+    IReadOnlyDictionary<string, BookmarkOccurrence>? Occurrences = null, string? Stub = null);
 
 /// <summary>
 /// Переопределение для одного вхождения закладки (полное имя с номером): форма слова и, если вхождение
-/// по смыслу другое, — своя цель. Незаданное берётся из цели базового имени.
+/// по смыслу другое, — своя цель и своя заглушка. Незаданное берётся из цели базового имени.
 /// </summary>
 public sealed record BookmarkOccurrence(
-    string? Form = null, string? Kind = null, string? Target = null, string? Part = null, string? Note = null);
+    string? Form = null, string? Kind = null, string? Target = null, string? Part = null, string? Note = null, string? Stub = null);
 
 public static class BookmarkTargetKinds
 {
@@ -38,7 +39,10 @@ public static class WordForms
 {
     public const string Nom = "nom", Gen = "gen", Dat = "dat", Acc = "acc", Ins = "ins", Prep = "prep";
 
-    public static readonly IReadOnlySet<string> All = new HashSet<string> { Nom, Gen, Dat, Acc, Ins, Prep };
+    /// <summary>Со строчной буквы: значение внутри фразы — «Ответственный исполнитель, заведующий кафедрой».</summary>
+    public const string Lower = "lower";
+
+    public static readonly IReadOnlySet<string> All = new HashSet<string> { Nom, Gen, Dat, Acc, Ins, Prep, Lower };
 }
 
 public static class SignatureParts

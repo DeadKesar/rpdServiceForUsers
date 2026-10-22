@@ -19,6 +19,7 @@ public static class DocumentSources
         ["parser.discipline.hours_total"] = "Академических часов по плану (disciplines.total_hours)",
         ["parser.discipline.details"] = "Часы по видам занятий по семестрам (discipline_semester_details)",
         ["parser.discipline.attestation"] = "Виды промежуточной аттестации (discipline_semester_details.control_types)",
+        ["parser.discipline.course_work_kind"] = "Курсовой проект или курсовая работа — по видам аттестации плана",
         ["reference.direction.code"] = "Код направления подготовки (study_directions.code)",
         ["reference.direction.name"] = "Наименование направления (study_directions.name)",
         ["reference.direction.level"] = "Уровень образования (study_directions.education_level)",
@@ -65,6 +66,7 @@ public static class TableBuilders
         ["discipline_partition"] = "Разделы дисциплины (тематический план)",
         ["practical_classes"] = "Практические занятия",
         ["lab_works"] = "Лабораторные работы",
+        ["discipline_contents"] = "Содержание разделов дисциплины (тематический план)",
         ["fos_passport"] = "Паспорт ФОС: компетенции, индикаторы, разделы и задания"
     };
 }

@@ -62,8 +62,9 @@ public class DocumentsApiTests(DatabaseFixture app)
         Assert.Contains("/hours_distribution", created.Metadata.ReadOnlyPaths);
         Assert.Contains("/place_in_structure/block", created.Metadata.ReadOnlyPaths);
         Assert.DoesNotContain("/title_page/academic_year", created.Metadata.ReadOnlyPaths);
-        // Не предусмотрено планом: курсовой проект — и раздел, и методические указания к нему.
-        Assert.Equal(["/course_work", "/literature/guidelines/course_work"], created.Metadata.HiddenPaths.Order());
+        // Не предусмотрено планом: курсовой проект. Ссылка на указания к курсовому проектированию и самостоятельной
+        // работе нужна всегда — самостоятельная работа есть у любой дисциплины.
+        Assert.Equal(["/course_work"], created.Metadata.HiddenPaths.Order());
 
         // Предзаполненное содержимое — корректный черновик; история и нормализованные часы записаны тем же сохранением.
         await using var scope = app.Services.CreateAsyncScope();
@@ -101,11 +102,18 @@ public class DocumentsApiTests(DatabaseFixture app)
         Assert.Equal(SectionFill.Complete, sections["hours_distribution"].Fill);
         Assert.Equal(SectionFill.Incomplete, sections["goals_and_objectives"].Fill);
         // Видимый условный раздел обязателен при отправке — хотя бы одна запись; новый документ его ещё не заполнил.
-        Assert.All(sections.Values.Where(s => s.Visible && s.Key is "lab_works" or "practical_classes" or "course_work"), s =>
+        Assert.All(sections.Values.Where(s => s.Visible && s.Key is "lab_works" or "practical_classes"), s =>
         {
             Assert.Equal(SectionFill.Incomplete, s.Fill);
             Assert.Equal(DocumentSubmission.EmptyVisibleSection, Assert.Single(s.Missing).Message);
         });
+        // Курсовой: вид — из плана, примерные темы пишет автор.
+        if (courseWork)
+        {
+            Assert.Equal("course_project", created.Payload.GetProperty("course_work").GetProperty("kind").GetString());
+            Assert.Equal(SectionFill.Incomplete, sections["course_work"].Fill);
+            Assert.Equal("/course_work/topics", Assert.Single(sections["course_work"].Missing).Path);
+        }
     }
 
     [Theory]

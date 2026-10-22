@@ -138,6 +138,16 @@
           "x-ui-widget": "richtext",
           "description": "Входные требования: результаты обучения, приобретённые ранее"
         },
+        "prior_outcomes": {
+          "type": "object",
+          "title": "Предварительные результаты обучения",
+          "description": "Что должно быть сформировано у обучающегося до начала изучения дисциплины",
+          "properties": {
+            "knows": { "type": "string", "title": "Знать", "x-ui-widget": "richtext" },
+            "can": { "type": "string", "title": "Уметь", "x-ui-widget": "richtext" },
+            "owns": { "type": "string", "title": "Владеть", "x-ui-widget": "richtext" }
+          }
+        },
         "postrequisites": {
           "type": "string",
           "title": "Последующие дисциплины",
@@ -290,14 +300,18 @@
       "title": "Курсовой проект (курсовая работа)",
       "x-visible-if": { "source": "parser.discipline.attestation", "includes": ["course_project", "course_work"] },
       "x-stub-text": "В учебном плане курсовое проектирование для данной дисциплины не предусмотрено.",
+      "required": ["kind", "topics"],
       "properties": {
         "kind": {
           "type": "string",
           "title": "Вид",
+          "readOnly": true,
+          "x-source": "parser.discipline.course_work_kind",
           "enum": ["course_project", "course_work"],
-          "x-enum-titles": { "course_project": "Курсовой проект", "course_work": "Курсовая работа" }
+          "x-enum-titles": { "course_project": "Курсовой проект", "course_work": "Курсовая работа" },
+          "x-print-titles": { "course_project": "предусмотрен курсовой проект", "course_work": "предусмотрена курсовая работа" }
         },
-        "topics": { "type": "array", "title": "Примерные темы", "items": { "type": "string" }, "description": "Примерные темы" },
+        "topics": { "type": "array", "title": "Примерные темы", "minItems": 1, "items": { "type": "string" }, "description": "Примерные темы" },
         "requirements": { "type": "string", "title": "Требования", "x-ui-widget": "richtext", "description": "Требования к содержанию и оформлению" }
       }
     },
@@ -372,24 +386,26 @@
         "guidelines": {
           "type": "object",
           "title": "Методические указания",
+          "description": "Ссылки на методические указания в электронной образовательной среде университета",
           "properties": {
             "lab_works": {
               "type": "string",
-              "title": "К лабораторным работам",
-              "x-ui-widget": "richtext",
-              "x-visible-if": { "source": "parser.discipline.details", "any": "lab_hours" }
+              "title": "Ссылка на указания к лабораторным занятиям",
+              "format": "uri",
+              "x-visible-if": { "source": "parser.discipline.details", "any": "lab_hours" },
+              "x-stub-text": "Лабораторные работы учебным планом не предусмотрены."
             },
             "practical_classes": {
               "type": "string",
-              "title": "К практическим занятиям",
-              "x-ui-widget": "richtext",
-              "x-visible-if": { "source": "parser.discipline.details", "any": "practice" }
+              "title": "Ссылка на указания к практическим занятиям",
+              "format": "uri",
+              "x-visible-if": { "source": "parser.discipline.details", "any": "practice" },
+              "x-stub-text": "Практические занятия учебным планом не предусмотрены."
             },
-            "course_work": {
+            "independent_work": {
               "type": "string",
-              "title": "К курсовому проекту (работе)",
-              "x-ui-widget": "richtext",
-              "x-visible-if": { "source": "parser.discipline.attestation", "includes": ["course_project", "course_work"] }
+              "title": "Ссылка на указания к курсовому проектированию и самостоятельной работе",
+              "format": "uri"
             }
           }
         },
@@ -459,7 +475,8 @@
         "number": { "type": "integer", "title": "№", "minimum": 1 },
         "title": { "type": "string", "title": "Тема занятия" },
         "hours": { "type": "integer", "title": "Часов", "minimum": 0 },
-        "section_number": { "type": "integer", "title": "Раздел", "minimum": 1, "description": "Раздел тематического плана" }
+        "section_number": { "type": "integer", "title": "Раздел", "minimum": 1, "description": "Раздел тематического плана" },
+        "control_form": { "type": "string", "title": "Форма контроля", "description": "Отчёт, собеседование, опрос, тест и т. п." }
       }
     },
     "literature_item": {

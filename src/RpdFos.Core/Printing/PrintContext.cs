@@ -36,6 +36,9 @@ public sealed class PrintContext(
             "parser.discipline.course" => string.Join(", ", semesters.Select(s => (s + 1) / 2).Distinct()),
             "parser.discipline.ze_total" => d.TotalCredits.ToString(),
             "parser.discipline.hours_total" => d.TotalHours.ToString(),
+            "parser.discipline.course_work_kind" => PlanTitles.CourseWorkKind(Facts.Semesters.SelectMany(s => s.ControlTypes)) is { } kind
+                ? PlanTitles.ControlType(kind)
+                : null,
             "parser.discipline.attestation" =>
                 string.Join(", ", Facts.Semesters.SelectMany(s => s.ControlTypes).Distinct().Select(PlanTitles.ControlType)),
             "reference.direction.code" => Facts.Direction.Code,
@@ -102,9 +105,11 @@ public sealed class PrintContext(
             case JsonValueKind.String when Text(schema, "format") == "date" && DateOnly.TryParse(value.GetString(), out var date):
                 return PrintValue.Text($"«{date.Day:00}» {MonthsGenitive[date.Month - 1]} {date.Year} г.");
             case JsonValueKind.String:
+                // Для печати — x-print-titles («предусмотрен курсовой проект»), иначе названия из формы (x-enum-titles).
                 var text = value.GetString() ?? "";
-                return PrintValue.Text(schema.TryGetProperty("x-enum-titles", out var titles) && titles.TryGetProperty(text, out var title)
-                    ? title.GetString()
+                return PrintValue.Text(
+                    schema.TryGetProperty("x-print-titles", out var phrases) && phrases.TryGetProperty(text, out var phrase) ? phrase.GetString()
+                    : schema.TryGetProperty("x-enum-titles", out var titles) && titles.TryGetProperty(text, out var title) ? title.GetString()
                     : text);
             // Библиографическая запись уже содержит год и издательство; интернет-ресурс — название и адрес.
             case JsonValueKind.Array when widget == "literature_list":
@@ -127,15 +132,19 @@ public sealed class PrintContext(
                     .Where(t => t.Length > 0)
                     .Select(t => new PrintParagraph([new PrintRun(t)], PrintListKind.Bullet, id)).ToList());
             case JsonValueKind.Object:
-                // Запись — значения её полей по порядку схемы через запятую: библиографическая запись, составитель.
-                var parts = schema.TryGetProperty("properties", out var props)
+                var fields = schema.TryGetProperty("properties", out var props)
                     ? props.EnumerateObject()
-                        .Where(p => !p.Value.TryGetProperty("format", out var f) || f.GetString() != "uuid")
-                        .Where(p => value.TryGetProperty(p.Name, out _))
-                        .Select(p => Render(value.GetProperty(p.Name), Resolve(p.Value)).Inline)
-                        .Where(t => t.Length > 0)
+                        .Select(p => (Name: p.Name, Schema: Resolve(p.Value)))
+                        .Where(p => Text(p.Schema, "format") != "uuid" && value.TryGetProperty(p.Name, out _))
+                        .Select(p => (p.Schema, Text: Render(value.GetProperty(p.Name), p.Schema).Inline))
+                        .Where(p => p.Text.Length > 0).ToList()
                     : [];
-                return PrintValue.Text(string.Join(", ", parts));
+                // Раздел с фразой для печати (вид курсового) — предложениями: фраза, затем «Поле: значение».
+                if (fields.Any(f => f.Schema.TryGetProperty("x-print-titles", out _)))
+                    return PrintValue.Text(string.Join(". ", fields.Select(f =>
+                        f.Schema.TryGetProperty("x-print-titles", out _) ? f.Text : $"{Text(f.Schema, "title")}: {f.Text}")).TrimEnd('.') + ".");
+                // Запись — значения её полей по порядку схемы через запятую.
+                return PrintValue.Text(string.Join(", ", fields.Select(f => f.Text)));
             default:
                 return PrintValue.Empty;
         }
