@@ -21,7 +21,12 @@ public sealed record DocumentDetails(DocumentItem Document, JsonElement Payload,
     bool Editable, DocumentActions Actions);
 
 public sealed record DocumentMetadata(List<SectionState> Sections, List<string> ReadOnlyPaths, List<string> HiddenPaths,
-    List<CompetenceCandidate> CompetenceCandidates);
+    List<CompetenceCandidate> CompetenceCandidates, PlanDisciplineChoices? PlanDisciplines);
+
+/// <summary>Дисциплины и практики плана раньше и позже дисциплины — кандидаты в пре- и постреквизиты.</summary>
+public sealed record PlanDisciplineChoices(List<PlanDisciplineCandidate> Earlier, List<PlanDisciplineCandidate> Later);
+
+public sealed record PlanDisciplineCandidate(Guid Id, string Code, string Name, List<int> Semesters);
 
 public sealed record SectionState(string Key, string Title, bool Visible, string? StubText, string Fill, List<FieldError> Missing,
     List<FieldError> Warnings);

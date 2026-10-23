@@ -1,0 +1,96 @@
+@using System.Text.Json
+@using System.Text.Json.Nodes
+@using RpdFos.Web.Models
+@inherits FieldBase
+
+@* Пре- и постреквизиты: дисциплины и практики учебного плана раньше или позже дисциплины (x-plan-disciplines).
+   В содержимое — ссылка на дисциплину плана с индексом и названием на момент выбора. *@
+<div class="mb-3">
+    <label class="form-label">
+        @Title <span class="badge text-bg-light border ms-1" title="Список — из учебного плана">из учебного плана</span>
+    </label>
+    @if (Candidates.Count == 0)
+    {
+        <div class="text-muted small">@Empty</div>
+    }
+    else
+    {
+        <div class="border rounded p-2" style="max-height: 16rem; overflow-y: auto">
+            @foreach (var candidate in Candidates)
+            {
+                <div class="form-check">
+                    <input type="checkbox" class="form-check-input" id="@($"{Anchor}-{candidate.Id}")" disabled="@ReadOnly"
+                           checked="@IsChosen(candidate.Id)" @onchange="e => Toggle(candidate, e.Value is true)" />
+                    <label class="form-check-label" for="@($"{Anchor}-{candidate.Id}")">
+                        @candidate.Code @candidate.Name
+                        <span class="text-muted small">— @SemesterText(candidate.Semesters)</span>
+                    </label>
+                </div>
+            }
+        </div>
+    }
+    @foreach (var stale in Stale)
+    {
+        <div class="small text-warning-emphasis mt-1">
+            @Text(stale["code"]) @Text(stale["name"]) — нет среди дисциплин плана по семестрам
+            @if (!ReadOnly)
+            {
+                <button class="btn btn-link btn-sm p-0 ms-1" type="button" @onclick="() => RemoveStale(stale)">убрать</button>
+            }
+        </div>
+    }
+    @if (Hint is not null)
+    {
+        <div class="form-text">@Hint</div>
+    }
+</div>
+
+@code {
+    private string Relation => SchemaContext.Text(Schema, "x-plan-disciplines") ?? "earlier";
+
+    private string Anchor => SchemaContext.Anchor(Path);
+
+    private List<PlanDisciplineCandidate> Candidates => Relation == "later"
+        ? Context.Metadata.PlanDisciplines?.Later ?? []
+        : Context.Metadata.PlanDisciplines?.Earlier ?? [];
+
+    private string Empty => Relation == "later"
+        ? "В учебном плане нет дисциплин и практик позже последнего семестра дисциплины."
+        : "В учебном плане нет дисциплин и практик раньше первого семестра дисциплины.";
+
+    private IEnumerable<JsonObject> Chosen => (Value as JsonArray ?? []).OfType<JsonObject>();
+
+    // Выбранное раньше, но уже не подходящее по семестрам (план изменился) — видно и снимается вручную.
+    private List<JsonObject> Stale => Chosen.Where(c => Candidates.All(x => x.Id.ToString() != Text(c["discipline_id"]))).ToList();
+
+    private bool IsChosen(Guid id) => Chosen.Any(c => Text(c["discipline_id"]) == id.ToString());
+
+    private static string SemesterText(List<int> semesters) =>
+        (semesters.Count == 1 ? "семестр " : "семестры ") + string.Join(", ", semesters);
+
+    private void Toggle(PlanDisciplineCandidate candidate, bool on)
+    {
+        var list = EnsureArray();
+        var existing = list.OfType<JsonObject>().FirstOrDefault(c => Text(c["discipline_id"]) == candidate.Id.ToString());
+        if (!on && existing is not null) list.Remove(existing);
+        if (on && existing is null)
+        {
+            // Порядок — как в плане: так список и печатается.
+            var chosen = Candidates.Where(c => c.Id == candidate.Id || IsChosen(c.Id)).ToList();
+            var stale = Stale.Select(s => s.DeepClone()).ToList();
+            list.Clear();
+            foreach (var c in chosen)
+                list.Add(new JsonObject { ["discipline_id"] = c.Id.ToString(), ["code"] = c.Code, ["name"] = c.Name });
+            foreach (var s in stale) list.Add(s);
+        }
+        if (list.Count == 0) SetValue(null);
+        else Context.Changed();
+    }
+
+    private void RemoveStale(JsonObject stale)
+    {
+        EnsureArray().Remove(stale);
+        if (EnsureArray().Count == 0) SetValue(null);
+        else Context.Changed();
+    }
+}

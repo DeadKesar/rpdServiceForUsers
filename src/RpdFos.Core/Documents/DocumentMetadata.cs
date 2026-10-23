@@ -17,13 +17,16 @@ public sealed record SectionState(
     string Key, string Title, bool Visible, string? StubText, string Fill, IReadOnlyList<DocumentValidationError> Missing,
     IReadOnlyList<DocumentValidationError> Warnings);
 
+/// <summary>Кандидаты в пре- и постреквизиты по подсказке <c>x-plan-disciplines</c> поля: раньше (<c>earlier</c>) и позже (<c>later</c>).</summary>
+public sealed record PlanDisciplineChoices(IReadOnlyList<PlanDisciplineCandidate> Earlier, IReadOnlyList<PlanDisciplineCandidate> Later);
+
 /// <summary>
 /// Метаданные документа для редактора: разделы, поля только для чтения при текущем статусе (JSON Pointer поддеревьев)
-/// и кандидаты в компетенции и индикаторы из матрицы.
+/// и кандидаты: компетенции и индикаторы из матрицы, дисциплины плана до и после дисциплины — для пре- и постреквизитов.
 /// </summary>
 public sealed record DocumentMetadata(
     IReadOnlyList<SectionState> Sections, IReadOnlyList<string> ReadOnlyPaths, IReadOnlyList<string> HiddenPaths,
-    IReadOnlyList<CompetenceCandidate> CompetenceCandidates)
+    IReadOnlyList<CompetenceCandidate> CompetenceCandidates, PlanDisciplineChoices PlanDisciplines)
 {
     /// <summary>
     /// Места, не предусмотренные учебным планом (<c>x-visible-if</c>): разделы и поля внутри разделов —
@@ -72,7 +75,8 @@ public sealed record DocumentMetadata(
                     errors, visible ? warnings[p.Name].ToList() : []));
             }
 
-        return new DocumentMetadata(sections, ReadOnly(schema, status, resolve), Hidden(schema, facts, resolve), facts.Competences);
+        return new DocumentMetadata(sections, ReadOnly(schema, status, resolve), Hidden(schema, facts, resolve), facts.Competences,
+            new PlanDisciplineChoices(facts.Earlier, facts.Later));
     }
 
     /// <summary>

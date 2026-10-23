@@ -87,7 +87,7 @@ public class DocumentEditingApiTests(DatabaseFixture app)
         var (client, _) = await DocumentData.UserAsync(app);
         var created = await DocumentData.CreateAsync(app, client, (await DocumentData.PublishedTemplateAsync(app)).Id, "Б1.О.13");
         var place = JsonNode.Parse(created.Payload.GetProperty("place_in_structure").GetRawText())!;
-        place["prerequisites"] = "<p onclick=\"steal()\">Знания <em>математики</em></p><script>alert(1)</script>";
+        place["prior_outcomes"] = new JsonObject { ["knows"] = "<p onclick=\"steal()\">Знания <em>математики</em></p><script>alert(1)</script>" };
 
         var response = await PatchAsync(client, created, "place_in_structure", 1, place);
         var invalid = await PatchAsync(client, created, "goals_and_objectives", 2, new JsonObject { ["goals"] = 123 });
@@ -96,7 +96,7 @@ public class DocumentEditingApiTests(DatabaseFixture app)
         await app.WithDbAsync(async db =>
         {
             var payload = JsonNode.Parse((await db.Documents.SingleAsync(d => d.Id == created.Document.Id)).Payload)!;
-            Assert.Equal("<p>Знания <em>математики</em></p>", payload["place_in_structure"]!["prerequisites"]!.GetValue<string>());
+            Assert.Equal("<p>Знания <em>математики</em></p>", payload["place_in_structure"]!["prior_outcomes"]!["knows"]!.GetValue<string>());
         });
         Assert.Equal(HttpStatusCode.UnprocessableEntity, invalid.StatusCode);
         Assert.Equal(["/goals_and_objectives/goals"], await ErrorPathsAsync(invalid));

@@ -19,6 +19,7 @@ public static class WidgetRegistry
         ["self_study_table"] = typeof(SelfStudyKindsWidget),
         ["competence_picker"] = typeof(CompetencePickerWidget),
         ["developer_picker"] = typeof(DeveloperPickerWidget),
+        ["discipline_picker"] = typeof(DisciplinePickerWidget),
         ["class_table"] = typeof(ObjectTableWidget),
         ["literature_list"] = typeof(ObjectTableWidget)
     };

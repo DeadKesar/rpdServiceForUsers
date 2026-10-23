@@ -24,7 +24,7 @@ namespace RpdFos.Api.Tests.Integration;
 [Collection(DatabaseCollection.Name)]
 public class DocxGenerationTests(DatabaseFixture app)
 {
-    private const string Prerequisites = "<p>Знания <strong>высшей математики</strong>:</p><ul><li>линейная алгебра</li><li>теория вероятностей</li></ul>";
+    private const string PriorKnowledge = "<p>основы <strong>высшей математики</strong>:</p><ul><li>линейная алгебра</li><li>теория вероятностей</li></ul>";
 
     [Fact]
     public async Task Real_rpd_is_printed_without_placeholders()
@@ -34,8 +34,14 @@ public class DocxGenerationTests(DatabaseFixture app)
         var version = await DocumentData.FillForSubmissionAsync(client, created);
         var plan = DocumentData.Sums(created.Payload);
         var place = JsonNode.Parse(created.Payload.GetProperty("place_in_structure").GetRawText())!;
-        place["prerequisites"] = Prerequisites;
-        place["prior_outcomes"] = new JsonObject { ["knows"] = "<p>основы линейной алгебры</p>" };
+        place["prior_outcomes"] = new JsonObject { ["knows"] = PriorKnowledge };
+        // Б1.О.10 — в 1 семестре: дисциплин раньше нет, позже — выбираются из плана.
+        Assert.Empty(created.Metadata.PlanDisciplines.Earlier);
+        var later = created.Metadata.PlanDisciplines.Later.Take(2).ToList();
+        place["postrequisites"] = new JsonArray(later.Select(d => (JsonNode)new JsonObject
+        {
+            ["discipline_id"] = d.Id.ToString(), ["code"] = d.Code, ["name"] = d.Name
+        }).ToArray());
         var sections = new Dictionary<string, JsonNode>
         {
             // Виды самостоятельной работы: реферат с обозначением, изучение раздела 1, остаток — самоподготовка.
@@ -87,8 +93,12 @@ public class DocxGenerationTests(DatabaseFixture app)
         Assert.Contains("Математическое и компьютерное моделирование", text);
         Assert.Contains("Сформировать у обучающихся умения", text);                   // цели
         Assert.Contains("Освоить методы построения моделей систем", text);            // задачи
-        Assert.Contains("основы линейной алгебры", text);                              // 2.1
+        Assert.Contains("основы высшей математики", text);                             // 2.1
         Assert.Contains("методы моделирования систем", text);                          // 2.2
+        // 2.2: где применяются — списком «индекс название» из плана.
+        var next = body.Elements<Paragraph>().Where(p => later.Any(d => p.InnerText == $"{d.Code} {d.Name}")).ToList();
+        Assert.Equal(2, next.Count);
+        Assert.All(next, p => Assert.NotNull(p.ParagraphProperties?.NumberingProperties));
         Assert.Contains("Основы моделирования систем", text);                          // тематический план
         Assert.Contains(created.Metadata.CompetenceCandidates[0].Indicators[0].Code, text); // таблица компетенций
         Assert.Contains("относится к обязательной части", text);                       // форма слова: дательный падеж

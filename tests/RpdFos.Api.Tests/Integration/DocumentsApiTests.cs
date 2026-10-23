@@ -80,6 +80,25 @@ public class DocumentsApiTests(DatabaseFixture app)
         });
     }
 
+    [Fact]
+    public async Task Plan_neighbours_follow_semesters()
+    {
+        // Б1.В.01 — во 2 семестре: раньше — только дисциплины и практики 1 семестра, позже — с 3 семестра.
+        var (client, _) = await TeacherAsync();
+        var created = await CreateAsync(client, (await PublishedTemplateAsync()).Id, "Б1.В.01");
+        var earlier = created.Metadata.PlanDisciplines.Earlier.Select(d => d.Code).ToList();
+        var later = created.Metadata.PlanDisciplines.Later.Select(d => d.Code).ToList();
+
+        // Порядок плана: обязательная часть, вариативная, затем практики. Учебная практика 1–2 семестров не раньше.
+        Assert.Equal(["Б1.О.01", "Б1.О.03", "Б1.О.08", "Б1.О.09", "Б1.О.10", "Б1.В.02", "Б1.В.03", "Б2.О.02(У)"], earlier);
+        // Элективы и дисциплины модуля — да; модуль, группа элективов и ГИА — нет.
+        Assert.Contains("Б1.В.ДВ.02.01", later);
+        Assert.Contains("Б1.О.14.02", later);
+        Assert.Contains("Б2.О.04(Пд)", later);
+        Assert.DoesNotContain(later, c => c is "Б1.О.14" or "Б1.В.ДВ.02" or "Б3.01(Д)" or "Б1.В.01");
+        Assert.All(created.Metadata.PlanDisciplines.Later, d => Assert.True(d.Semesters.Min() > 2));
+    }
+
     [Theory]
     [InlineData("Б1.О.10", true, true, false)]   // лабораторные и практика, экзамен
     [InlineData("Б1.О.01", false, true, false)]  // лекции и практика, зачёт

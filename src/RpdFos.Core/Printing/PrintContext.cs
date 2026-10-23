@@ -120,6 +120,13 @@ public sealed class PrintContext(
                         : null))
                     .OfType<string>().Where(t => t.Trim().Length > 0)
                     .Select(t => new PrintParagraph([new PrintRun(t.Trim())], PrintListKind.Numbered, list)).ToList());
+            // Пре- и постреквизиты — списком «индекс название», как в РПД вуза.
+            case JsonValueKind.Array when widget == "discipline_picker":
+                var disciplines = NextListId();
+                return new PrintValue(value.EnumerateArray()
+                    .Select(item => $"{Text(item, "code")} {Text(item, "name")}".Trim())
+                    .Where(t => t.Length > 0)
+                    .Select(t => new PrintParagraph([new PrintRun(t)], PrintListKind.Bullet, disciplines)).ToList());
             case JsonValueKind.Number:
                 return PrintValue.Text(value.GetRawText());
             case JsonValueKind.Array when widget == "competence_picker":

@@ -133,10 +133,12 @@
           "description": "Часть блока"
         },
         "prerequisites": {
-          "type": "string",
-          "title": "Входные требования",
-          "x-ui-widget": "richtext",
-          "description": "Входные требования: результаты обучения, приобретённые ранее"
+          "type": "array",
+          "title": "Дисциплины и практики, результаты которых нужны для освоения дисциплины",
+          "description": "Из учебного плана: изучаются раньше первого семестра дисциплины",
+          "x-ui-widget": "discipline_picker",
+          "x-plan-disciplines": "earlier",
+          "items": { "$ref": "#/$defs/discipline_ref" }
         },
         "prior_outcomes": {
           "type": "object",
@@ -149,10 +151,12 @@
           }
         },
         "postrequisites": {
-          "type": "string",
-          "title": "Последующие дисциплины",
-          "x-ui-widget": "richtext",
-          "description": "Дисциплины, использующие результаты обучения по данной дисциплине"
+          "type": "array",
+          "title": "Дисциплины и практики, где применяются результаты обучения",
+          "description": "Из учебного плана: изучаются позже последнего семестра дисциплины",
+          "x-ui-widget": "discipline_picker",
+          "x-plan-disciplines": "later",
+          "items": { "$ref": "#/$defs/discipline_ref" }
         }
       }
     },
@@ -484,6 +488,16 @@
         "hours": { "type": "integer", "title": "Часов", "minimum": 0 },
         "section_number": { "type": "integer", "title": "Раздел", "minimum": 1, "description": "Раздел тематического плана" },
         "control_form": { "type": "string", "title": "Форма контроля", "description": "Отчёт, собеседование, опрос, тест и т. п." }
+      }
+    },
+    "discipline_ref": {
+      "type": "object",
+      "description": "Ссылка на дисциплину или практику учебного плана; индекс и название — на момент выбора",
+      "required": ["discipline_id", "code", "name"],
+      "properties": {
+        "discipline_id": { "type": "string", "format": "uuid", "title": "Дисциплина плана" },
+        "code": { "type": "string", "title": "Индекс" },
+        "name": { "type": "string", "title": "Название" }
       }
     },
     "self_study_kind": {
