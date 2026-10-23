@@ -64,6 +64,15 @@ public static class PlanTitles
             : null;
     }
 
+    /// <summary>
+    /// Вид промежуточного контроля в таблицах трудоёмкости и разделов дисциплины: только экзамен, зачёт, зачёт
+    /// с оценкой. Курсовой проект и курсовая работа печатаются в разделе 3.5.
+    /// </summary>
+    public static string Attestation(IEnumerable<string> controlTypes) => string.Join(", ", controlTypes
+        .Where(t => t is ControlTypeCodes.Exam or ControlTypeCodes.Credit or ControlTypeCodes.GradedCredit)
+        .Distinct()
+        .Select(ControlType));
+
     /// <summary>Вид промежуточной аттестации — как в x-enum-titles схемы РПД.</summary>
     public static string ControlType(string type) => type switch
     {

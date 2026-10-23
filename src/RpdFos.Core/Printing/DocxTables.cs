@@ -72,10 +72,12 @@ internal static class DocxTables
             return;
         }
 
+        // Общая трудоёмкость — сумма строк таблицы: контактная работа (лекции, практические, лабораторные входят в неё),
+        // промежуточный контроль и самостоятельная работа. Так итог сходится с тем, что напечатано ниже.
         var columns = semesters.Select(s => new
             {
-                Title = $"{s.Semester} семестр", Total = s.ContactHours + s.SelfStudy + s.Control, s.ContactHours, s.Lectures, s.Practice,
-                s.LabHours, s.Control, s.SelfStudy, Attestation = string.Join(", ", s.ControlTypes.Select(PlanTitles.ControlType))
+                Title = $"{s.Semester} семестр", Total = s.ContactHours + s.Control + s.SelfStudy, s.ContactHours, s.Lectures, s.Practice,
+                s.LabHours, s.Control, s.SelfStudy, Attestation = PlanTitles.Attestation(s.ControlTypes)
             })
             .ToList();
         columns.Add(new
@@ -83,7 +85,7 @@ internal static class DocxTables
             Title = "всего", Total = columns.Sum(c => c.Total), ContactHours = columns.Sum(c => c.ContactHours),
             Lectures = columns.Sum(c => c.Lectures), Practice = columns.Sum(c => c.Practice), LabHours = columns.Sum(c => c.LabHours),
             Control = columns.Sum(c => c.Control), SelfStudy = columns.Sum(c => c.SelfStudy),
-            Attestation = string.Join(", ", semesters.SelectMany(s => s.ControlTypes).Distinct().Select(PlanTitles.ControlType))
+            Attestation = PlanTitles.Attestation(semesters.SelectMany(s => s.ControlTypes))
         });
 
         // Ширина значений — как у столбца подписей, поровну на столбцы.
@@ -142,7 +144,8 @@ internal static class DocxTables
         int Sum(string key) => topics.Sum(t => int.TryParse(Number(Property(t, "hours"), key), out var n) ? n : 0);
         Add(true, "", "Итого", "", "", Sum("lectures").ToString(), Sum("lab_hours").ToString(), Sum("practice").ToString(),
             Sum("self_study").ToString(), "", "");
-        Add(true, "", "Промежуточный контроль", "", "", "", "", "", "", "", context.Source("parser.discipline.attestation") ?? "");
+        Add(true, "", "Промежуточный контроль", "", "", "", "", "", "", "",
+            PlanTitles.Attestation(context.Facts.Semesters.SelectMany(s => s.ControlTypes)));
 
         void Add(bool bold, params string[] values)
         {

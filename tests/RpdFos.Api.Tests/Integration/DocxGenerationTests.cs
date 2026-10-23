@@ -90,6 +90,14 @@ public class DocxGenerationTests(DatabaseFixture app)
         Assert.Equal("По дисциплине Математическое и компьютерное моделирование курсовое проектирование учебным планом не предусмотрено.",
             Line("По дисциплине"));
 
+        // 3.1: общая трудоёмкость — сумма строк (контактная + контроль + самостоятельная), аттестация — экзамен.
+        var laboriousness = Laboriousness(body);
+        Assert.Equal(["108", "108"], Cells(laboriousness, "Общая трудоёмкость"));
+        Assert.Equal(["48", "48"], Cells(laboriousness, "Контактная работа"));
+        Assert.Equal(["36", "36"], Cells(laboriousness, "Промежуточный контроль"));
+        Assert.Equal(["24", "24"], Cells(laboriousness, "Самостоятельная работа"));
+        Assert.Equal(["Экзамен", "Экзамен"], Cells(laboriousness, "Вид промежуточного контроля"));
+
         // 3.2: строка на тему, образцы шаблона убраны.
         var contents = body.Descendants<Table>().Single(t => t.InnerText.StartsWith("№ раздела"));
         Assert.Equal(2, contents.Elements<TableRow>().Count());
@@ -162,9 +170,15 @@ public class DocxGenerationTests(DatabaseFixture app)
         await DocumentData.FillForSubmissionAsync(client, created);
 
         using var docx = await DownloadAsync(client, created, await PrintAsync(client, created));
-        var line = docx.MainDocumentPart!.Document!.Body!.Elements<Paragraph>().First(p => p.InnerText.StartsWith("По дисциплине")).InnerText;
+        var body = docx.MainDocumentPart!.Document!.Body!;
+        var line = body.Elements<Paragraph>().First(p => p.InnerText.StartsWith("По дисциплине")).InnerText;
 
         Assert.EndsWith(" предусмотрен курсовой проект. Примерные темы: Модель системы массового обслуживания.", line);
+        // Курсовой проект — только в 3.5: в строках промежуточного контроля таблиц 3.1 и «Разделы дисциплины» его нет,
+        // а экзамена или зачёта у этой дисциплины по плану нет.
+        Assert.Equal(["", ""], Cells(Laboriousness(body), "Вид промежуточного контроля"));
+        var partition = body.Descendants<Table>().Single(t => t.InnerText.Contains("Раздел дисциплины"));
+        Assert.Equal("Промежуточный контроль", partition.Elements<TableRow>().Last().InnerText);
     }
 
     [Fact]
@@ -261,6 +275,13 @@ public class DocxGenerationTests(DatabaseFixture app)
         Assert.Equal(expected, item.Status);
         return item;
     }
+
+    private static Table Laboriousness(Body body) => body.Descendants<Table>().Single(t => t.InnerText.Contains("Общая трудоёмкость"));
+
+    // Значения строки таблицы 3.1 по началу подписи — ячейки после подписи.
+    private static List<string> Cells(Table table, string label) => table.Elements<TableRow>()
+        .First(r => r.Elements<TableCell>().First().InnerText.StartsWith(label))
+        .Elements<TableCell>().Skip(1).Select(c => c.InnerText).ToList();
 
     private static async Task<WordprocessingDocument> DownloadAsync(HttpClient client, DocumentDetails document, GenerationItem item)
     {
