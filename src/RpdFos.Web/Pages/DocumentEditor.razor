@@ -301,7 +301,8 @@ else
         context = new SchemaContext(details.Schema, payload, details.Metadata, OnChanged, OnEdited)
         {
             Locked = !details.Editable, Comments = comments, CanComment = details.Actions.Review,
-            CanResolve = details.Actions.ResolveComments, AddComment = AddCommentAsync, ResolveComment = ResolveCommentAsync
+            CanResolve = details.Actions.ResolveComments, AddComment = AddCommentAsync, ResolveComment = ResolveCommentAsync,
+            Defaults = details.TemplateDefaults is { } defaults ? JsonNode.Parse(defaults.GetRawText()) as JsonObject : null
         };
         sections = details.Metadata.Sections.ToList();
         version = details.Document.Version;

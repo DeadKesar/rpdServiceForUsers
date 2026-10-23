@@ -11,12 +11,15 @@ public class DocxBookmarksTests
 {
     public static byte[] Template(string name) => File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "fixtures", name));
 
-    // Действующий шаблон РПД — новая версия файла оформления (этап 5); исходный остаётся для истории и проверки каталога.
-    public const string Rpd = "DWP_TemplateBookmarks_v2.docx", RpdOriginal = "DWP_TemplateBookmarks.docx", Fos = "FOS_TemplateBookmarks.docx";
+    // Действующий шаблон РПД — третья версия файла оформления (этап 5.1): постоянные пункты списков вуза — значения
+    // по умолчанию шаблона. Исходный и вторая версия остаются для истории и проверки каталога.
+    public const string Rpd = "DWP_TemplateBookmarks_v3.docx", RpdV2 = "DWP_TemplateBookmarks_v2.docx",
+        RpdOriginal = "DWP_TemplateBookmarks.docx", Fos = "FOS_TemplateBookmarks.docx";
 
     [Theory]
     [InlineData(RpdOriginal, 52, 35)]
-    [InlineData(Rpd, 76, 57)] // новая версия: +24 вхождения, +22 закладки — методическое содержимое, бланки протокола и составителей
+    [InlineData(RpdV2, 76, 57)] // вторая версия: +24 вхождения, +22 закладки — методическое содержимое, бланки протокола и составителей
+    [InlineData(Rpd, 76, 57)]   // третья: закладки те же, убраны только постоянные пункты списков
     [InlineData(Fos, 46, 24)]
     public void Real_templates_match_bookmark_catalog(string file, int bookmarks, int baseNames)
     {

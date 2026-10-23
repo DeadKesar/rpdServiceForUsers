@@ -22,6 +22,7 @@ internal sealed class DocumentTemplateConfiguration : IEntityTypeConfiguration<D
         e.Property(x => x.Schema).HasColumnType("json");
         e.Property(x => x.SignaturesConfig).HasColumnType("jsonb");
         e.Property(x => x.PrintMapping).HasColumnType("jsonb");
+        e.Property(x => x.DefaultPayload).HasColumnType("jsonb");
 
         // Оптимистичная блокировка: версия — токен конкуренции.
         // В WHERE запроса UPDATE уходит исходная версия, новую проставляет VersioningInterceptor.

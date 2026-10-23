@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace RpdFos.Web.Models;
 
 // Контракт API шаблонов (Features/Templates) на стороне клиента: клиент не ссылается на сборку хоста.
@@ -12,7 +14,13 @@ public sealed record TemplateItem(Guid Id, string Type, string TypeTitle, string
     int Version, int Revision, Guid LineageId, PlanItem? Plan, DateTimeOffset CreatedAt, DateTimeOffset? PublishedAt);
 
 public sealed record TemplateDetails(TemplateItem Template, string? PrintTemplateName, List<BookmarkRow> Bookmarks,
-    List<SignatureRow> Signatures, List<string> Errors, bool CanPublish);
+    List<SignatureRow> Signatures, List<string> Errors, bool CanPublish, JsonElement Schema, List<DefaultField> DefaultFields,
+    JsonElement? Defaults);
+
+/// <summary>Поле, для которого шаблон задаёт значение по умолчанию: JSON Pointer и подпись «Раздел → Поле».</summary>
+public sealed record DefaultField(string Pointer, string Title);
+
+public sealed record TemplateDefaultsRequest(int Version, JsonElement Defaults);
 
 public sealed record BookmarkRow(string BaseName, int Count, List<string> Names, BookmarkTarget? Target);
 

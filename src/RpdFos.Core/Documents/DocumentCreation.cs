@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using RpdFos.Core.Data;
 using RpdFos.Core.Data.Entities;
 using RpdFos.Core.DocumentTypes;
+using RpdFos.Core.Templates;
 
 namespace RpdFos.Core.Documents;
 
@@ -77,6 +78,9 @@ public sealed class DocumentCreation(AppDbContext db, DocumentTypeRegistry regis
             .Select(e => new DocumentAuthor(e.Id, e.NameForDocument, e.Position)).SingleAsync(ct);
         var schema = JsonDocument.Parse(template.Schema).RootElement;
         var payload = DocumentPrefill.Build(schema, facts, author, registry.FindSchema);
+        // Постоянные пункты вуза — из значений по умолчанию шаблона, кроме мест, не предусмотренных планом.
+        TemplateDefaults.Apply(payload, template.DefaultPayload, TemplateDefaults.Fields(schema, registry.FindSchema),
+            DocumentMetadata.Hidden(schema, facts, registry.FindSchema));
 
         var now = clock.GetUtcNow();
         var document = new Document

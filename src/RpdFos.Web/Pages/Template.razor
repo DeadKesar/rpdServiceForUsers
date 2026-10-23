@@ -4,6 +4,11 @@
 @using System.Net
 @using System.Net.Http.Headers
 @using System.Net.Http.Json
+@using System.Text.Json
+@using System.Text.Json.Nodes
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.AspNetCore.Components.Routing
+@using RpdFos.Web.Forms
 @using Microsoft.AspNetCore.Authorization
 @using Microsoft.AspNetCore.Components.WebAssembly.Authentication
 @using RpdFos.Web.Models
@@ -196,6 +201,31 @@ else
         </table>
     }
 
+    @if (defaultsContext is not null && details.DefaultFields.Count > 0)
+    {
+        <h2 class="h4 mt-4">Значения по умолчанию</h2>
+        <p class="text-muted" style="max-width: 960px">
+            Постоянные пункты вуза: новый документ получает их предзаполненными, автор дополняет и удаляет пункты.
+            В печати пункты по умолчанию и пункты автора — один список с единой нумерацией.
+            @if (!CanEditDefaults)
+            {
+                <span>Опубликованный шаблон меняется новой редакцией.</span>
+            }
+        </p>
+        <NavigationLock ConfirmExternalNavigation="@defaultsDirty" OnBeforeInternalNavigation="ConfirmLeaveAsync" />
+        <div style="max-width: 960px">
+            @foreach (var field in details.DefaultFields)
+            {
+                <SchemaField Context="defaultsContext" Schema="FieldSchema(field.Pointer)" Parent="Container(field.Pointer)"
+                             Key="@field.Pointer.Split('/')[^1]" Path="@field.Pointer" Label="@field.Title" Nested="true" />
+            }
+        </div>
+        @if (CanEditDefaults)
+        {
+            <button class="btn btn-primary mb-3" @onclick="SaveDefaultsAsync" disabled="@(busy || !defaultsDirty)">Сохранить значения по умолчанию</button>
+        }
+    }
+
     <h2 class="h4 mt-4">Лист согласования</h2>
     <table class="table table-sm">
         <thead>
@@ -222,7 +252,16 @@ else
 
     [Parameter] public Guid? Id { get; set; }
 
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
     private TemplateDetails? details;
+    private SchemaContext? defaultsContext;
+    private JsonObject defaults = [];
+    private bool defaultsDirty;
+    private bool canManage;
+
+    // Умолчания меняет методист или администратор, пока шаблон не опубликован; остальным — только просмотр.
+    private bool CanEditDefaults => canManage && details?.Template.Status is "empty" or "draft" or "saved_draft";
     private List<PlanItem> plans = [];
     private IBrowserFile? printTemplate;
     private string newType = "rpd";
@@ -239,6 +278,12 @@ else
         // Одна страница — и создание, и шаблон: после «Новой редакции» меняется только Id.
         details = null;
         printTemplate = null;
+        defaultsContext = null;
+        if (AuthState is not null)
+        {
+            var user = (await AuthState).User;
+            canManage = user.IsInRole("methodist") || user.IsInRole("admin");
+        }
         try
         {
             loadFailed = false;
@@ -248,7 +293,10 @@ else
             {
                 var response = await Http.GetAsync($"api/templates/{Id}");
                 if (response.IsSuccessStatusCode)
+                {
                     details = await response.Content.ReadFromJsonAsync<TemplateDetails>();
+                    BuildDefaults();
+                }
                 else
                 {
                     loadFailed = true;
@@ -335,6 +383,7 @@ else
         if (response.IsSuccessStatusCode && await response.Content.ReadFromJsonAsync<TemplateDetails>() is { } updated)
         {
             details = updated;
+            BuildDefaults();
             printTemplate = null;
             Show(done, false);
         }
@@ -393,6 +442,66 @@ else
     }
 
     private void Show(string text, bool isError) => (message, messageIsError) = (text, isError);
+
+    // Умолчания редактируются теми же полями и виджетами, что и документ: содержимое — умолчания шаблона, метаданных
+    // документа (план, кандидаты) у шаблона нет.
+    private void BuildDefaults()
+    {
+        defaultsDirty = false;
+        if (details is null) return;
+        defaults = details.Defaults is { } d && JsonNode.Parse(d.GetRawText()) is JsonObject o ? o : [];
+        defaultsContext = new SchemaContext(details.Schema, defaults, new DocumentMetadata([], [], [], [], null),
+            () => { defaultsDirty = true; StateHasChanged(); }, () => defaultsDirty = true)
+        {
+            Locked = !CanEditDefaults, Defaults = defaults
+        };
+    }
+
+    private JsonElement FieldSchema(string pointer)
+    {
+        var node = details!.Schema;
+        foreach (var segment in pointer.TrimStart('/').Split('/'))
+            node = defaultsContext!.Resolve(node.TryGetProperty("properties", out var p) && p.TryGetProperty(segment, out var next) ? next : default);
+        return node;
+    }
+
+    // Объект, в котором лежит поле: промежуточные объекты создаются сразу — пустые сервер при сохранении отбросит.
+    private JsonObject Container(string pointer)
+    {
+        var current = defaults;
+        foreach (var segment in pointer.TrimStart('/').Split('/')[..^1])
+        {
+            if (current[segment] is not JsonObject next) current[segment] = next = new JsonObject();
+            current = next;
+        }
+        return current;
+    }
+
+    private async Task SaveDefaultsAsync()
+    {
+        await RunAsync(async () =>
+        {
+            var body = new TemplateDefaultsRequest(details!.Template.Version, JsonDocument.Parse(defaults.ToJsonString()).RootElement);
+            var response = await Http.PutAsJsonAsync($"api/templates/{Id}/defaults", body);
+            if (response.StatusCode == HttpStatusCode.UnprocessableEntity)
+            {
+                // Места ошибок — подписями полей формы: «Интернет-ресурсы → № 2 → Адрес».
+                using var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+                Show(problem.RootElement.TryGetProperty("title", out var t) ? t.GetString() ?? "" : "Значения по умолчанию не сохранены", true);
+                problems = problem.RootElement.TryGetProperty("errors", out var errors) && errors.ValueKind == JsonValueKind.Array
+                    ? errors.EnumerateArray().Select(e => $"{defaultsContext!.FieldTitle(e.GetProperty("path").GetString() ?? "")}: {e.GetProperty("message").GetString()}").ToList()
+                    : [];
+                return;
+            }
+            await ApplyAsync(response, "Значения по умолчанию сохранены.");
+        });
+    }
+
+    private async Task ConfirmLeaveAsync(LocationChangingContext context)
+    {
+        if (defaultsDirty && !await JS.InvokeAsync<bool>("confirm", "Значения по умолчанию не сохранены. Уйти со страницы?"))
+            context.PreventNavigation();
+    }
 
     // Цель закладки: для подписи — место и часть, для остальных — путь, поле, построитель или текст.
     private string TargetText(string kind, string target, string? part) => kind == "signature"

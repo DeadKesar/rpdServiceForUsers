@@ -66,7 +66,7 @@ public class PrintingTests
         var main = context.Field("/literature/main");
         Assert.Equal(("Советов Б. Я. Моделирование систем. — М. : Юрайт, 2023. — 343 с.", PrintListKind.Numbered),
             (main.Paragraphs.Single().PlainText, main.Paragraphs[0].List));
-        Assert.Equal("ЭБС // Режим доступа: https://example.org", context.Field("/literature/internet_resources").Inline);
+        Assert.Equal("ЭБС // Режим доступа URL: https://example.org", context.Field("/literature/internet_resources").Inline);
         Assert.Equal("«05» октября 2026 г.", context.Field("/approval_sheet/department_protocol/date").Inline);
         // Курсового проекта по плану нет — стандартная формулировка вместо содержимого раздела.
         Assert.Equal("В учебном плане курсовое проектирование для данной дисциплины не предусмотрено.", context.Field("/course_work").Inline);

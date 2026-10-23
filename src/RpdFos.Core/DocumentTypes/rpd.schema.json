@@ -245,6 +245,7 @@
           "title": "Виды самостоятельной работы",
           "description": "В каждом семестре сумма часов видов равна самостоятельной работе по учебному плану",
           "x-ui-widget": "self_study_table",
+          "x-template-default": true,
           "items": { "$ref": "#/$defs/self_study_kind" }
         }
       }
@@ -384,6 +385,7 @@
           "type": "array",
           "title": "Интернет-ресурсы",
           "x-ui-widget": "literature_list",
+          "x-template-default": true,
           "items": {
             "type": "object",
             "required": ["title", "url"],
@@ -397,6 +399,7 @@
         "guidelines": {
           "type": "object",
           "title": "Методические указания",
+          "x-template-default": true,
           "description": "Ссылки на методические указания в электронной образовательной среде университета",
           "properties": {
             "lab_works": {
@@ -423,6 +426,7 @@
         "software": {
           "type": "array",
           "title": "Программное обеспечение",
+          "x-template-default": true,
           "items": { "type": "string" },
           "description": "Программное обеспечение, базы данных, информационно-справочные системы"
         }
@@ -430,9 +434,12 @@
     },
 
     "material_support": {
-      "type": "string",
+      "type": "array",
       "title": "Материально-техническое обеспечение",
-      "x-ui-widget": "richtext"
+      "description": "Помещения и оборудование — пунктами списка",
+      "x-ui-widget": "list",
+      "x-template-default": true,
+      "items": { "type": "string", "minLength": 3 }
     },
 
     "approval_sheet": {
@@ -530,16 +537,7 @@
             }
           }
         }
-      },
-      "examples": [
-        { "kind": "написание реферата", "form_code": "Р" },
-        { "kind": "самостоятельное изучение разделов", "sections": [] },
-        { "kind": "самоподготовка (проработка и повторение лекционного материала и материала учебников и учебных пособий)" },
-        { "kind": "подготовка к лабораторным занятиям" },
-        { "kind": "подготовка к практическим занятиям" },
-        { "kind": "подготовка к сдаче модулей" },
-        { "kind": "подготовка к текущему контролю" }
-      ]
+      }
     },
     "literature_item": {
       "type": "object",

@@ -18,6 +18,12 @@ public sealed class SchemaContext(JsonElement root, JsonObject payload, Document
     /// <summary>Документ целиком только для чтения: статус не позволяет правку или пользователь — не автор.</summary>
     public bool Locked { get; set; }
 
+    /// <summary>
+    /// Значения по умолчанию шаблона — стандартные пункты для подсказок (виды самостоятельной работы). На странице
+    /// шаблона это само редактируемое содержимое.
+    /// </summary>
+    public JsonObject? Defaults { get; set; }
+
     /// <summary>Замечания методиста к документу — показываются у полей.</summary>
     public List<CommentItem> Comments { get; set; } = [];
 

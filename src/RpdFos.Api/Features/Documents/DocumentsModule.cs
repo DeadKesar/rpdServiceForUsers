@@ -375,8 +375,9 @@ public class DocumentsModule : ICarterModule
         CancellationToken ct,
         bool isAuthor, bool isReviewer)
     {
-        var schemaJson = await db.DocumentTemplates.IgnoreQueryFilters().Where(t => t.Id == document.TemplateId)
-            .Select(t => t.Schema).SingleAsync(ct);
+        var template = await db.DocumentTemplates.IgnoreQueryFilters().Where(t => t.Id == document.TemplateId)
+            .Select(t => new { t.Schema, t.DefaultPayload }).SingleAsync(ct);
+        var schemaJson = template.Schema;
         var facts = (await DisciplineFacts.LoadAsync(db, document.DisciplineId, ct))!;
         var payload = JsonDocument.Parse(document.Payload).RootElement;
         var status = document.Status;
@@ -394,7 +395,8 @@ public class DocumentsModule : ICarterModule
                 Review: isReviewer && DocumentTransitions.CanReview(status),
                 ResolveComments: isAuthor && DocumentTransitions.CanResolveComments(status),
                 // Печать: автор — в любом статусе, методист — на проверке и после приёма (как в срезе «Печать»).
-                Print: isAuthor || isReviewer && status is DocumentStatuses.UnderReview or DocumentStatuses.Accepted));
+                Print: isAuthor || isReviewer && status is DocumentStatuses.UnderReview or DocumentStatuses.Accepted),
+            template.DefaultPayload is { } defaults ? JsonDocument.Parse(defaults).RootElement : null);
     }
 
     private static IResult NotFound() =>
@@ -455,9 +457,13 @@ public record DocumentItem(
 /// </summary>
 public record DocumentActions(bool Submit, bool Review, bool ResolveComments, bool Print);
 
-/// <summary>Документ для редактора: содержимое, схема из шаблона, метаданные и доступные действия.</summary>
+/// <summary>
+/// Документ для редактора: содержимое, схема из шаблона, метаданные, доступные действия и значения по умолчанию
+/// шаблона — из них редактор берёт стандартные пункты для подсказок (виды самостоятельной работы).
+/// </summary>
 public record DocumentDetails(
-    DocumentItem Document, JsonElement Payload, JsonElement Schema, DocumentMetadata Metadata, bool Editable, DocumentActions Actions);
+    DocumentItem Document, JsonElement Payload, JsonElement Schema, DocumentMetadata Metadata, bool Editable, DocumentActions Actions,
+    JsonElement? TemplateDefaults = null);
 
 /// <summary>Замечание к полю: кто и когда оставил, разрешено ли и кем.</summary>
 public record CommentItem(

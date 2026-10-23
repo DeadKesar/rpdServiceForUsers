@@ -43,6 +43,12 @@ public class DocumentTemplate : IVersioned
     /// <summary>Сопоставление закладок шаблона оформления: базовое имя → цель (jsonb).</summary>
     public string? PrintMapping { get; set; }
 
+    /// <summary>
+    /// Значения по умолчанию (jsonb): содержимое в форме документа, только поля с пометкой <c>x-template-default</c>.
+    /// Новый документ получает их предзаполненными.
+    /// </summary>
+    public string? DefaultPayload { get; set; }
+
     /// <summary>Методист-создатель — запись справочника сотрудников.</summary>
     public Guid? CreatedBy { get; set; }
 
@@ -60,7 +66,8 @@ public class DocumentTemplate : IVersioned
         CurriculumPlanId = curriculumPlanId,
         CreatedBy = createdBy,
         Schema = type.SchemaJson,
-        SignaturesConfig = type.SignaturesJson
+        SignaturesConfig = type.SignaturesJson,
+        DefaultPayload = type.DefaultPayloadJson
     };
 
     /// <summary>Загружен DOCX-шаблон оформления: его сопоставление закладок, статус «Черновик».</summary>
@@ -70,6 +77,17 @@ public class DocumentTemplate : IVersioned
         PrintTemplateFileId = fileId;
         PrintMapping = printMapping;
         Status = TemplateStatuses.Draft;
+    }
+
+    /// <summary>
+    /// Новые значения по умолчанию (уже очищенные до разрешённых полей): сохранённый черновик снова становится
+    /// черновиком — изменение ещё не сохранено; у пустого шаблона статус задаёт шаблон оформления.
+    /// </summary>
+    public void SetDefaults(string? defaultPayload)
+    {
+        Require(TemplateTransitions.CanEditDefaults(Status), TemplateTransitions.DefaultsAction);
+        DefaultPayload = defaultPayload;
+        if (Status == TemplateStatuses.SavedDraft) Status = TemplateStatuses.Draft;
     }
 
     public void Save()
@@ -123,6 +141,7 @@ public class DocumentTemplate : IVersioned
             SignaturesConfig = SignaturesConfig,
             PrintTemplateFileId = PrintTemplateFileId,
             PrintMapping = PrintMapping,
+            DefaultPayload = DefaultPayload,
             Status = TemplateStatuses.Draft
         };
     }
@@ -165,7 +184,10 @@ public static class TemplateTransitions
     // Действия — для сообщения «Шаблон в статусе … нельзя …».
     public const string AttachAction = "загрузить шаблон оформления", SaveAction = "сохранить",
         PublishAction = "опубликовать", ArchiveAction = "архивировать", DeleteAction = "удалить",
-        RevisionAction = "создать новую редакцию";
+        RevisionAction = "создать новую редакцию", DefaultsAction = "изменить значения по умолчанию";
+
+    // Умолчания меняются, пока шаблон не опубликован, — как и шаблон оформления.
+    public static bool CanEditDefaults(string status) => CanAttachPrintTemplate(status);
 
     // Шаблон оформления можно заменить, пока шаблон не опубликован; опубликованный меняется новой редакцией.
     public static bool CanAttachPrintTemplate(string status) =>

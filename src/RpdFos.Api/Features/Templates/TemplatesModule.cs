@@ -1,4 +1,7 @@
 using System.Security.Cryptography;
+using System.Text.Encodings.Web;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using Carter;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -7,6 +10,7 @@ using RpdFos.Api.Infrastructure;
 using RpdFos.Core.Data;
 using RpdFos.Core.Data.Entities;
 using RpdFos.Core.Directory;
+using RpdFos.Core.Documents;
 using RpdFos.Core.DocumentTypes;
 using RpdFos.Core.Templates;
 
@@ -30,6 +34,7 @@ public class TemplatesModule : ICarterModule
         g.MapPost("/{id:guid}/print-template", UploadPrintTemplate)
             .Accepts<IFormFile>("multipart/form-data")
             .RequireAuthorization(Policies.MethodistOrAdmin);
+        g.MapPut("/{id:guid}/defaults", UpdateDefaults).RequireAuthorization(Policies.MethodistOrAdmin);
         g.MapPost("/{id:guid}/save", Save).RequireAuthorization(Policies.MethodistOrAdmin);
         g.MapPost("/{id:guid}/publish", Publish).RequireAuthorization(Policies.MethodistOrAdmin);
         g.MapPost("/{id:guid}/archive", Archive).RequireAuthorization(Policies.MethodistOrAdmin);
@@ -146,6 +151,33 @@ public class TemplatesModule : ICarterModule
         return Results.Ok(await DetailsAsync(t, db, lifecycle, registry, ct));
     }
 
+    /// <summary>
+    /// Значения по умолчанию шаблона (поля с <c>x-template-default</c>): только разрешённые поля, пункты — полные
+    /// по схеме; иначе 422 со списком мест. Опубликованный шаблон меняется новой редакцией — 409.
+    /// </summary>
+    private static async Task<IResult> UpdateDefaults(
+        Guid id, TemplateDefaultsRequest rq, AppDbContext db, TemplateLifecycle lifecycle, DocumentTypeRegistry registry,
+        IDocumentValidator validator, CancellationToken ct)
+    {
+        var t = await db.DocumentTemplates.SingleOrDefaultAsync(x => x.Id == id, ct);
+        if (t is null) return TemplateNotFound();
+        if (!TemplateTransitions.CanEditDefaults(t.Status)) return Refused(t, TemplateTransitions.DefaultsAction);
+
+        var errors = TemplateDefaults.Check(t.Schema, JsonNode.Parse(rq.Defaults.GetRawText()), registry.FindSchema, validator,
+            out var normalized);
+        if (errors.Count > 0)
+            return Results.Problem(statusCode: StatusCodes.Status422UnprocessableEntity, title: "Значения по умолчанию не сохранены",
+                detail: string.Join(" ", errors.Select(e => $"{e.Path}: {e.Message}.")),
+                extensions: new Dictionary<string, object?> { ["errors"] = errors });
+
+        t.SetDefaults(normalized.Count == 0 ? null : normalized.ToJsonString(Json));
+        db.Entry(t).Property(x => x.Version).OriginalValue = rq.Version;
+        await db.SaveChangesAsync(ct);
+        return Results.Ok(await DetailsAsync(t, db, lifecycle, registry, ct));
+    }
+
+    private static readonly JsonSerializerOptions Json = new() { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
+
     // Образец среза «смена статуса + проверка версии»: загрузить -> 404 -> правило перехода (409)
     // -> изменить -> сохранить. Конфликт версий превращает в 409 ConcurrencyExceptionHandler.
     private static async Task<IResult> Save(
@@ -246,6 +278,7 @@ public class TemplatesModule : ICarterModule
             ? await db.UploadedFiles.Where(f => f.Id == fileId).Select(f => f.OriginalName).SingleAsync(ct)
             : null;
         var inspection = await lifecycle.InspectAsync(t, ct);
+        var schema = JsonDocument.Parse(t.Schema).RootElement;
 
         return new TemplateDetails(
             TemplateItem.From(t, registry, plan),
@@ -254,7 +287,10 @@ public class TemplatesModule : ICarterModule
                 inspection.Mapping.GetValueOrDefault(b.BaseName))).ToList(),
             inspection.Signatures.Select(s => new SignatureRow(s.Id, s.Title, s.Role, SignatoryRoles.Title(s.Role),
                 s.Resolver, SignatureResolvers.All.GetValueOrDefault(s.Resolver), s.Electronic, s.Placement)).ToList(),
-            inspection.Errors);
+            inspection.Errors,
+            schema,
+            TemplateDefaults.Fields(schema, registry.FindSchema),
+            t.DefaultPayload is { } defaults ? JsonDocument.Parse(defaults).RootElement : null);
     }
 
     private static IResult Invalid(string title, string detail) =>
@@ -278,6 +314,9 @@ public record CreateTemplateRequest(string Type, string Name, Guid CurriculumPla
 /// <summary>Версия шаблона, которую видел клиент, — для оптимистичной блокировки.</summary>
 public record TemplateVersionRequest(int Version);
 
+/// <summary>Значения по умолчанию в форме содержимого документа и версия шаблона у клиента.</summary>
+public record TemplateDefaultsRequest(int Version, JsonElement Defaults);
+
 public record TemplateItem(
     Guid Id, string Type, string TypeTitle, string Name, string Status, string StatusTitle, int Version, int Revision,
     Guid LineageId, PlanItem? Plan, DateTimeOffset CreatedAt, DateTimeOffset? PublishedAt)
@@ -287,10 +326,14 @@ public record TemplateItem(
             TemplateStatuses.Title(t.Status), t.Version, t.Revision, t.LineageId, plan, t.CreatedAt, t.PublishedAt);
 }
 
-/// <summary>Шаблон с закладками оформления, листом согласования и результатом проверки перед публикацией.</summary>
+/// <summary>
+/// Шаблон с закладками оформления, листом согласования, результатом проверки перед публикацией и значениями
+/// по умолчанию: поля, для которых они задаются, их значения и снимок схемы — по нему страница рисует поля.
+/// </summary>
 public record TemplateDetails(
     TemplateItem Template, string? PrintTemplateName, IReadOnlyList<BookmarkRow> Bookmarks,
-    IReadOnlyList<SignatureRow> Signatures, IReadOnlyList<string> Errors)
+    IReadOnlyList<SignatureRow> Signatures, IReadOnlyList<string> Errors, JsonElement Schema,
+    IReadOnlyList<DefaultField> DefaultFields, JsonElement? Defaults)
 {
     public bool CanPublish => Errors.Count == 0;
 }

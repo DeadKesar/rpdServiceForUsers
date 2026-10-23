@@ -3,14 +3,14 @@ using System.Text.Json;
 namespace RpdFos.Core.DocumentTypes;
 
 /// <summary>
-/// Тип документа: JSON Schema содержимого (2020-12 с x-расширениями), сопоставление закладок DOCX и лист
-/// согласования по умолчанию. Тексты JSON — то, что копируется в шаблон при создании (снимок);
+/// Тип документа: JSON Schema содержимого (2020-12 с x-расширениями), сопоставление закладок DOCX, лист
+/// согласования и начальные значения по умолчанию. Тексты JSON — то, что копируется в шаблон при создании (снимок);
 /// разобранные значения — только для чтения.
 /// </summary>
 public sealed record DocumentTypeDefinition(
     string Code, string Title, string SchemaJson, JsonElement Schema, string SchemaId,
     string PrintMappingJson, IReadOnlyDictionary<string, BookmarkTarget> PrintMapping,
-    string SignaturesJson, IReadOnlyList<SignatureSeat> Signatures);
+    string SignaturesJson, IReadOnlyList<SignatureSeat> Signatures, string? DefaultPayloadJson = null);
 
 /// <summary>
 /// Реестр типов документов. Структуры типов — файлы JSON во встроенных ресурсах ядра (DocumentTypes/*.json):
@@ -52,13 +52,17 @@ public sealed class DocumentTypeRegistry
         var signaturesJson = ReadResource($"{code}.signatures.json");
         var signatures = PrintMappingJson.ReadSignatures(signaturesJson);
         return new DocumentTypeDefinition(code, title, schemaJson, schema, schema.GetProperty("$id").GetString()!,
-            mappingJson, mapping, signaturesJson, signatures);
+            mappingJson, mapping, signaturesJson, signatures, TryReadResource($"{code}.default-payload.json"));
     }
 
-    internal static string ReadResource(string name)
+    internal static string ReadResource(string name) =>
+        TryReadResource(name) ?? throw new InvalidOperationException($"Нет встроенного ресурса DocumentTypes/{name}");
+
+    // Начальных умолчаний у типа может не быть (ФОС).
+    private static string? TryReadResource(string name)
     {
-        using var stream = typeof(DocumentTypeRegistry).Assembly.GetManifestResourceStream($"DocumentTypes.{name}")
-            ?? throw new InvalidOperationException($"Нет встроенного ресурса DocumentTypes/{name}");
+        using var stream = typeof(DocumentTypeRegistry).Assembly.GetManifestResourceStream($"DocumentTypes.{name}");
+        if (stream is null) return null;
         using var reader = new StreamReader(stream);
         return reader.ReadToEnd();
     }

@@ -42,6 +42,16 @@ public class DocxGenerationTests(DatabaseFixture app)
         {
             ["discipline_id"] = d.Id.ToString(), ["code"] = d.Code, ["name"] = d.Name
         }).ToArray());
+        // Новый документ получил постоянные пункты вуза из умолчаний шаблона — автор дополняет их своими.
+        var literature = JsonNode.Parse(created.Payload.GetProperty("literature").GetRawText())!.AsObject();
+        Assert.Equal((4, 8), (literature["internet_resources"]!.AsArray().Count, literature["software"]!.AsArray().Count));
+        literature["main"] = new JsonArray(new JsonObject { ["citation"] = "Петров П. П. Моделирование систем : учебник. — Москва : Наука, 2024. — 320 с." });
+        literature["additional"] = new JsonArray();
+        literature["internet_resources"]!.AsArray().Add(new JsonObject { ["title"] = "Портал моделирования", ["url"] = "https://example.org/models" });
+        literature["guidelines"] = new JsonObject { ["lab_works"] = "https://edu.example.org/labs" };
+        literature["software"]!.AsArray().Add("Среда имитационного моделирования");
+        var support = JsonNode.Parse(created.Payload.GetProperty("material_support").GetRawText())!.AsArray();
+        support.Add("Компьютерный класс со средой моделирования.");
         var sections = new Dictionary<string, JsonNode>
         {
             // Виды самостоятельной работы: реферат с обозначением, изучение раздела 1, остаток — самоподготовка.
@@ -62,15 +72,8 @@ public class DocxGenerationTests(DatabaseFixture app)
                 },
                 ["current_control_forms"] = new JsonArray("Опрос", "Р")
             }),
-            ["literature"] = new JsonObject
-            {
-                ["main"] = new JsonArray(new JsonObject { ["citation"] = "Петров П. П. Моделирование систем : учебник. — Москва : Наука, 2024. — 320 с." }),
-                ["additional"] = new JsonArray(),
-                ["internet_resources"] = new JsonArray(new JsonObject { ["title"] = "Портал моделирования", ["url"] = "https://example.org/models" }),
-                ["guidelines"] = new JsonObject { ["lab_works"] = "https://edu.example.org/labs" },
-                ["software"] = new JsonArray("Среда имитационного моделирования")
-            },
-            ["material_support"] = "<p>Компьютерный класс со средой моделирования.</p>",
+            ["literature"] = literature,
+            ["material_support"] = support,
             // Один составитель: строка второго и протокол кафедры остаются бланками.
             ["approval_sheet"] = new JsonObject
             {
@@ -88,6 +91,17 @@ public class DocxGenerationTests(DatabaseFixture app)
         var body = docx.MainDocumentPart!.Document!.Body!;
         var text = body.InnerText;
         string Line(string start) => body.Elements<Paragraph>().First(p => p.InnerText.StartsWith(start)).InnerText;
+        // Список от первого пункта до последнего: подряд, все пункты — элементы одного списка Word.
+        void AssertOneList(string first, string last, int count)
+        {
+            var paragraphs = body.Elements<Paragraph>().ToList();
+            var from = paragraphs.FindIndex(p => p.InnerText.StartsWith(first));
+            var to = paragraphs.FindIndex(p => p.InnerText == last);
+            Assert.Equal(count - 1, to - from);
+            var lists = paragraphs.GetRange(from, count).Select(p => p.ParagraphProperties?.NumberingProperties?.NumberingId?.Val?.Value).ToList();
+            Assert.NotNull(lists[0]);
+            Assert.All(lists, id => Assert.Equal(lists[0], id));
+        }
 
         Assert.DoesNotContain("Autofill", text);
         Assert.Contains("Математическое и компьютерное моделирование", text);
@@ -134,13 +148,12 @@ public class DocxGenerationTests(DatabaseFixture app)
         Assert.Equal(2, contents.Elements<TableRow>().Count());
         Assert.Contains("Понятие модели и моделирования", contents.InnerText);
 
-        // 4.3: ресурс дисциплины — элемент списка шаблона перед постоянными ресурсами вуза.
-        var resource = body.Elements<Paragraph>().Single(p => p.InnerText == "Портал моделирования // Режим доступа: https://example.org/models");
-        var constant = body.Elements<Paragraph>().First(p => p.InnerText.StartsWith("Электронная образовательная среда"));
-        Assert.Equal(constant.ParagraphProperties!.NumberingProperties!.NumberingId!.Val!.Value,
-            resource.ParagraphProperties!.NumberingProperties!.NumberingId!.Val!.Value);
+        // 4.3, 4.7, 5: пункты по умолчанию и пункты автора — один список шаблона с единой нумерацией.
+        AssertOneList("Электронная образовательная среда в сети Интернет // Режим доступа URL: http://edu.stankin.ru/",
+            "Портал моделирования // Режим доступа URL: https://example.org/models", 5);
+        AssertOneList("Профессиональная база данных Web of Science", "Среда имитационного моделирования", 9);
+        AssertOneList("Учебная аудитория для проведения лекций", "Компьютерный класс со средой моделирования.", 3);
         Assert.Contains("https://edu.example.org/labs", text);                         // 4.4 — ссылка
-        Assert.Contains("Компьютерный класс со средой моделирования.", text);          // 5
 
         // Пустые необязательные значения не стирают бланк: протокол и строка второго составителя — для ручного заполнения.
         Assert.Equal("протокол № ________ от \"___\" __________ 20__г.", Line("протокол №"));

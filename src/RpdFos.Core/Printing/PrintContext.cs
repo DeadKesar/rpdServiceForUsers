@@ -111,12 +111,12 @@ public sealed class PrintContext(
                     schema.TryGetProperty("x-print-titles", out var phrases) && phrases.TryGetProperty(text, out var phrase) ? phrase.GetString()
                     : schema.TryGetProperty("x-enum-titles", out var titles) && titles.TryGetProperty(text, out var title) ? title.GetString()
                     : text);
-            // Библиографическая запись уже содержит год и издательство; интернет-ресурс — название и адрес.
+            // Библиографическая запись уже содержит год и издательство; интернет-ресурс — название и адрес, как в пунктах вуза.
             case JsonValueKind.Array when widget == "literature_list":
                 var list = NextListId();
                 return new PrintValue(value.EnumerateArray()
                     .Select(item => Text(item, "citation") ?? (Text(item, "title") is { } name
-                        ? Text(item, "url") is { } url ? $"{name} // Режим доступа: {url}" : name
+                        ? Text(item, "url") is { } url ? $"{name} // Режим доступа URL: {url}" : name
                         : null))
                     .OfType<string>().Where(t => t.Trim().Length > 0)
                     .Select(t => new PrintParagraph([new PrintRun(t.Trim())], PrintListKind.Numbered, list)).ToList());

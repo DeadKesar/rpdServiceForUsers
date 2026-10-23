@@ -1251,6 +1251,10 @@ namespace RpdFos.Core.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("curriculum_plan_id");
 
+                    b.Property<string>("DefaultPayload")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("default_payload");
+
                     b.Property<DateTimeOffset?>("DeletedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("deleted_at");

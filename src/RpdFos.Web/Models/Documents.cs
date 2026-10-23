@@ -18,7 +18,7 @@ public sealed record DocumentItem(Guid Id, string Type, string Title, string Sta
 public sealed record DocumentActions(bool Submit, bool Review, bool ResolveComments, bool Print);
 
 public sealed record DocumentDetails(DocumentItem Document, JsonElement Payload, JsonElement Schema, DocumentMetadata Metadata,
-    bool Editable, DocumentActions Actions);
+    bool Editable, DocumentActions Actions, JsonElement? TemplateDefaults = null);
 
 public sealed record DocumentMetadata(List<SectionState> Sections, List<string> ReadOnlyPaths, List<string> HiddenPaths,
     List<CompetenceCandidate> CompetenceCandidates, PlanDisciplineChoices? PlanDisciplines);

@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using RpdFos.Api.Features.Plans;
@@ -281,6 +282,68 @@ public class TemplatesApiTests(DatabaseFixture app)
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
+
+    [Fact]
+    public async Task New_rpd_template_starts_with_university_defaults()
+    {
+        var (client, plan) = await MethodistWithPlanAsync();
+        var created = await CreateAsync(client, DocumentTypeRegistry.Rpd, plan.Id);
+
+        // Поля для умолчаний — по пометке схемы, в порядке схемы, с подписью «Раздел → Поле».
+        Assert.Equal(
+            ["/hours_distribution/self_study_kinds", "/literature/internet_resources", "/literature/guidelines", "/literature/software",
+             "/material_support"],
+            created.DefaultFields.Select(f => f.Pointer));
+        Assert.Equal("Учебно-методическое обеспечение дисциплины → Интернет-ресурсы", created.DefaultFields[1].Title);
+        // Начальные умолчания — постоянные пункты, убранные из третьей версии шаблона оформления, и стандартные виды СРС.
+        var defaults = created.Defaults!.Value;
+        Assert.Equal(7, defaults.GetProperty("hours_distribution").GetProperty("self_study_kinds").GetArrayLength());
+        Assert.Equal(4, defaults.GetProperty("literature").GetProperty("internet_resources").GetArrayLength());
+        Assert.Equal(8, defaults.GetProperty("literature").GetProperty("software").GetArrayLength());
+        Assert.Equal(2, defaults.GetProperty("material_support").GetArrayLength());
+        // У ФОС начальных умолчаний нет.
+        Assert.Null((await CreateAsync(client, DocumentTypeRegistry.Fos, plan.Id)).Defaults);
+    }
+
+    [Fact]
+    public async Task Methodist_edits_defaults_until_publication()
+    {
+        var (client, plan) = await MethodistWithPlanAsync();
+        var created = await CreateAsync(client, DocumentTypeRegistry.Rpd, plan.Id);
+        var draft = await UploadAsync(client, created, DocxBookmarksTests.Template(DocxBookmarksTests.Rpd), DocxBookmarksTests.Rpd);
+        var saved = await PostAsync(client, $"/api/templates/{draft.Template.Id}/save", draft.Template.Version);
+
+        // Пустые контейнеры от формы отбрасываются; сохранённый черновик снова становится черновиком.
+        var updated = await PutDefaultsAsync(client, saved, """
+            { "literature": { "software": [ "Программный пакет LibreOffice" ], "internet_resources": [] }, "hours_distribution": {} }
+            """);
+        Assert.Equal(HttpStatusCode.OK, updated.StatusCode);
+        var details = (await updated.Content.ReadFromJsonAsync<TemplateDetails>())!;
+        Assert.Equal(TemplateStatuses.Draft, details.Template.Status);
+        Assert.Equal("""{"literature":{"software":["Программный пакет LibreOffice"]}}""", details.Defaults!.Value.GetRawText());
+
+        // Поле без пометки и неполный пункт — 422 с местами.
+        var refused = await PutDefaultsAsync(client, details, """
+            { "goals_and_objectives": { "goals": "Цель" }, "literature": { "internet_resources": [ { "title": "Без адреса" } ] } }
+            """);
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, refused.StatusCode);
+        var paths = (await refused.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("errors").EnumerateArray()
+            .Select(e => e.GetProperty("path").GetString()).ToList();
+        Assert.Contains("/goals_and_objectives", paths);
+        Assert.Contains(paths, p => p!.StartsWith("/literature/internet_resources/0"));
+
+        // Опубликованный шаблон меняется новой редакцией — 409; редакция копирует умолчания.
+        var published = await PostAsync(client, $"/api/templates/{details.Template.Id}/publish", details.Template.Version);
+        Assert.Equal(HttpStatusCode.Conflict, (await PutDefaultsAsync(client, published, "{}")).StatusCode);
+        var revision = await client.PostAsJsonAsync($"/api/templates/{published.Template.Id}/revisions",
+            new TemplateVersionRequest(published.Template.Version));
+        Assert.True(JsonNode.DeepEquals(JsonNode.Parse(details.Defaults!.Value.GetRawText()),
+            JsonNode.Parse((await revision.Content.ReadFromJsonAsync<TemplateDetails>())!.Defaults!.Value.GetRawText())));
+    }
+
+    private static Task<HttpResponseMessage> PutDefaultsAsync(HttpClient client, TemplateDetails template, string defaults) =>
+        client.PutAsJsonAsync($"/api/templates/{template.Template.Id}/defaults",
+            new TemplateDefaultsRequest(template.Template.Version, JsonDocument.Parse(defaults).RootElement));
 
     private async Task<(HttpClient Client, CurriculumPlan Plan)> MethodistWithPlanAsync()
     {
