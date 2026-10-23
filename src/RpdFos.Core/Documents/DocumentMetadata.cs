@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using RpdFos.Core.DocumentTypes;
 
 namespace RpdFos.Core.Documents;
@@ -23,10 +24,13 @@ public sealed record PlanDisciplineChoices(IReadOnlyList<PlanDisciplineCandidate
 /// <summary>
 /// Метаданные документа для редактора: разделы, поля только для чтения при текущем статусе (JSON Pointer поддеревьев)
 /// и кандидаты: компетенции и индикаторы из матрицы, дисциплины плана до и после дисциплины — для пре- и постреквизитов.
+/// <paramref name="PlanValues"/> — поля из плана и их значения по плану: исправленное методистом поле редактор помечает
+/// «изменено методистом, в плане: …».
 /// </summary>
 public sealed record DocumentMetadata(
     IReadOnlyList<SectionState> Sections, IReadOnlyList<string> ReadOnlyPaths, IReadOnlyList<string> HiddenPaths,
-    IReadOnlyList<CompetenceCandidate> CompetenceCandidates, PlanDisciplineChoices PlanDisciplines)
+    IReadOnlyList<CompetenceCandidate> CompetenceCandidates, PlanDisciplineChoices PlanDisciplines,
+    IReadOnlyDictionary<string, JsonNode?> PlanValues)
 {
     /// <summary>
     /// Места, не предусмотренные учебным планом (<c>x-visible-if</c>): разделы и поля внутри разделов —
@@ -76,7 +80,7 @@ public sealed record DocumentMetadata(
             }
 
         return new DocumentMetadata(sections, ReadOnly(schema, status, resolve), Hidden(schema, facts, resolve), facts.Competences,
-            new PlanDisciplineChoices(facts.Earlier, facts.Later));
+            new PlanDisciplineChoices(facts.Earlier, facts.Later), PlanFields.Values(schema, facts, resolve));
     }
 
     /// <summary>

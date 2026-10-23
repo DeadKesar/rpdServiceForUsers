@@ -26,8 +26,15 @@ public sealed class DocumentEditing(
 
     private static readonly JsonSerializerOptions Json = new() { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
 
+    public const string PlanOnlyChanged = "В этом статусе исправляются только поля из учебного плана";
+
+    /// <param name="scope">
+    /// Что можно менять (<see cref="DocumentTransitions.EditScope"/>): поля из плана — только методисту и администратору;
+    /// каждое их изменение — запись в журнале аудита (кто, когда, было, стало).
+    /// </param>
     public async Task<SectionUpdateResult> UpdateSectionAsync(
-        Document document, string section, JsonElement value, Guid editorId, CancellationToken ct = default)
+        Document document, string section, JsonElement value, Guid editorId, CancellationToken ct = default,
+        DocumentEditScope scope = DocumentEditScope.Content)
     {
         var schemaJson = await SchemaAsync(document, ct);
         var schema = JsonDocument.Parse(schemaJson).RootElement;
@@ -46,12 +53,21 @@ public sealed class DocumentEditing(
         if (Sanitize(JsonNode.Parse(value.GetRawText()), sectionSchema, root, 0) is { } sanitized) updated[section] = sanitized;
         else updated.Remove(section);
 
-        // Поля из плана и закрытые статусом: присланное должно совпасть с тем, что уже в документе.
-        var changed = DocumentMetadata.ReadOnly(schema, document.Status, registry.FindSchema)
-            .Where(p => p == $"/{section}" || p.StartsWith($"/{section}/", StringComparison.Ordinal))
+        // Поля из плана и закрытые статусом: присланное должно совпасть с тем, что уже в документе. Поля плана
+        // открыты исправляющему (методист, администратор), закрытые статусом — нет.
+        bool InSection(string p) => p == $"/{section}" || p.StartsWith($"/{section}/", StringComparison.Ordinal);
+        var planPaths = PlanFields.Paths(schema, registry.FindSchema).Where(InSection).ToList();
+        var locked = DocumentMetadata.ReadOnly(schema, document.Status, registry.FindSchema).Where(InSection)
+            .Where(p => scope == DocumentEditScope.Content || !planPaths.Contains(p));
+        var changed = locked
             .Where(p => !JsonNode.DeepEquals(At(payload, p), At(updated, p)))
             .Select(p => new DocumentValidationError(p, ReadOnlyChanged)).ToList();
         if (changed.Count > 0) return new(SectionUpdateProblem.ReadOnlyChanged, changed, null);
+        // После приёма и у администратора — только поля плана: остальное содержимое раздела должно совпасть.
+        if (scope == DocumentEditScope.PlanOnly && !JsonNode.DeepEquals(Without(payload[section], section, planPaths),
+                Without(updated[section], section, planPaths)))
+            return new(SectionUpdateProblem.ReadOnlyChanged, [new DocumentValidationError($"/{section}", PlanOnlyChanged)], null);
+        var corrections = scope == DocumentEditScope.Content ? [] : PlanFields.Changes(payload, updated, planPaths);
 
         var updatedJson = updated.ToJsonString(Json);
         var element = JsonDocument.Parse(updatedJson).RootElement;
@@ -62,8 +78,16 @@ public sealed class DocumentEditing(
             .Where(e => DocumentSubmission.Section(e.Path) == section).ToList();
         if (wrong.Count > 0) return new(SectionUpdateProblem.Invalid, wrong, null);
 
-        var previous = document.Edit(updatedJson);
-        if (previous is not null) history.StatusChanged(document, previous, editorId);
+        if (scope == DocumentEditScope.PlanOnly) document.CorrectPlanFields(updatedJson);
+        else if (document.Edit(updatedJson) is { } previous) history.StatusChanged(document, previous, editorId);
+        var now = clock.GetUtcNow();
+        foreach (var c in corrections)
+            db.AuditLog.Add(new AuditLogEntry
+            {
+                UserId = editorId, EventType = AuditEvents.PlanFieldCorrected, EntityType = AuditEntities.Document,
+                EntityId = document.Id, OccurredAt = now,
+                Payload = new JsonObject { ["path"] = c.Path, ["before"] = c.Before, ["after"] = c.After }.ToJsonString(Json)
+            });
         await history.SnapshotAsync(document, editorId, VersionTriggers.AutoSave, ct);
 
         var metadata = DocumentMetadata.Build(schemaJson, element, document.Status, facts, validator, rules, registry.FindSchema);
@@ -107,6 +131,21 @@ public sealed class DocumentEditing(
                     a[i] = Sanitize(a[i]?.DeepClone(), itemSchema, itemsRoot, depth + 1);
         }
         return node;
+    }
+
+    // Раздел без полей из плана — чтобы сравнить остальное содержимое.
+    private static JsonNode? Without(JsonNode? sectionValue, string section, IEnumerable<string> planPaths)
+    {
+        if (sectionValue?.DeepClone() is not JsonObject copy) return sectionValue?.DeepClone();
+        foreach (var path in planPaths)
+        {
+            var segments = path.TrimStart('/').Split('/')[1..];
+            if (segments.Length == 0) return null;
+            JsonNode? parent = copy;
+            foreach (var segment in segments[..^1]) parent = (parent as JsonObject)?[segment];
+            (parent as JsonObject)?.Remove(segments[^1]);
+        }
+        return copy;
     }
 
     private static JsonNode? At(JsonNode node, string pointer)

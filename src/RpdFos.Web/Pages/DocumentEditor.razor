@@ -59,7 +59,7 @@ else
             <button class="btn btn-success" disabled="@(busy || conflict)" @onclick="AcceptAsync">Принять</button>
             <button class="btn btn-warning" disabled="@(busy || conflict)" @onclick="() => returning = !returning">Вернуть на доработку</button>
         }
-        @if (details.Editable)
+        @if (details.Editable || details.Actions.CorrectPlan)
         {
             <span class="small @(dirty ? "text-warning" : "text-muted")">
                 @if (busy)
@@ -105,7 +105,30 @@ else
 
     @if (!details.Editable)
     {
-        <div class="alert alert-secondary py-2">@ReadOnlyReason(d.Status)</div>
+        <div class="alert alert-secondary py-2">
+            @ReadOnlyReason(d.Status)
+            @if (details.Actions.CorrectPlan)
+            {
+                <span>Исправить можно поля из учебного плана — изменения сохраняются автоматически и записываются в историю.</span>
+            }
+        </div>
+    }
+
+    @if (details.PlanCorrections is { Count: > 0 } corrections)
+    {
+        <details class="card mb-3">
+            <summary class="card-body py-2 small fw-semibold">Исправления полей из учебного плана: @corrections.Count</summary>
+            <ul class="small mb-2">
+                @foreach (var c in corrections.AsEnumerable().Reverse())
+                {
+                    <li>
+                        @c.ChangedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm"), @(c.ChangedBy ?? "—"):
+                        <a href="" @onclick="() => GoToAsync(c.Path)" @onclick:preventDefault>@PlaceTitle(c.Path)</a> —
+                        было @SchemaContext.PlanText(Node(c.Before)), стало @SchemaContext.PlanText(Node(c.After))
+                    </li>
+                }
+            </ul>
+        </details>
     }
 
     @if (comments.Count > 0)
@@ -302,7 +325,8 @@ else
         {
             Locked = !details.Editable, Comments = comments, CanComment = details.Actions.Review,
             CanResolve = details.Actions.ResolveComments, AddComment = AddCommentAsync, ResolveComment = ResolveCommentAsync,
-            Defaults = details.TemplateDefaults is { } defaults ? JsonNode.Parse(defaults.GetRawText()) as JsonObject : null
+            Defaults = details.TemplateDefaults is { } defaults ? JsonNode.Parse(defaults.GetRawText()) as JsonObject : null,
+            CorrectPlan = details.Actions.CorrectPlan, Corrections = details.PlanCorrections ?? []
         };
         sections = details.Metadata.Sections.ToList();
         version = details.Document.Version;
@@ -336,6 +360,8 @@ else
         var title = sections.FirstOrDefault(s => s.Key == section)?.Title ?? section;
         return path.Trim('/').Contains('/') ? $"{title} → {context!.FieldTitle(path)}" : title;
     }
+
+    private static JsonNode? Node(JsonElement? value) => value is { } v ? JsonNode.Parse(v.GetRawText()) : null;
 
     private static string ReadOnlyReason(string status) => status switch
     {

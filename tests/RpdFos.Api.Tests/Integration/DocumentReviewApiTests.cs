@@ -150,7 +150,7 @@ public class DocumentReviewApiTests(DatabaseFixture app)
 
         var details = (await methodist.GetFromJsonAsync<DocumentDetails>(Url(created, "")))!;
         Assert.True(details.Editable);
-        Assert.Equal(new DocumentActions(Submit: false, Review: true, ResolveComments: false, Print: true), details.Actions);
+        Assert.Equal(new DocumentActions(Submit: false, Review: true, ResolveComments: false, Print: true, CorrectPlan: true), details.Actions);
 
         var edited = await DocumentData.PatchAsync(methodist, created.Document.Id, "goals_and_objectives", version, Goals("Задача, уточнённая методистом"));
 
@@ -162,6 +162,77 @@ public class DocumentReviewApiTests(DatabaseFixture app)
                 .OrderByDescending(v => v.VersionNumber).FirstAsync();
             Assert.Equal((reviewer.Id, VersionTriggers.AutoSave), (last.SavedBy, last.TriggerEvent));
         });
+    }
+
+    [Fact]
+    public async Task Methodist_corrects_plan_hours_with_warning_mark_and_history()
+    {
+        var (author, _) = await DocumentData.UserAsync(app);
+        var (methodist, reviewer) = await DocumentData.UserAsync(app, AppRoles.Methodist);
+        var created = await DocumentData.CreateAsync(app, author, (await DocumentData.PublishedTemplateAsync(app)).Id, "Б1.О.13");
+        var version = await DocumentData.FillForSubmissionAsync(author, created);
+        version = await ExpectAsync(author.PostAsJsonAsync(Url(created, "submit"), new DocumentVersionRequest(version)), DocumentStatuses.UnderReview);
+
+        // На проверке методист исправляет лекции 1 семестра: на 2 часа меньше, чем в плане.
+        var before = (await methodist.GetFromJsonAsync<DocumentDetails>(Url(created, "")))!;
+        var hours = JsonNode.Parse(before.Payload.GetProperty("hours_distribution").GetRawText())!;
+        var planLectures = (int)hours["semesters"]![0]!["lectures"]!;
+        hours["semesters"]![0]!["lectures"] = planLectures - 2;
+        var saved = await DocumentData.PatchAsync(methodist, created.Document.Id, "hours_distribution", version, hours);
+        Assert.Equal(DocumentStatuses.UnderReview, saved.Status);
+
+        var after = (await methodist.GetFromJsonAsync<DocumentDetails>(Url(created, "")))!;
+        var sections = after.Metadata.Sections.ToDictionary(s => s.Key);
+        // Предупреждение «отличается от плана» отправку и приём не блокирует; правило часов сверяет уже с исправленными.
+        var warning = Assert.Single(sections["hours_distribution"].Warnings);
+        Assert.Equal(("/hours_distribution/semesters/0/lectures", $"{PlanFields.DiffersFromPlan}: в плане {planLectures}"),
+            (warning.Path, warning.Message));
+        Assert.Contains(sections["thematic_plan"].Missing, e => e.Message == $"Лекции: по темам {planLectures} ч, по распределению часов {planLectures - 2} ч");
+        // Значение по плану — для пометки в редакторе; история — кто, было, стало.
+        Assert.Equal(planLectures, (int)after.Metadata.PlanValues["/hours_distribution/semesters"]![0]!["lectures"]!);
+        var correction = Assert.Single(after.PlanCorrections!);
+        Assert.Equal(("/hours_distribution/semesters/0/lectures", planLectures, planLectures - 2, reviewer.ShortName),
+            (correction.Path, correction.Before!.Value.GetInt32(), correction.After!.Value.GetInt32(), correction.ChangedBy));
+        await app.WithDbAsync(async db =>
+        {
+            var entry = await db.AuditLog.SingleAsync(a => a.EntityId == created.Document.Id);
+            Assert.Equal((AuditEvents.PlanFieldCorrected, reviewer.Id), (entry.EventType, entry.UserId));
+        });
+    }
+
+    [Fact]
+    public async Task After_acceptance_methodist_and_admin_correct_only_plan_fields()
+    {
+        var (author, _) = await DocumentData.UserAsync(app);
+        var (other, _) = await DocumentData.UserAsync(app);
+        var (methodist, _) = await DocumentData.UserAsync(app, AppRoles.Methodist);
+        var (admin, _) = await DocumentData.UserAsync(app, AppRoles.Admin);
+        var created = await DocumentData.CreateAsync(app, author, (await DocumentData.PublishedTemplateAsync(app)).Id, "Б1.О.08");
+        var version = await DocumentData.FillForSubmissionAsync(author, created);
+        version = await ExpectAsync(author.PostAsJsonAsync(Url(created, "submit"), new DocumentVersionRequest(version)), DocumentStatuses.UnderReview);
+        version = await ExpectAsync(methodist.PostAsJsonAsync(Url(created, "accept"), new DocumentVersionRequest(version)), DocumentStatuses.Accepted);
+
+        var forMethodist = (await methodist.GetFromJsonAsync<DocumentDetails>(Url(created, "")))!;
+        Assert.Equal((false, true), (forMethodist.Editable, forMethodist.Actions.CorrectPlan));
+        Assert.False((await author.GetFromJsonAsync<DocumentDetails>(Url(created, "")))!.Actions.CorrectPlan);
+
+        var title = JsonNode.Parse(forMethodist.Payload.GetProperty("title_page").GetRawText())!;
+        title["discipline_name"] = "Название, исправленное методистом";
+        var corrected = await DocumentData.PatchAsync(methodist, created.Document.Id, "title_page", version, title);
+        Assert.Equal(DocumentStatuses.Accepted, corrected.Status);
+        title["discipline_name"] = "Название, исправленное администратором";
+        version = (await DocumentData.PatchAsync(admin, created.Document.Id, "title_page", corrected.Version, title)).Version;
+
+        // Остальное содержимое после приёма закрыто и для методиста; автору — всё; чужому — 403.
+        var goals = await methodist.PatchAsJsonAsync(Url(created, "sections/goals_and_objectives"), Section(version, Goals("Правка после приёма")));
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, goals.StatusCode);
+        Assert.Equal(DocumentEditing.PlanOnlyChanged, Assert.Single(await ErrorsAsync(goals)).GetProperty("message").GetString());
+        Assert.Equal(HttpStatusCode.Conflict, (await author.PatchAsJsonAsync(Url(created, "sections/title_page"), Section(version, title))).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await other.PatchAsJsonAsync(Url(created, "sections/title_page"), Section(version, title))).StatusCode);
+
+        var history = (await admin.GetFromJsonAsync<DocumentDetails>(Url(created, "")))!.PlanCorrections!;
+        Assert.Equal(["Название, исправленное методистом", "Название, исправленное администратором"],
+            history.Select(c => c.After!.Value.GetString()));
     }
 
     [Fact]

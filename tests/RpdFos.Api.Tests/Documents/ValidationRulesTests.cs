@@ -57,7 +57,7 @@ public class ValidationRulesTests
         var plan = """[ { "hours": { "lectures": 12, "practice": 16, "lab_hours": 16, "self_study": 60 } } ]""";
 
         Assert.Equal(
-            [new DocumentValidationError("/thematic_plan", "Лекции: по темам 12 ч, по учебному плану 24 ч")],
+            [new DocumentValidationError("/thematic_plan", "Лекции: по темам 12 ч, по распределению часов 24 ч")],
             Run(new TopicHoursMatchTotal(), plan, "/thematic_plan"));
     }
 
@@ -83,10 +83,10 @@ public class ValidationRulesTests
 
         Assert.Equal(
             [
-                new DocumentValidationError("/hours_distribution/self_study_kinds", "1 семестр: по видам 36 ч, по учебному плану 40 ч"),
-                new DocumentValidationError("/hours_distribution/self_study_kinds", "2 семестр: по видам 0 ч, по учебному плану 20 ч"),
+                new DocumentValidationError("/hours_distribution/self_study_kinds", "1 семестр: по видам 36 ч, по распределению часов 40 ч"),
+                new DocumentValidationError("/hours_distribution/self_study_kinds", "2 семестр: по видам 0 ч, по распределению часов 20 ч"),
                 new DocumentValidationError("/hours_distribution/self_study_kinds",
-                    "3 семестр: по видам 4 ч, а в учебном плане дисциплины такого семестра нет")
+                    "3 семестр: по видам 4 ч, а у дисциплины такого семестра нет")
             ],
             Run(new SelfStudyKindsMatchPlan(), hours, "/hours_distribution"));
         // Без видов вовсе — тоже расхождение: правило висит на трудоёмкости, она в документе всегда есть.

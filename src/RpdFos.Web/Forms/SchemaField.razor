@@ -37,6 +37,10 @@
                     {
                         <span class="badge text-bg-light border ms-1" title="Заполняется из учебного плана и справочников">из учебного плана</span>
                     }
+                    @if (Context.PlanMark(Path, Value) is { } mark)
+                    {
+                        <span class="badge text-bg-warning ms-1" title="@Context.CorrectionInfo(Path)">@mark</span>
+                    }
                 </label>
                 <ScalarInput Context="Context" Schema="Schema" Parent="Parent" Key="@Key" Path="@Path" EnsureParent="EnsureParent" />
                 @if (Hint is not null)

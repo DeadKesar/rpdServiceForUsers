@@ -226,6 +226,35 @@ public class DocxGenerationTests(DatabaseFixture app)
     }
 
     [Fact]
+    public async Task Corrected_plan_fields_are_printed_without_marks()
+    {
+        // Б1.О.11: методист на проверке исправляет название и часы лекций — печать берёт исправленное.
+        var (author, _) = await DocumentData.UserAsync(app);
+        var (methodist, _) = await DocumentData.UserAsync(app, AppRoles.Methodist);
+        var created = await DocumentData.CreateAsync(app, author, (await DocumentData.PublishedTemplateAsync(app)).Id, "Б1.О.11");
+        var version = await DocumentData.FillForSubmissionAsync(author, created);
+        var submitted = await author.PostAsJsonAsync($"/api/documents/{created.Document.Id}/submit", new DocumentVersionRequest(version));
+        version = (await submitted.Content.ReadFromJsonAsync<DocumentReviewed>())!.Version;
+
+        var current = (await methodist.GetFromJsonAsync<DocumentDetails>($"/api/documents/{created.Document.Id}"))!;
+        var title = JsonNode.Parse(current.Payload.GetProperty("title_page").GetRawText())!;
+        title["discipline_name"] = "Исправленное название дисциплины";
+        version = (await DocumentData.PatchAsync(methodist, created.Document.Id, "title_page", version, title)).Version;
+        var hours = JsonNode.Parse(current.Payload.GetProperty("hours_distribution").GetRawText())!;
+        var lectures = (int)hours["semesters"]![0]!["lectures"]! + 2;
+        hours["semesters"]![0]!["lectures"] = lectures;
+        await DocumentData.PatchAsync(methodist, created.Document.Id, "hours_distribution", version, hours);
+
+        using var docx = await DownloadAsync(methodist, created, await PrintAsync(methodist, created));
+        var body = docx.MainDocumentPart!.Document!.Body!;
+
+        Assert.Contains("Исправленное название дисциплины", body.InnerText);
+        Assert.Equal([lectures.ToString(), lectures.ToString()], Cells(Laboriousness(body), "Лекции"));
+        Assert.DoesNotContain("изменено методистом", body.InnerText);
+        Assert.DoesNotContain(PlanFields.DiffersFromPlan, body.InnerText);
+    }
+
+    [Fact]
     public async Task Methodist_prints_only_documents_under_review()
     {
         var (author, _) = await DocumentData.UserAsync(app);

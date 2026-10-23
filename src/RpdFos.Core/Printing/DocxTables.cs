@@ -65,7 +65,7 @@ internal static class DocxTables
     private static void Laboriousness(Table table, PrintContext context, List<string> warnings, List<string> unfilled, string bookmark)
     {
         var rows = table.Elements<TableRow>().ToList();
-        var semesters = context.Facts.Semesters;
+        var semesters = context.Semesters;
         if (rows.Count < 11 || semesters.Count == 0)
         {
             warnings.Add($"Закладка {bookmark}: таблица трудоёмкости не той формы или в плане нет семестров — не заполнена.");
@@ -196,7 +196,7 @@ internal static class DocxTables
         var prototype = rows[Math.Min(2, rows.Count - 1)];
         var topics = Items(context.At("/thematic_plan"));
         if (topics.Count == 0) unfilled.Add($"{bookmark} — тематический план не заполнен");
-        var semester = context.Facts.Semesters.Count == 1 ? context.Facts.Semesters[0].Semester.ToString() : "";
+        var semester = context.Semesters.Count == 1 ? context.Semesters[0].Semester.ToString() : "";
 
         foreach (var topic in topics)
         {
@@ -210,7 +210,7 @@ internal static class DocxTables
         Add(true, "", "Итого", "", "", Sum("lectures").ToString(), Sum("lab_hours").ToString(), Sum("practice").ToString(),
             Sum("self_study").ToString(), "", "");
         Add(true, "", "Промежуточный контроль", "", "", "", "", "", "", "",
-            PlanTitles.Attestation(context.Facts.Semesters.SelectMany(s => s.ControlTypes)));
+            PlanTitles.Attestation(context.Semesters.SelectMany(s => s.ControlTypes)));
 
         void Add(bool bold, params string[] values)
         {

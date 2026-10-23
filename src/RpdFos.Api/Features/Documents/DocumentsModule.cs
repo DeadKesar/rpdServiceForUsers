@@ -46,6 +46,9 @@ public class DocumentsModule : ICarterModule
     // Проверяет документы методист: возвращает, принимает, оставляет замечания, правит на проверке.
     private static bool IsReviewer(ClaimsPrincipal user) => user.IsInRole(AppRoles.Methodist);
 
+    // Исправляют поля из учебного плана (этап 5.1): методист и администратор.
+    private static bool IsCorrector(ClaimsPrincipal user) => user.IsInRole(AppRoles.Methodist) || user.IsInRole(AppRoles.Admin);
+
     private static async Task<List<DocumentListItem>> List(
         string? status, Guid? planId, HttpContext http, AppDbContext db, DirectoryAccounts directory, CancellationToken ct)
     {
@@ -109,7 +112,7 @@ public class DocumentsModule : ICarterModule
     {
         var (document, me, refusal) = await VisibleDocumentAsync(id, http, db, directory, ct);
         if (refusal is not null) return refusal;
-        return Results.Ok(await DetailsAsync(document!, db, validator, rules, registry, ct, document!.AuthorId == me, IsReviewer(http.User)));
+        return Results.Ok(await DetailsAsync(document!, db, validator, rules, registry, ct, document!.AuthorId == me, IsReviewer(http.User), IsCorrector(http.User)));
     }
 
     private static async Task<IResult> Create(
@@ -124,7 +127,7 @@ public class DocumentsModule : ICarterModule
         return result switch
         {
             { Document: { } document } => Results.Created($"/api/documents/{document.Id}",
-                await DetailsAsync(document, db, validator, rules, registry, ct, isAuthor: true, IsReviewer(http.User))),
+                await DetailsAsync(document, db, validator, rules, registry, ct, isAuthor: true, IsReviewer(http.User), IsCorrector(http.User))),
             { Problem: DocumentCreationProblem.Duplicate } => Results.Problem(statusCode: StatusCodes.Status409Conflict,
                 title: "Документ уже есть", detail: result.Detail,
                 extensions: new Dictionary<string, object?>
@@ -154,12 +157,22 @@ public class DocumentsModule : ICarterModule
         Guid id, string section, SectionUpdateRequest rq, HttpContext http, AppDbContext db, DirectoryAccounts directory,
         DocumentEditing editing, TimeProvider clock, CancellationToken ct)
     {
-        var (document, editorId, refusal) = await EditorDocumentAsync(id, http, db, directory, DocumentTransitions.EditAction, ct);
-        if (refusal is not null) return refusal;
+        var document = await db.Documents.SingleOrDefaultAsync(d => d.Id == id, ct);
+        if (document is null) return NotFound();
+        var editorId = await directory.FindIdAsync(http.User, ct);
+        if (editorId is null) return NoDirectoryRecord();
+        var isAuthor = document.AuthorId == editorId;
+        // Автор — своё содержимое, методист на проверке — всё, после приёма методист и администратор — поля из плана.
+        var scope = DocumentTransitions.EditScope(document.Status, isAuthor, IsReviewer(http.User), IsCorrector(http.User));
+        if (scope is null)
+            return isAuthor || IsCorrector(http.User)
+                ? Refused(document, DocumentTransitions.EditAction)
+                : Results.Problem(statusCode: StatusCodes.Status403Forbidden, title: "Изменяет только автор",
+                    detail: "Документ изменяет его автор, а на проверке — методист.");
 
         // Сравнивать будем с версией, которую видел клиент; новую проставит перехватчик сохранения.
-        db.Entry(document!).Property(d => d.Version).OriginalValue = rq.Version;
-        var result = await editing.UpdateSectionAsync(document!, section, rq.Value, editorId, ct);
+        db.Entry(document).Property(d => d.Version).OriginalValue = rq.Version;
+        var result = await editing.UpdateSectionAsync(document, section, rq.Value, editorId.Value, ct, scope.Value);
         if (result.Problem is { } problem)
             return problem switch
             {
@@ -373,7 +386,7 @@ public class DocumentsModule : ICarterModule
     private static async Task<DocumentDetails> DetailsAsync(
         Document document, AppDbContext db, IDocumentValidator validator, ValidationRuleSet rules, DocumentTypeRegistry registry,
         CancellationToken ct,
-        bool isAuthor, bool isReviewer)
+        bool isAuthor, bool isReviewer, bool isCorrector = false)
     {
         var template = await db.DocumentTemplates.IgnoreQueryFilters().Where(t => t.Id == document.TemplateId)
             .Select(t => new { t.Schema, t.DefaultPayload }).SingleAsync(ct);
@@ -381,6 +394,16 @@ public class DocumentsModule : ICarterModule
         var facts = (await DisciplineFacts.LoadAsync(db, document.DisciplineId, ct))!;
         var payload = JsonDocument.Parse(document.Payload).RootElement;
         var status = document.Status;
+        var scope = DocumentTransitions.EditScope(status, isAuthor, isReviewer, isCorrector);
+        // Исправления полей из плана — из журнала аудита: кто, когда, было, стало.
+        var corrections = await (
+                from a in db.AuditLog
+                where a.EntityType == AuditEntities.Document && a.EntityId == document.Id && a.EventType == AuditEvents.PlanFieldCorrected
+                join e in db.Employees on a.UserId equals e.Id into editors
+                from e in editors.DefaultIfEmpty()
+                orderby a.OccurredAt
+                select new { a.Payload, a.OccurredAt, Name = e == null ? null : e.ShortName })
+            .ToListAsync(ct);
 
         return new DocumentDetails(
             DocumentItem.From(document, facts.Discipline),
@@ -395,8 +418,10 @@ public class DocumentsModule : ICarterModule
                 Review: isReviewer && DocumentTransitions.CanReview(status),
                 ResolveComments: isAuthor && DocumentTransitions.CanResolveComments(status),
                 // Печать: автор — в любом статусе, методист — на проверке и после приёма (как в срезе «Печать»).
-                Print: isAuthor || isReviewer && status is DocumentStatuses.UnderReview or DocumentStatuses.Accepted),
-            template.DefaultPayload is { } defaults ? JsonDocument.Parse(defaults).RootElement : null);
+                Print: isAuthor || isReviewer && status is DocumentStatuses.UnderReview or DocumentStatuses.Accepted,
+                CorrectPlan: scope is DocumentEditScope.ContentAndPlan or DocumentEditScope.PlanOnly),
+            template.DefaultPayload is { } defaults ? JsonDocument.Parse(defaults).RootElement : null,
+            corrections.Select(c => PlanCorrection.From(c.Payload, c.Name, c.OccurredAt)).ToList());
     }
 
     private static IResult NotFound() =>
@@ -453,9 +478,20 @@ public record DocumentItem(
 
 /// <summary>
 /// Что пользователь может сделать с документом сейчас: отправить, проверить (вернуть, принять, замечания), разрешать
-/// замечания, формировать печатную форму.
+/// замечания, формировать печатную форму, исправлять поля из учебного плана (методист и администратор, этап 5.1).
 /// </summary>
-public record DocumentActions(bool Submit, bool Review, bool ResolveComments, bool Print);
+public record DocumentActions(bool Submit, bool Review, bool ResolveComments, bool Print, bool CorrectPlan = false);
+
+/// <summary>Исправление поля из плана из журнала аудита: место, было, стало, кто и когда.</summary>
+public record PlanCorrection(string Path, JsonElement? Before, JsonElement? After, string? ChangedBy, DateTimeOffset ChangedAt)
+{
+    public static PlanCorrection From(string payload, string? changedBy, DateTimeOffset at)
+    {
+        var e = JsonDocument.Parse(payload).RootElement;
+        JsonElement? Value(string name) => e.TryGetProperty(name, out var v) && v.ValueKind != JsonValueKind.Null ? v.Clone() : null;
+        return new(e.TryGetProperty("path", out var p) ? p.GetString() ?? "" : "", Value("before"), Value("after"), changedBy, at);
+    }
+}
 
 /// <summary>
 /// Документ для редактора: содержимое, схема из шаблона, метаданные, доступные действия и значения по умолчанию
@@ -463,7 +499,7 @@ public record DocumentActions(bool Submit, bool Review, bool ResolveComments, bo
 /// </summary>
 public record DocumentDetails(
     DocumentItem Document, JsonElement Payload, JsonElement Schema, DocumentMetadata Metadata, bool Editable, DocumentActions Actions,
-    JsonElement? TemplateDefaults = null);
+    JsonElement? TemplateDefaults = null, IReadOnlyList<PlanCorrection>? PlanCorrections = null);
 
 /// <summary>Замечание к полю: кто и когда оставил, разрешено ли и кем.</summary>
 public record CommentItem(

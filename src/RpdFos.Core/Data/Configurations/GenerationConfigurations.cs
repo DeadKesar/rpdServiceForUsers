@@ -41,3 +41,20 @@ internal sealed class GeneratedFileConfiguration : IEntityTypeConfiguration<Gene
         e.HasOne<GenerationTask>().WithMany().HasForeignKey(x => x.GenerationTaskId).OnDelete(DeleteBehavior.Cascade);
     }
 }
+
+// Журнал аудита (раздел 2.4 ВКР): индексы — как в проекте. Запрет изменения и удаления на уровне прав роли
+// приложения в прототипе не настраивается: одна роль базы на всё приложение.
+internal sealed class AuditLogConfiguration : IEntityTypeConfiguration<AuditLogEntry>
+{
+    public void Configure(EntityTypeBuilder<AuditLogEntry> e)
+    {
+        e.ToTable("audit_log");
+        e.Property(x => x.EventType).HasMaxLength(100);
+        e.Property(x => x.EntityType).HasMaxLength(50);
+        e.Property(x => x.Payload).HasColumnType("jsonb");
+        e.HasIndex(x => new { x.UserId, x.OccurredAt }).IsDescending(false, true);
+        e.HasIndex(x => new { x.EntityType, x.EntityId });
+        e.HasIndex(x => new { x.EventType, x.OccurredAt }).IsDescending(false, true);
+        e.HasOne<Employee>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Restrict);
+    }
+}

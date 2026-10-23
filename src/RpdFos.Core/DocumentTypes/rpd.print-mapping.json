@@ -74,7 +74,7 @@
     "occurrences": { "AutofillDeveloperName2": { "target": "/approval_sheet/developers/1/name_for_document" } }
   },
   "AutofillZeAtAll": { "kind": "field", "target": "/hours_distribution/total_credits" },
-  "AutofillByPlan": { "kind": "source", "target": "parser.discipline.hours_total" },
+  "AutofillByPlan": { "kind": "field", "target": "/hours_distribution/total_hours" },
   "AutofillCompetencies": { "kind": "field", "target": "/competences" },
   "AutofillCompetenciesTable": { "kind": "table", "target": "competences" },
   "AutofillLaboriousnessTable": { "kind": "table", "target": "laboriousness" },

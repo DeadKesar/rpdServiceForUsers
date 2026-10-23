@@ -54,10 +54,67 @@ public sealed class SchemaContext(JsonElement root, JsonObject payload, Document
     /// </summary>
     public void Edited() => edited();
 
-    // Поле из плана или закрытое статусом: само место или вложенное в такое место.
-    public bool IsReadOnly(string path, JsonElement schema) =>
-        Locked || schema.TryGetProperty("readOnly", out var r) && r.ValueKind == JsonValueKind.True ||
-        Metadata.ReadOnlyPaths.Any(p => path == p || path.StartsWith(p + "/", StringComparison.Ordinal));
+    /// <summary>Пользователь исправляет поля из учебного плана: методист на проверке и после приёма, администратор (этап 5.1).</summary>
+    public bool CorrectPlan { get; set; }
+
+    /// <summary>Исправления полей из плана — кто, когда, было, стало.</summary>
+    public List<PlanCorrection> Corrections { get; set; } = [];
+
+    // Поле из плана открыто только исправляющему; остальное — по статусу: само место или вложенное в закрытое место.
+    public bool IsReadOnly(string path, JsonElement schema)
+    {
+        if (IsPlanField(path, schema)) return !CorrectPlan;
+        return Locked || Metadata.ReadOnlyPaths.Any(p => path == p || path.StartsWith(p + "/", StringComparison.Ordinal));
+    }
+
+    private bool IsPlanField(string path, JsonElement schema) =>
+        schema.ValueKind == JsonValueKind.Object && schema.TryGetProperty("readOnly", out var r) && r.ValueKind == JsonValueKind.True ||
+        Metadata.PlanValues is { } values && values.Keys.Any(p => path == p || path.StartsWith(p + "/", StringComparison.Ordinal));
+
+    /// <summary>
+    /// Пометка исправленного поля из плана: «изменено методистом, в плане: 24»; значение как в плане — null. В печати
+    /// пометок нет.
+    /// </summary>
+    public string? PlanMark(string path, JsonNode? current)
+    {
+        if (PlanValueAt(path) is not var (found, plan) || !found) return null;
+        if (JsonNode.DeepEquals(Normalize(plan), Normalize(current))) return null;
+        return $"изменено методистом, в плане: {PlanText(plan)}";
+    }
+
+    /// <summary>Кто и когда последним исправлял это место — для подсказки у пометки.</summary>
+    public string? CorrectionInfo(string path) =>
+        Corrections.LastOrDefault(c => c.Path == path || c.Path.StartsWith(path + "/", StringComparison.Ordinal)) is { } c
+            ? $"{c.ChangedBy ?? "—"}, {c.ChangedAt.ToLocalTime():dd.MM.yyyy HH:mm}"
+            : null;
+
+    // Значение по плану на месте path: поле плана целиком или его часть («семестр 1 → лекции»).
+    private (bool Found, JsonNode? Value)? PlanValueAt(string path)
+    {
+        if (Metadata.PlanValues is not { } values) return null;
+        var root = values.Keys.FirstOrDefault(p => path == p || path.StartsWith(p + "/", StringComparison.Ordinal));
+        if (root is null) return null;
+        JsonNode? node = values[root] is { } v ? JsonNode.Parse(v.GetRawText()) : null;
+        foreach (var segment in path[root.Length..].Split('/', StringSplitOptions.RemoveEmptyEntries))
+            node = node switch
+            {
+                JsonObject o => o[segment],
+                JsonArray a when int.TryParse(segment, out var i) && i < a.Count => a[i],
+                _ => null
+            };
+        return (true, node);
+    }
+
+    // Число из формы и из сервера хранятся по-разному — сравнение через текст JSON.
+    private static JsonNode? Normalize(JsonNode? node) => node is null ? null : JsonNode.Parse(node.ToJsonString());
+
+    public static string PlanText(JsonNode? value) => value switch
+    {
+        null => "—",
+        JsonArray a => a.Count == 0 ? "—" : string.Join(", ", a.Select(PlanText)),
+        JsonValue v when v.TryGetValue(out string? s) => s.Length == 0 ? "—" : s,
+        _ => value.ToJsonString()
+    };
 
     /// <summary>
     /// Поле из учебного плана — для пометки источника: закрыто схемой (<c>readOnly</c>). Предзаполненные, но

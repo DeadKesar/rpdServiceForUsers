@@ -1,4 +1,5 @@
 using System.Text.Json;
+using RpdFos.Core.Data.Entities;
 using RpdFos.Core.Documents;
 using RpdFos.Core.DocumentTypes;
 
@@ -20,6 +21,14 @@ public sealed class PrintContext(
 
     /// <summary>Номер для нового списка: нумерация у каждого списка своя.</summary>
     public int NextListId() => ++_lists;
+
+    /// <summary>
+    /// Семестры трудоёмкости документа: таблицы печатают часы документа — исправленные методистом, если исправлял,
+    /// без пометок (этап 5.1).
+    /// </summary>
+    public IReadOnlyList<DisciplineSemesterDetails> Semesters => _semesters ??= DocumentSemesters.Of(Payload, Facts);
+
+    private IReadOnlyList<DisciplineSemesterDetails>? _semesters;
 
     /// <summary>Значение источника данных плана и справочников (каталог <see cref="DocumentSources"/>) — строкой.</summary>
     public string? Source(string source)

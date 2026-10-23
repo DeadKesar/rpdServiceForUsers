@@ -51,6 +51,13 @@ public class Document : IVersioned
         return Status == DocumentStatuses.SavedDraft ? Move(DocumentStatuses.Draft) : null;
     }
 
+    /// <summary>Исправление полей из плана методистом или администратором: статус не меняется (этап 5.1).</summary>
+    public void CorrectPlanFields(string payload)
+    {
+        Require(DocumentTransitions.CanCorrectPlanFields(Status), DocumentTransitions.EditAction);
+        Payload = payload;
+    }
+
     /// <summary>
     /// «Сохранить»: черновик становится сохранённым черновиком; на доработке и на проверке статус не меняется —
     /// сохранение даёт только снимок версии. Возвращает прежний статус, если он сменился.
@@ -110,6 +117,12 @@ public class Document : IVersioned
 /// <summary>Кем пользователь приходится документу: автор или проверяющий методист.</summary>
 public enum DocumentRole { Author, Reviewer }
 
+/// <summary>
+/// Что можно менять при правке: содержимое без полей из плана (автор), содержимое с полями из плана (методист на
+/// проверке) или только поля из плана (методист после приёма, администратор) — этап 5.1.
+/// </summary>
+public enum DocumentEditScope { Content, ContentAndPlan, PlanOnly }
+
 /// <summary>Разрешённые действия с документом по статусу и роли — в одном месте, а не в эндпоинтах.</summary>
 public static class DocumentTransitions
 {
@@ -126,6 +139,23 @@ public static class DocumentTransitions
         DocumentRole.Author => status is DocumentStatuses.Draft or DocumentStatuses.SavedDraft or DocumentStatuses.Returned,
         _ => status is DocumentStatuses.UnderReview
     };
+
+    /// <summary>
+    /// Поля из учебного плана исправляют методист и администратор — на проверке и после приёма: иногда дешевле
+    /// поправить готовый документ, чем источник. Автору они закрыты всегда.
+    /// </summary>
+    public static bool CanCorrectPlanFields(string status) => status is DocumentStatuses.UnderReview or DocumentStatuses.Accepted;
+
+    /// <summary>
+    /// Объём правки для пользователя: методист на проверке — всё, включая поля плана; автор — своё содержимое;
+    /// методист после приёма и администратор — только поля плана. null — править нельзя.
+    /// </summary>
+    /// <param name="isCorrector">Методист или администратор.</param>
+    public static DocumentEditScope? EditScope(string status, bool isAuthor, bool isReviewer, bool isCorrector) =>
+        isReviewer && CanEdit(status, DocumentRole.Reviewer) ? DocumentEditScope.ContentAndPlan
+        : isAuthor && CanEdit(status, DocumentRole.Author) ? DocumentEditScope.Content
+        : isCorrector && CanCorrectPlanFields(status) ? DocumentEditScope.PlanOnly
+        : null;
 
     /// <summary>«Сохранить» — там же, где правка: на доработке и на проверке это только снимок версии.</summary>
     public static bool CanSave(string status, DocumentRole role) => CanEdit(status, role);

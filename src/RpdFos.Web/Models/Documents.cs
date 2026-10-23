@@ -15,13 +15,17 @@ public sealed record DocumentItem(Guid Id, string Type, string Title, string Sta
     DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, DateTimeOffset? SubmittedAt);
 
 /// <summary>Что пользователь может сделать с документом: отправить, проверить (вернуть, принять, замечания), разрешать замечания.</summary>
-public sealed record DocumentActions(bool Submit, bool Review, bool ResolveComments, bool Print);
+public sealed record DocumentActions(bool Submit, bool Review, bool ResolveComments, bool Print, bool CorrectPlan = false);
+
+/// <summary>Исправление поля из учебного плана: место, было, стало, кто и когда.</summary>
+public sealed record PlanCorrection(string Path, JsonElement? Before, JsonElement? After, string? ChangedBy, DateTimeOffset ChangedAt);
 
 public sealed record DocumentDetails(DocumentItem Document, JsonElement Payload, JsonElement Schema, DocumentMetadata Metadata,
-    bool Editable, DocumentActions Actions, JsonElement? TemplateDefaults = null);
+    bool Editable, DocumentActions Actions, JsonElement? TemplateDefaults = null, List<PlanCorrection>? PlanCorrections = null);
 
 public sealed record DocumentMetadata(List<SectionState> Sections, List<string> ReadOnlyPaths, List<string> HiddenPaths,
-    List<CompetenceCandidate> CompetenceCandidates, PlanDisciplineChoices? PlanDisciplines);
+    List<CompetenceCandidate> CompetenceCandidates, PlanDisciplineChoices? PlanDisciplines,
+    Dictionary<string, JsonElement?>? PlanValues = null);
 
 /// <summary>Дисциплины и практики плана раньше и позже дисциплины — кандидаты в пре- и постреквизиты.</summary>
 public sealed record PlanDisciplineChoices(List<PlanDisciplineCandidate> Earlier, List<PlanDisciplineCandidate> Later);

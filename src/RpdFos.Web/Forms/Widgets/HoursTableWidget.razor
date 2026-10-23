@@ -3,12 +3,32 @@
 @inherits FieldBase
 
 @* Трудоёмкость из учебного плана: часы по семестрам и видам занятий, виды аттестации — только для чтения.
+   Методист и администратор исправляют часы (этап 5.1): исправленная ячейка помечена значением по плану.
    Под ней — виды самостоятельной работы автора: своё поле схемы со своим виджетом из реестра. *@
 <div class="mb-3">
     <p class="text-muted small mb-2">
         <span class="badge text-bg-light border">из учебного плана</span>
         Трудоёмкость: @Number(Value?["total_credits"]) з. е., @Number(Value?["total_hours"]) ч.
+        @foreach (var key in new[] { "total_credits", "total_hours" })
+        {
+            if (Context.PlanMark($"{Path}/{key}", Value?[key]) is { } mark)
+            {
+                <span class="badge text-bg-warning ms-1" title="@Context.CorrectionInfo($"{Path}/{key}")">@Property(key).Title: @mark</span>
+            }
+        }
     </p>
+    @if (Editable && Value is JsonObject totals)
+    {
+        <div class="row g-2 mb-2" style="max-width: 420px">
+            @foreach (var key in new[] { "total_credits", "total_hours" })
+            {
+                <div class="col-6">
+                    <label class="form-label small">@Property(key).Title</label>
+                    <ScalarInput Context="Context" Schema="Property(key).Schema" Parent="totals" Key="@key" Path="@($"{Path}/{key}")" Compact="true" />
+                </div>
+            }
+        </div>
+    }
     <table class="table table-sm table-bordered text-center">
         <thead class="table-light">
             <tr>
@@ -17,16 +37,39 @@
             </tr>
         </thead>
         <tbody>
+            @{ var index = 0; }
             @foreach (var s in Semesters)
             {
+                var row = index++;
                 <tr>
-                    <td>@Number(s["semester"])</td><td>@Number(s["contact_hours"])</td><td>@Number(s["lectures"])</td><td>@Number(s["practice"])</td>
-                    <td>@Number(s["lab_hours"])</td><td>@Number(s["self_study"])</td><td>@Number(s["control"])</td><td>@Number(s["credits"])</td>
+                    <td>@Number(s["semester"])</td>
+                    @foreach (var key in HourKeys)
+                    {
+                        var path = $"{Path}/semesters/{row}/{key}";
+                        var mark = Context.PlanMark(path, s[key]);
+                        <td class="@(mark is null ? "" : "table-warning")" title="@(mark is null ? null : $"{mark} ({Context.CorrectionInfo(path)})")">
+                            @if (Editable)
+                            {
+                                <ScalarInput Context="Context" Schema="SemesterProperty(key)" Parent="s" Key="@key" Path="@path" Compact="true" />
+                            }
+                            else
+                            {
+                                @Number(s[key])
+                            }
+                        </td>
+                    }
                     <td>@string.Join(", ", (s["control_types"] as JsonArray ?? []).Select(t => SchemaContext.EnumTitle(ControlTypes, Text(t) ?? "")))</td>
                 </tr>
             }
         </tbody>
     </table>
+    @if (Editable)
+    {
+        <div class="form-text">
+            Часы из учебного плана исправляются, когда дешевле поправить документ, чем план: исправленное помечается,
+            в истории — кто, когда, было и стало. Виды аттестации меняются в учебном плане.
+        </div>
+    }
     @if (Value is JsonObject hours && SelfStudyKinds.ValueKind == JsonValueKind.Object)
     {
         <SchemaField Context="Context" Schema="SelfStudyKinds" Parent="hours" Key="self_study_kinds"
@@ -35,7 +78,24 @@
 </div>
 
 @code {
+    private static readonly string[] HourKeys = ["contact_hours", "lectures", "practice", "lab_hours", "self_study", "control", "credits"];
+
     private IEnumerable<JsonObject> Semesters => (Value?["semesters"] as JsonArray ?? []).OfType<JsonObject>();
+
+    // Часы правит только исправляющий — методист или администратор (поле из плана).
+    private bool Editable => !Context.IsReadOnly($"{Path}/semesters", SemestersSchema);
+
+    private JsonElement SemestersSchema =>
+        Schema.TryGetProperty("properties", out var p) && p.TryGetProperty("semesters", out var s) ? s : default;
+
+    private JsonElement SemesterProperty(string key) =>
+        SemestersSchema.ValueKind == JsonValueKind.Object && SemestersSchema.TryGetProperty("items", out var i) &&
+        i.TryGetProperty("properties", out var ip) && ip.TryGetProperty(key, out var k) ? k : default;
+
+    private (string Title, JsonElement Schema) Property(string key) =>
+        Schema.TryGetProperty("properties", out var p) && p.TryGetProperty(key, out var k)
+            ? (SchemaContext.Text(k, "title") ?? key, k)
+            : (key, default);
 
     // Шаблоны, опубликованные до этапа 5.1, видов самостоятельной работы в схеме не имеют.
     private JsonElement SelfStudyKinds =>
@@ -43,9 +103,7 @@
 
     // Схема видов аттестации — для русских названий кодов (x-enum-titles).
     private JsonElement ControlTypes =>
-        Schema.TryGetProperty("properties", out var p) && p.TryGetProperty("semesters", out var s) &&
-        s.TryGetProperty("items", out var i) && i.TryGetProperty("properties", out var ip) &&
-        ip.TryGetProperty("control_types", out var c) && c.TryGetProperty("items", out var items)
+        SemesterProperty("control_types") is { ValueKind: JsonValueKind.Object } c && c.TryGetProperty("items", out var items)
             ? items
             : default;
 }

@@ -6,8 +6,8 @@ namespace RpdFos.Core.Documents;
 
 /// <summary>
 /// <c>topic_hours_match_total</c> (FR-VAL-01): суммы часов тематического плана по видам занятий — лекции,
-/// практические, лабораторные, самостоятельная работа — равны часам учебного плана. Трудоёмкость в РПД берётся
-/// из плана и не редактируется, поэтому сверяется именно распределение по темам. Ошибка.
+/// практические, лабораторные, самостоятельная работа — равны часам трудоёмкости документа. Трудоёмкость берётся
+/// из плана; исправленную методистом (этап 5.1) правило сверяет уже с исправленными часами. Ошибка.
 /// </summary>
 public sealed class TopicHoursMatchTotal : IValidationRule
 {
@@ -28,9 +28,9 @@ public sealed class TopicHoursMatchTotal : IValidationRule
         foreach (var (key, title, plan) in Kinds)
         {
             var byTopics = context.Value.EnumerateArray().Sum(topic => Hours(topic, key));
-            var byPlan = context.Facts.Semesters.Sum(plan);
+            var byPlan = DocumentSemesters.Of(context.Payload, context.Facts).Sum(plan);
             if (byTopics != byPlan)
-                yield return new(context.Path, $"{title}: по темам {byTopics} ч, по учебному плану {byPlan} ч");
+                yield return new(context.Path, $"{title}: по темам {byTopics} ч, по распределению часов {byPlan} ч");
         }
     }
 
@@ -43,7 +43,7 @@ public sealed class TopicHoursMatchTotal : IValidationRule
 
 /// <summary>
 /// <c>self_study_kinds_match_plan</c>: в каждом семестре сумма часов видов самостоятельной работы равна
-/// самостоятельной работе учебного плана; часы в семестре, которого у дисциплины нет, — тоже ошибка. Правило висит
+/// самостоятельной работе трудоёмкости документа; часы в семестре, которого у дисциплины нет, — тоже ошибка. Правило висит
 /// на трудоёмкости, а не на списке видов: пустой список при часах СРС в плане тоже должен остановить отправку. Ошибка.
 /// </summary>
 public sealed class SelfStudyKindsMatchPlan : IValidationRule
@@ -55,14 +55,15 @@ public sealed class SelfStudyKindsMatchPlan : IValidationRule
     {
         var path = $"{context.Path}/self_study_kinds";
         var byKinds = Hours(context.Value);
-        foreach (var semester in context.Facts.Semesters)
+        var semesters = DocumentSemesters.FromHours(context.Value) is { Count: > 0 } own ? own : context.Facts.Semesters;
+        foreach (var semester in semesters)
         {
             var sum = byKinds.GetValueOrDefault(semester.Semester);
             if (sum != semester.SelfStudy)
-                yield return new(path, $"{semester.Semester} семестр: по видам {sum} ч, по учебному плану {semester.SelfStudy} ч");
+                yield return new(path, $"{semester.Semester} семестр: по видам {sum} ч, по распределению часов {semester.SelfStudy} ч");
         }
-        foreach (var (semester, sum) in byKinds.Where(h => h.Value > 0 && context.Facts.Semesters.All(s => s.Semester != h.Key)))
-            yield return new(path, $"{semester} семестр: по видам {sum} ч, а в учебном плане дисциплины такого семестра нет");
+        foreach (var (semester, sum) in byKinds.Where(h => h.Value > 0 && semesters.All(s => s.Semester != h.Key)))
+            yield return new(path, $"{semester} семестр: по видам {sum} ч, а у дисциплины такого семестра нет");
     }
 
     /// <summary>Часы видов самостоятельной работы по семестрам.</summary>

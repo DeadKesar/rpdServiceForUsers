@@ -38,6 +38,11 @@ public static class DocumentSubmission
         errors.AddRange(validator.Validate(schemaJson, payload, ValidationMode.Submit, targetStatus)
             .Where(e => !hidden.Contains(Section(e.Path))));
         errors.AddRange(rules.Run(schema, payload, facts, resolve, hidden));
+        // Поле из плана исправлено методистом — предупреждение: отправку и приём оно не блокирует (этап 5.1).
+        errors.AddRange(PlanFields.Differences(schema, payload, facts, resolve)
+            .Where(d => !hidden.Contains(Section(d.Path)))
+            .Select(d => new DocumentValidationError(d.Path, $"{PlanFields.DiffersFromPlan}: в плане {PlanFields.Text(d.PlanValue)}",
+                IssueLevels.Warning)));
         return errors.Distinct().OrderBy(e => e.Path, StringComparer.Ordinal).ToList();
     }
 

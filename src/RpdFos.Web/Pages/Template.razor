@@ -450,7 +450,7 @@ else
         defaultsDirty = false;
         if (details is null) return;
         defaults = details.Defaults is { } d && JsonNode.Parse(d.GetRawText()) is JsonObject o ? o : [];
-        defaultsContext = new SchemaContext(details.Schema, defaults, new DocumentMetadata([], [], [], [], null),
+        defaultsContext = new SchemaContext(details.Schema, defaults, new DocumentMetadata([], [], [], [], null, null),
             () => { defaultsDirty = true; StateHasChanged(); }, () => defaultsDirty = true)
         {
             Locked = !CanEditDefaults, Defaults = defaults

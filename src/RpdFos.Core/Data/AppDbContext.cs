@@ -37,6 +37,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
     // Импорт исходных файлов (контекст Infrastructure).
     public DbSet<UploadedFile> UploadedFiles => Set<UploadedFile>();
     public DbSet<ParserRun> ParserRuns => Set<ParserRun>();
+    public DbSet<AuditLogEntry> AuditLog => Set<AuditLogEntry>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
