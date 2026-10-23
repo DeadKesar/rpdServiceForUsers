@@ -78,6 +78,20 @@
             <div class="mt-2">
                 <SchemaField Context="Context" Schema="ControlForms" Parent="topic" Key="current_control_forms"
                              Path="@($"{Path}/{index}/current_control_forms")" Nested="true" />
+                @if (SelfStudyForms.Count > 0)
+                {
+                    <div class="small">
+                        <span class="text-muted">Из видов самостоятельной работы:</span>
+                        @foreach (var (form, kind) in SelfStudyForms)
+                        {
+                            <label class="form-check form-check-inline mb-0" title="@kind">
+                                <input type="checkbox" class="form-check-input" disabled="@ReadOnly"
+                                       checked="@HasForm(topic, form)" @onchange="e => ToggleForm(topic, form, e.Value is true)" />
+                                <span class="form-check-label">@form</span>
+                            </label>
+                        }
+                    </div>
+                }
             </div>
         </div>
     }
@@ -124,6 +138,25 @@
         (Context.Payload["competences"] as JsonArray ?? []).OfType<JsonObject>()
             .SelectMany(c => (c["indicators"] as JsonArray ?? []).OfType<JsonObject>())
             .Select(i => Text(i["code"]) ?? "").Where(c => c.Length > 0).Distinct().ToList();
+
+    // Виды самостоятельной работы с обозначением формы (реферат — «Р»): обозначение выбирается в формы контроля темы.
+    private List<(string Code, string Kind)> SelfStudyForms =>
+        (Context.Payload["hours_distribution"]?["self_study_kinds"] as JsonArray ?? []).OfType<JsonObject>()
+            .Select(k => (Code: Text(k["form_code"])?.Trim() ?? "", Kind: Text(k["kind"]) ?? ""))
+            .Where(f => f.Code.Length > 0).DistinctBy(f => f.Code).ToList();
+
+    private bool HasForm(JsonObject topic, string code) =>
+        (topic["current_control_forms"] as JsonArray ?? []).Any(n => Text(n) == code);
+
+    private void ToggleForm(JsonObject topic, string code, bool on)
+    {
+        if (topic["current_control_forms"] is not JsonArray list) topic["current_control_forms"] = list = new JsonArray();
+        var existing = list.FirstOrDefault(n => Text(n) == code);
+        if (on && existing is null) list.Add(JsonValue.Create(code));
+        if (!on && existing is not null) list.Remove(existing);
+        if (list.Count == 0) topic.Remove("current_control_forms");
+        Context.Changed();
+    }
 
     private bool HasIndicator(JsonObject topic, string code) =>
         (topic["competence_indicators"] as JsonArray ?? []).Any(n => Text(n) == code);

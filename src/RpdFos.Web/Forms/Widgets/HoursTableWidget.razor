@@ -2,7 +2,8 @@
 @using System.Text.Json.Nodes
 @inherits FieldBase
 
-@* Трудоёмкость из учебного плана: часы по семестрам и видам занятий, виды аттестации — только для чтения. *@
+@* Трудоёмкость из учебного плана: часы по семестрам и видам занятий, виды аттестации — только для чтения.
+   Под ней — виды самостоятельной работы автора: своё поле схемы со своим виджетом из реестра. *@
 <div class="mb-3">
     <p class="text-muted small mb-2">
         <span class="badge text-bg-light border">из учебного плана</span>
@@ -26,10 +27,19 @@
             }
         </tbody>
     </table>
+    @if (Value is JsonObject hours && SelfStudyKinds.ValueKind == JsonValueKind.Object)
+    {
+        <SchemaField Context="Context" Schema="SelfStudyKinds" Parent="hours" Key="self_study_kinds"
+                     Path="@($"{Path}/self_study_kinds")" Nested="true" />
+    }
 </div>
 
 @code {
     private IEnumerable<JsonObject> Semesters => (Value?["semesters"] as JsonArray ?? []).OfType<JsonObject>();
+
+    // Шаблоны, опубликованные до этапа 5.1, видов самостоятельной работы в схеме не имеют.
+    private JsonElement SelfStudyKinds =>
+        Schema.TryGetProperty("properties", out var p) && p.TryGetProperty("self_study_kinds", out var k) ? Context.Resolve(k) : default;
 
     // Схема видов аттестации — для русских названий кодов (x-enum-titles).
     private JsonElement ControlTypes =>

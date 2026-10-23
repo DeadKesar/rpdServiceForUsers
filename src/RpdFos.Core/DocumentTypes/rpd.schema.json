@@ -198,14 +198,14 @@
     "hours_distribution": {
       "type": "object",
       "title": "Распределение часов по семестрам",
-      "description": "Трудоёмкость, часы по видам занятий и виды аттестации — из учебного плана",
-      "readOnly": true,
+      "description": "Трудоёмкость, часы по видам занятий и виды аттестации — из учебного плана; виды самостоятельной работы — автора",
       "x-ui-widget": "hours_table",
-      "x-validation-rule": "hours_match_curriculum",
+      "x-validation-rule": ["hours_match_curriculum", "self_study_kinds_match_plan"],
       "properties": {
         "semesters": {
           "type": "array",
           "title": "Семестры",
+          "readOnly": true,
           "x-source": "parser.discipline.details",
           "items": {
             "type": "object",
@@ -234,8 +234,15 @@
             }
           }
         },
-        "total_credits": { "type": "integer", "title": "Зачётных единиц", "x-source": "parser.discipline.ze_total", "description": "Зачётных единиц" },
-        "total_hours": { "type": "integer", "title": "Часов по плану", "x-source": "parser.discipline.hours_total", "description": "Академических часов по плану" }
+        "total_credits": { "type": "integer", "title": "Зачётных единиц", "readOnly": true, "x-source": "parser.discipline.ze_total", "description": "Зачётных единиц" },
+        "total_hours": { "type": "integer", "title": "Часов по плану", "readOnly": true, "x-source": "parser.discipline.hours_total", "description": "Академических часов по плану" },
+        "self_study_kinds": {
+          "type": "array",
+          "title": "Виды самостоятельной работы",
+          "description": "В каждом семестре сумма часов видов равна самостоятельной работе по учебному плану",
+          "x-ui-widget": "self_study_table",
+          "items": { "$ref": "#/$defs/self_study_kind" }
+        }
       }
     },
 
@@ -478,6 +485,47 @@
         "section_number": { "type": "integer", "title": "Раздел", "minimum": 1, "description": "Раздел тематического плана" },
         "control_form": { "type": "string", "title": "Форма контроля", "description": "Отчёт, собеседование, опрос, тест и т. п." }
       }
+    },
+    "self_study_kind": {
+      "type": "object",
+      "required": ["kind"],
+      "properties": {
+        "kind": { "type": "string", "title": "Вид", "minLength": 3 },
+        "form_code": {
+          "type": "string",
+          "title": "Обозначение",
+          "maxLength": 10,
+          "description": "Обозначение формы для графы «Формы текущего контроля» разделов, например «Р»"
+        },
+        "sections": {
+          "type": "array",
+          "title": "Разделы",
+          "description": "Номера разделов тематического плана — для самостоятельного изучения разделов",
+          "uniqueItems": true,
+          "items": { "type": "integer", "minimum": 1 }
+        },
+        "hours": {
+          "type": "array",
+          "title": "Часы по семестрам",
+          "items": {
+            "type": "object",
+            "required": ["semester", "hours"],
+            "properties": {
+              "semester": { "type": "integer", "title": "Семестр", "minimum": 1, "maximum": 12 },
+              "hours": { "type": "integer", "title": "Часов", "minimum": 0 }
+            }
+          }
+        }
+      },
+      "examples": [
+        { "kind": "написание реферата", "form_code": "Р" },
+        { "kind": "самостоятельное изучение разделов", "sections": [] },
+        { "kind": "самоподготовка (проработка и повторение лекционного материала и материала учебников и учебных пособий)" },
+        { "kind": "подготовка к лабораторным занятиям" },
+        { "kind": "подготовка к практическим занятиям" },
+        { "kind": "подготовка к сдаче модулей" },
+        { "kind": "подготовка к текущему контролю" }
+      ]
     },
     "literature_item": {
       "type": "object",

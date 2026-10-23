@@ -1,0 +1,217 @@
+@using System.Globalization
+@using System.Text.Json
+@using System.Text.Json.Nodes
+@inherits FieldBase
+
+@* Виды самостоятельной работы: вид — из стандартного списка (подсказки схемы, examples) или свой; обозначение формы
+   для графы «Формы текущего контроля» разделов; разделы тематического плана — для самостоятельного изучения разделов;
+   часы по семестрам дисциплины. Сумма по семестру сверяется с планом при вводе. *@
+<div class="mb-3">
+    <label class="form-label">@Title</label>
+    @{ var rows = Value as JsonArray; }
+    <table class="table table-sm table-bordered align-middle mb-2">
+        <thead class="table-light">
+            <tr>
+                <th>Вид</th>
+                <th style="width: 8rem">Обозначение</th>
+                @foreach (var (semester, _) in Semesters)
+                {
+                    <th style="width: 7rem">@semester семестр, ч</th>
+                }
+                <th style="width: 3rem"></th>
+            </tr>
+        </thead>
+        <tbody>
+            @for (var i = 0; i < (rows?.Count ?? 0); i++)
+            {
+                var index = i;
+                if (rows![index] is not JsonObject row) continue;
+                <tr>
+                    <td>
+                        <input type="text" class="form-control form-control-sm" list="@ListId" readonly="@ReadOnly" value="@Text(row["kind"])"
+                               @oninput="e => InputKind(row, e.Value as string)" @onchange="e => SetKind(row, e.Value as string)" />
+                        @if (row["sections"] is JsonArray)
+                        {
+                            <div class="small mt-1">
+                                <span class="text-muted">Разделы:</span>
+                                @foreach (var section in SectionNumbers)
+                                {
+                                    <label class="form-check form-check-inline mb-0">
+                                        <input type="checkbox" class="form-check-input" disabled="@ReadOnly"
+                                               checked="@HasSection(row, section)" @onchange="e => ToggleSection(row, section, e.Value is true)" />
+                                        <span class="form-check-label">@section</span>
+                                    </label>
+                                }
+                                @if (SectionNumbers.Count == 0)
+                                {
+                                    <span class="text-muted">появятся после заполнения тематического плана</span>
+                                }
+                            </div>
+                        }
+                    </td>
+                    <td>
+                        <ScalarInput Context="Context" Schema="FormCode" Parent="row" Key="form_code"
+                                     Path="@($"{Path}/{index}/form_code")" Compact="true" />
+                    </td>
+                    @foreach (var (semester, _) in Semesters)
+                    {
+                        <td>
+                            <input type="number" min="0" step="1" class="form-control form-control-sm" readonly="@ReadOnly"
+                                   value="@HoursText(row, semester)"
+                                   @oninput="e => InputHours(row, semester, e.Value as string)" @onchange="e => SetHours(row, semester, e.Value as string)" />
+                        </td>
+                    }
+                    <td class="text-end">
+                        @if (!ReadOnly)
+                        {
+                            <button class="btn btn-sm btn-outline-secondary" type="button" title="Удалить вид" @onclick="() => Remove(index)">✕</button>
+                        }
+                    </td>
+                </tr>
+            }
+        </tbody>
+        <tfoot>
+            <tr>
+                <td colspan="2" class="text-end small">Сумма видов / по учебному плану</td>
+                @foreach (var (semester, plan) in Semesters)
+                {
+                    var sum = Sum(semester);
+                    <td class="@(sum != plan ? "table-warning" : "")">@sum / @plan</td>
+                }
+                <td></td>
+            </tr>
+        </tfoot>
+    </table>
+    <datalist id="@ListId">
+        @foreach (var example in Examples)
+        {
+            <option value="@Text(example["kind"])"></option>
+        }
+    </datalist>
+    @if (!ReadOnly)
+    {
+        <button class="btn btn-sm btn-outline-primary" type="button" @onclick="Add">Добавить вид</button>
+    }
+    @if (Hint is not null)
+    {
+        <div class="form-text">@Hint. Вид выбирается из списка или вводится свой.</div>
+    }
+</div>
+
+@code {
+    private string ListId => "srs-kinds-" + SchemaContext.Anchor(Path);
+
+    private JsonElement FormCode => Property("form_code");
+
+    private JsonElement Property(string name) =>
+        Items.ValueKind == JsonValueKind.Object && Items.GetProperty("properties").TryGetProperty(name, out var p) ? Context.Resolve(p) : default;
+
+    // Стандартный список — примеры записей в схеме вида (examples): вид, обозначение, признак перечня разделов.
+    private IEnumerable<JsonObject> Examples =>
+        Items.ValueKind == JsonValueKind.Object && Items.TryGetProperty("examples", out var e) && e.ValueKind == JsonValueKind.Array
+            ? e.EnumerateArray().Select(x => JsonNode.Parse(x.GetRawText())).OfType<JsonObject>()
+            : [];
+
+    // Семестры дисциплины и часы самостоятельной работы по плану — из трудоёмкости, внутри которой стоит список.
+    private List<(int Semester, int Plan)> Semesters =>
+        (Parent["semesters"] as JsonArray ?? []).OfType<JsonObject>().Select(s => (Number(s["semester"]), Number(s["self_study"]))).ToList();
+
+    private List<int> SectionNumbers =>
+        (Context.Payload["thematic_plan"] as JsonArray ?? []).OfType<JsonObject>()
+            .Select(t => Number(t["section_number"])).Where(n => n > 0).Distinct().Order().ToList();
+
+    private int Sum(int semester) => (Value as JsonArray ?? []).OfType<JsonObject>().Sum(row => Hours(row, semester) ?? 0);
+
+    private static JsonObject? HoursEntry(JsonObject row, int semester) =>
+        (row["hours"] as JsonArray ?? []).OfType<JsonObject>().FirstOrDefault(h => Number(h["semester"]) == semester);
+
+    private static int? Hours(JsonObject row, int semester) => HoursEntry(row, semester) is { } h ? Number(h["hours"]) : null;
+
+    private static string HoursText(JsonObject row, int semester) => Hours(row, semester)?.ToString(CultureInfo.InvariantCulture) ?? "";
+
+    // Часы — целое не меньше нуля; пустое поле убирает семестр из записи вида.
+    private static bool WriteHours(JsonObject row, int semester, string? text)
+    {
+        var entry = HoursEntry(row, semester);
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            if (entry is not null) ((JsonArray)row["hours"]!).Remove(entry);
+            return true;
+        }
+        if (!int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var hours) || hours < 0) return false;
+        if (entry is null)
+        {
+            if (row["hours"] is not JsonArray list) row["hours"] = list = new JsonArray();
+            list.Add(new JsonObject { ["semester"] = semester, ["hours"] = hours });
+        }
+        else entry["hours"] = hours;
+        return true;
+    }
+
+    private void InputHours(JsonObject row, int semester, string? text)
+    {
+        WriteHours(row, semester, text);
+        Context.Edited();
+        StateHasChanged(); // итог по семестру — сразу при вводе
+    }
+
+    private void SetHours(JsonObject row, int semester, string? text)
+    {
+        WriteHours(row, semester, text);
+        Context.Changed();
+    }
+
+    // Выбранный из списка вид приносит своё обозначение и перечень разделов, если у записи их ещё нет.
+    private void ApplyExample(JsonObject row, string? kind)
+    {
+        if (Examples.FirstOrDefault(e => Text(e["kind"]) == kind) is not { } example) return;
+        if (row["form_code"] is null && example["form_code"] is { } code) row["form_code"] = code.DeepClone();
+        if (row["sections"] is null && example["sections"] is JsonArray) row["sections"] = new JsonArray();
+    }
+
+    private void InputKind(JsonObject row, string? text)
+    {
+        if (string.IsNullOrEmpty(text)) row.Remove("kind");
+        else row["kind"] = text;
+        ApplyExample(row, text);
+        Context.Edited();
+    }
+
+    private void SetKind(JsonObject row, string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) row.Remove("kind");
+        else row["kind"] = text.Trim();
+        ApplyExample(row, text?.Trim());
+        Context.Changed();
+    }
+
+    private static bool HasSection(JsonObject row, int section) =>
+        (row["sections"] as JsonArray ?? []).Any(n => Number(n) == section);
+
+    private void ToggleSection(JsonObject row, int section, bool on)
+    {
+        if (row["sections"] is not JsonArray list) row["sections"] = list = new JsonArray();
+        var existing = list.FirstOrDefault(n => Number(n) == section);
+        if (on && existing is null)
+        {
+            // Номера — по порядку: так их и печатать.
+            var numbers = list.Select(Number).Append(section).Order().ToList();
+            list.Clear();
+            foreach (var n in numbers) list.Add(n);
+        }
+        if (!on && existing is not null) list.Remove(existing);
+        Context.Changed();
+    }
+
+    private void Add()
+    {
+        EnsureArray().Add(new JsonObject());
+        Context.Changed();
+    }
+
+    private void Remove(int index)
+    {
+        EnsureArray().RemoveAt(index);
+        Context.Changed();
+    }
+}

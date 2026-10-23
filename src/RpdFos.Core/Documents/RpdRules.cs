@@ -42,6 +42,46 @@ public sealed class TopicHoursMatchTotal : IValidationRule
 }
 
 /// <summary>
+/// <c>self_study_kinds_match_plan</c>: в каждом семестре сумма часов видов самостоятельной работы равна
+/// самостоятельной работе учебного плана; часы в семестре, которого у дисциплины нет, — тоже ошибка. Правило висит
+/// на трудоёмкости, а не на списке видов: пустой список при часах СРС в плане тоже должен остановить отправку. Ошибка.
+/// </summary>
+public sealed class SelfStudyKindsMatchPlan : IValidationRule
+{
+    public string Name => "self_study_kinds_match_plan";
+    public string Level => IssueLevels.Error;
+
+    public IEnumerable<DocumentValidationError> Check(RuleContext context)
+    {
+        var path = $"{context.Path}/self_study_kinds";
+        var byKinds = Hours(context.Value);
+        foreach (var semester in context.Facts.Semesters)
+        {
+            var sum = byKinds.GetValueOrDefault(semester.Semester);
+            if (sum != semester.SelfStudy)
+                yield return new(path, $"{semester.Semester} семестр: по видам {sum} ч, по учебному плану {semester.SelfStudy} ч");
+        }
+        foreach (var (semester, sum) in byKinds.Where(h => h.Value > 0 && context.Facts.Semesters.All(s => s.Semester != h.Key)))
+            yield return new(path, $"{semester} семестр: по видам {sum} ч, а в учебном плане дисциплины такого семестра нет");
+    }
+
+    /// <summary>Часы видов самостоятельной работы по семестрам.</summary>
+    public static Dictionary<int, int> Hours(JsonElement hoursDistribution)
+    {
+        var result = new Dictionary<int, int>();
+        if (hoursDistribution.ValueKind != JsonValueKind.Object ||
+            !hoursDistribution.TryGetProperty("self_study_kinds", out var kinds) || kinds.ValueKind != JsonValueKind.Array) return result;
+        foreach (var kind in kinds.EnumerateArray())
+            if (kind.ValueKind == JsonValueKind.Object && kind.TryGetProperty("hours", out var hours) && hours.ValueKind == JsonValueKind.Array)
+                foreach (var h in hours.EnumerateArray())
+                    if (h.ValueKind == JsonValueKind.Object && h.TryGetProperty("semester", out var s) && s.TryGetInt32(out var semester) &&
+                        h.TryGetProperty("hours", out var v) && v.TryGetInt32(out var n))
+                        result[semester] = result.GetValueOrDefault(semester) + n;
+        return result;
+    }
+}
+
+/// <summary>
 /// <c>competences_match_matrix</c> (FR-VAL-03): у каждой компетенции дисциплины из матрицы выбран хотя бы один
 /// индикатор, в документе нет компетенций не из матрицы и индикаторов чужих компетенций. Ошибка.
 /// </summary>

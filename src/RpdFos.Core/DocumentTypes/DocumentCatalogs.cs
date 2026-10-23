@@ -52,7 +52,9 @@ public static class ValidationRules
         "linked_rpd_must_be_approved_or_under_review", "all_indicators_have_means", "scale_matches_control_type",
         "unique_competence_codes", "literature_main_count", "fos_passport_consistent", "control_forms_match",
         // Этап 5: покрытие компетенций матрицы и возраст основной литературы — имён для них в каталоге проекта не было.
-        "competences_match_matrix", "literature_main_recent"
+        "competences_match_matrix", "literature_main_recent",
+        // Этап 5.1: часы видов самостоятельной работы по семестрам против плана.
+        "self_study_kinds_match_plan"
     };
 }
 

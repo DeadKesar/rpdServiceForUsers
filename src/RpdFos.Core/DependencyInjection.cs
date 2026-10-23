@@ -37,6 +37,7 @@ public static class DependencyInjection
         // Правила проверки (x-validation-rule): реестр собирает все реализации IValidationRule.
         services.AddOptions<ValidationRuleSettings>();
         services.AddSingleton<IValidationRule, TopicHoursMatchTotal>();
+        services.AddSingleton<IValidationRule, SelfStudyKindsMatchPlan>();
         services.AddSingleton<IValidationRule, CompetencesMatchMatrix>();
         services.AddSingleton<IValidationRule, LiteratureMainRecent>();
         services.AddSingleton<ValidationRuleSet>();

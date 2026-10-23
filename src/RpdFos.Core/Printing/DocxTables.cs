@@ -22,7 +22,7 @@ internal static class DocxTables
                 Competences(table, context, unfilled, bookmark);
                 break;
             case "laboriousness":
-                Laboriousness(table, context, warnings, bookmark);
+                Laboriousness(table, context, warnings, unfilled, bookmark);
                 break;
             case "discipline_partition":
                 Partition(table, context, unfilled, bookmark);
@@ -62,7 +62,7 @@ internal static class DocxTables
     /// работа, лекции, практические, лабораторные, промежуточный контроль, самостоятельная работа, перечень видов
     /// самостоятельной работы, вид промежуточного контроля.
     /// </summary>
-    private static void Laboriousness(Table table, PrintContext context, List<string> warnings, string bookmark)
+    private static void Laboriousness(Table table, PrintContext context, List<string> warnings, List<string> unfilled, string bookmark)
     {
         var rows = table.Elements<TableRow>().ToList();
         var semesters = context.Facts.Semesters;
@@ -113,11 +113,76 @@ internal static class DocxTables
             Append(10, c.Attestation);
         }
 
+        SelfStudyKinds(rows[9], semesters.Select(s => s.Semester).ToList(), context, unfilled, bookmark);
+
         void Append(int row, string text)
         {
             var cell = NewCell(rows[row], width);
             SetCell(cell, [text], bold: null, align: JustificationValues.Center);
             rows[row].AppendChild(cell);
+        }
+    }
+
+    /// <summary>
+    /// Виды самостоятельной работы с часами — подстроками под «Самостоятельная работа:» вместо курсивной подсказки
+    /// шаблона: «- вид разделы (обозначение)» и часы по семестрам и всего. Видов нет — строка остаётся пустой
+    /// для ручного заполнения.
+    /// </summary>
+    private static void SelfStudyKinds(TableRow hint, List<int> semesters, PrintContext context, List<string> unfilled, string bookmark)
+    {
+        var kinds = Items(context.At("/hours_distribution/self_study_kinds"))
+            .Select(k => (Label: SelfStudyLabel(k), Hours: KindHours(k)))
+            .Where(k => k.Label.Length > 2 && k.Hours.Values.Sum() > 0)
+            .ToList();
+        if (kinds.Count == 0)
+        {
+            SetCell(hint.Elements<TableCell>().First(), [""], bold: false, JustificationValues.Left);
+            unfilled.Add($"{bookmark} — виды самостоятельной работы не заполнены");
+            return;
+        }
+
+        var after = hint;
+        foreach (var (label, hours) in kinds)
+        {
+            var row = DataRow(hint);
+            var cells = row.Elements<TableCell>().ToList();
+            SetCell(cells[0], [label], bold: false, JustificationValues.Left);
+            string[] values = [.. semesters.Select(s => hours.GetValueOrDefault(s).ToString()), hours.Values.Sum().ToString()];
+            for (var i = 0; i < values.Length && i + 1 < cells.Count; i++)
+                SetCell(cells[i + 1], [values[i]], bold: null, JustificationValues.Center);
+            Upright(row);
+            after.InsertAfterSelf(row);
+            after = row;
+        }
+        hint.Remove();
+    }
+
+    // «- самостоятельное изучение разделов 1, 3», «- написание реферата (Р)».
+    private static string SelfStudyLabel(JsonElement kind)
+    {
+        var sections = Items(Property(kind, "sections")).Select(s => s.GetRawText()).ToList();
+        var code = Text(kind, "form_code");
+        return "- " + (Text(kind, "kind") ?? "").Trim()
+            + (sections.Count > 0 ? " " + string.Join(", ", sections) : "")
+            + (string.IsNullOrWhiteSpace(code) ? "" : $" ({code.Trim()})");
+    }
+
+    private static Dictionary<int, int> KindHours(JsonElement kind)
+    {
+        var result = new Dictionary<int, int>();
+        foreach (var h in Items(Property(kind, "hours")))
+            if (int.TryParse(Number(h, "semester"), out var semester) && int.TryParse(Number(h, "hours"), out var hours))
+                result[semester] = result.GetValueOrDefault(semester) + hours;
+        return result;
+    }
+
+    // Подсказка шаблона набрана курсивом, и ячейки часов строки взяли её оформление — значения печатаются прямым шрифтом.
+    private static void Upright(TableRow row)
+    {
+        foreach (var properties in row.Descendants<RunProperties>())
+        {
+            properties.Italic = null;
+            properties.ItalicComplexScript = null;
         }
     }
 

@@ -55,8 +55,8 @@ public static class DocumentData
 
     /// <summary>
     /// Заполняет созданную РПД так, чтобы она прошла полную проверку: цели и задачи, по индикатору у каждой
-    /// компетенции матрицы, тема с часами плана, по записи в видимых условных разделах, основная литература.
-    /// Возвращает текущую версию документа.
+    /// компетенции матрицы, самоподготовка на все часы самостоятельной работы, тема с часами плана, по записи
+    /// в видимых условных разделах, основная литература. Возвращает текущую версию документа.
     /// </summary>
     public static async Task<int> FillForSubmissionAsync(HttpClient client, DocumentDetails created)
     {
@@ -67,6 +67,7 @@ public static class DocumentData
 
         var sections = new Dictionary<string, JsonNode>
         {
+            ["hours_distribution"] = WithSelfStudy(created.Payload, new JsonObject { ["kind"] = "самоподготовка" }),
             ["goals_and_objectives"] = new JsonObject
             {
                 ["goals"] = "<p>Сформировать у обучающихся умения строить и исследовать математические модели систем.</p>",
@@ -106,6 +107,28 @@ public static class DocumentData
         foreach (var (section, value) in sections)
             version = (await PatchAsync(client, id, section, version, value)).Version;
         return version;
+    }
+
+    /// <summary>
+    /// Трудоёмкость документа с видами самостоятельной работы: последний вид получает остаток часов самостоятельной
+    /// работы каждого семестра, остальные — свои часы как есть.
+    /// </summary>
+    public static JsonObject WithSelfStudy(JsonElement payload, params JsonObject[] kinds)
+    {
+        var hours = JsonNode.Parse(payload.GetProperty("hours_distribution").GetRawText())!.AsObject();
+        var last = kinds[^1];
+        var rest = new JsonArray();
+        foreach (var semester in hours["semesters"]!.AsArray())
+        {
+            var number = (int)semester!["semester"]!;
+            var taken = kinds[..^1].SelectMany(k => k["hours"]?.AsArray() ?? [])
+                .Where(h => (int)h!["semester"]! == number).Sum(h => (int)h!["hours"]!);
+            var left = ((int?)semester["self_study"] ?? 0) - taken;
+            if (left > 0) rest.Add(new JsonObject { ["semester"] = number, ["hours"] = left });
+        }
+        last["hours"] = rest;
+        hours["self_study_kinds"] = new JsonArray(kinds.Select(k => (JsonNode)k).ToArray());
+        return hours;
     }
 
     /// <summary>Часы плана по видам занятий — сумма по семестрам трудоёмкости документа.</summary>

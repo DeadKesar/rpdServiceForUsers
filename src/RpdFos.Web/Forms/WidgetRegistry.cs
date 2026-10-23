@@ -16,6 +16,7 @@ public static class WidgetRegistry
         ["list"] = typeof(StringListWidget),
         ["hours_table"] = typeof(HoursTableWidget),
         ["topic_plan_table"] = typeof(TopicPlanWidget),
+        ["self_study_table"] = typeof(SelfStudyKindsWidget),
         ["competence_picker"] = typeof(CompetencePickerWidget),
         ["developer_picker"] = typeof(DeveloperPickerWidget),
         ["class_table"] = typeof(ObjectTableWidget),

@@ -38,6 +38,12 @@ public class DocxGenerationTests(DatabaseFixture app)
         place["prior_outcomes"] = new JsonObject { ["knows"] = "<p>основы линейной алгебры</p>" };
         var sections = new Dictionary<string, JsonNode>
         {
+            // Виды самостоятельной работы: реферат с обозначением, изучение раздела 1, остаток — самоподготовка.
+            ["hours_distribution"] = DocumentData.WithSelfStudy(created.Payload,
+                new JsonObject { ["kind"] = "написание реферата", ["form_code"] = "Р", ["hours"] = new JsonArray(Hours(1, 6)) },
+                new JsonObject { ["kind"] = "самостоятельное изучение разделов", ["sections"] = new JsonArray(1), ["hours"] = new JsonArray(Hours(1, 8)) },
+                new JsonObject { ["kind"] = "подготовка к сдаче модулей" }, // без часов — не печатается
+                new JsonObject { ["kind"] = "самоподготовка" }),
             ["place_in_structure"] = place,
             ["learning_outcomes"] = new JsonObject { ["knows"] = "<p>методы моделирования систем</p>" },
             ["thematic_plan"] = new JsonArray(new JsonObject
@@ -47,7 +53,8 @@ public class DocxGenerationTests(DatabaseFixture app)
                 ["hours"] = new JsonObject
                 {
                     ["lectures"] = plan.Lectures, ["practice"] = plan.Practice, ["lab_hours"] = plan.Labs, ["self_study"] = plan.SelfStudy
-                }
+                },
+                ["current_control_forms"] = new JsonArray("Опрос", "Р")
             }),
             ["literature"] = new JsonObject
             {
@@ -97,6 +104,20 @@ public class DocxGenerationTests(DatabaseFixture app)
         Assert.Equal(["36", "36"], Cells(laboriousness, "Промежуточный контроль"));
         Assert.Equal(["24", "24"], Cells(laboriousness, "Самостоятельная работа"));
         Assert.Equal(["Экзамен", "Экзамен"], Cells(laboriousness, "Вид промежуточного контроля"));
+        // Виды самостоятельной работы с часами — подстроками прямым шрифтом вместо курсивной подсказки шаблона.
+        Assert.Equal(["6", "6"], Cells(laboriousness, "- написание реферата (Р)"));
+        Assert.Equal(["8", "8"], Cells(laboriousness, "- самостоятельное изучение разделов 1"));
+        Assert.Equal(["10", "10"], Cells(laboriousness, "- самоподготовка"));
+        Assert.DoesNotContain("подготовка к сдаче модулей", laboriousness.InnerText);
+        Assert.DoesNotContain("и т.п.", laboriousness.InnerText);
+        var kindRows = laboriousness.Elements<TableRow>().Where(r => r.InnerText.StartsWith("- ")).ToList();
+        Assert.Equal(3, kindRows.Count);
+        Assert.DoesNotContain(kindRows.SelectMany(r => r.Descendants<RunProperties>()), p => p.Italic is not null);
+        // Разделы дисциплины: самостоятельная работа — общими часами раздела, реферат — обозначением в формах контроля.
+        var partition = body.Descendants<Table>().Single(t => t.InnerText.Contains("Раздел дисциплины"));
+        var topicCells = partition.Elements<TableRow>().First(r => r.InnerText.StartsWith("1Основы"))
+            .Elements<TableCell>().Select(c => c.InnerText).ToList();
+        Assert.Equal(("24", "Опрос, Р"), (topicCells[7], topicCells[9]));
 
         // 3.2: строка на тему, образцы шаблона убраны.
         var contents = body.Descendants<Table>().Single(t => t.InnerText.StartsWith("№ раздела"));
@@ -275,6 +296,8 @@ public class DocxGenerationTests(DatabaseFixture app)
         Assert.Equal(expected, item.Status);
         return item;
     }
+
+    private static JsonObject Hours(int semester, int hours) => new() { ["semester"] = semester, ["hours"] = hours };
 
     private static Table Laboriousness(Body body) => body.Descendants<Table>().Single(t => t.InnerText.Contains("Общая трудоёмкость"));
 

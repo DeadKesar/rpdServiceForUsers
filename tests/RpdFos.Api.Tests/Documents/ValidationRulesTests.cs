@@ -18,7 +18,8 @@ public class ValidationRulesTests
     private static readonly IValidationRule[] All =
     [
         new TopicHoursMatchTotal(), new CompetencesMatchMatrix(),
-        new LiteratureMainRecent(Options.Create(new ValidationRuleSettings { LiteratureMaxAgeYears = 10 }))
+        new LiteratureMainRecent(Options.Create(new ValidationRuleSettings { LiteratureMaxAgeYears = 10 })),
+        new SelfStudyKindsMatchPlan()
     ];
 
     // План: два семестра — часы складываются.
@@ -58,6 +59,38 @@ public class ValidationRulesTests
         Assert.Equal(
             [new DocumentValidationError("/thematic_plan", "Лекции: по темам 12 ч, по учебному плану 24 ч")],
             Run(new TopicHoursMatchTotal(), plan, "/thematic_plan"));
+    }
+
+    [Fact]
+    public void Self_study_kinds_add_up_to_plan_in_each_semester()
+    {
+        var hours = """
+            { "self_study_kinds": [
+                { "kind": "написание реферата", "form_code": "Р", "hours": [ { "semester": 1, "hours": 10 } ] },
+                { "kind": "самоподготовка", "hours": [ { "semester": 1, "hours": 30 }, { "semester": 2, "hours": 20 } ] } ] }
+            """;
+
+        Assert.Empty(Run(new SelfStudyKindsMatchPlan(), hours, "/hours_distribution"));
+    }
+
+    [Fact]
+    public void Self_study_kinds_mismatch_names_semester_and_both_sums()
+    {
+        // Во втором семестре видов нет вовсе, а в третьем у дисциплины нет занятий.
+        var hours = """
+            { "self_study_kinds": [ { "kind": "самоподготовка", "hours": [ { "semester": 1, "hours": 36 }, { "semester": 3, "hours": 4 } ] } ] }
+            """;
+
+        Assert.Equal(
+            [
+                new DocumentValidationError("/hours_distribution/self_study_kinds", "1 семестр: по видам 36 ч, по учебному плану 40 ч"),
+                new DocumentValidationError("/hours_distribution/self_study_kinds", "2 семестр: по видам 0 ч, по учебному плану 20 ч"),
+                new DocumentValidationError("/hours_distribution/self_study_kinds",
+                    "3 семестр: по видам 4 ч, а в учебном плане дисциплины такого семестра нет")
+            ],
+            Run(new SelfStudyKindsMatchPlan(), hours, "/hours_distribution"));
+        // Без видов вовсе — тоже расхождение: правило висит на трудоёмкости, она в документе всегда есть.
+        Assert.Equal(2, Run(new SelfStudyKindsMatchPlan(), "{}", "/hours_distribution").Count);
     }
 
     [Fact]
@@ -106,6 +139,7 @@ public class ValidationRulesTests
         var year = DateTime.Today.Year;
         var payload = $$"""
             {
+              "hours_distribution": { "self_study_kinds": [ { "kind": "самоподготовка", "hours": [ { "semester": 1, "hours": 40 } ] } ] },
               "thematic_plan": [ { "hours": { "lectures": 1 } } ],
               "competences": [ { "code": "УК-1", "indicators": [ { "code": "УК-1.1" } ] } ],
               "literature": { "main": [ { "citation": "Учебник по моделированию систем", "year": {{year - 30}} } ] }
@@ -118,6 +152,7 @@ public class ValidationRulesTests
         Assert.Contains(issues, i => i is { Path: "/thematic_plan", Level: IssueLevels.Error } && i.Message.StartsWith("Лекции"));
         Assert.Contains(issues, i => i is { Path: "/competences", Level: IssueLevels.Error } && i.Message.StartsWith("ОПК-2"));
         Assert.Contains(issues, i => i is { Path: "/literature/main/0", Level: IssueLevels.Warning });
+        Assert.Contains(issues, i => i is { Path: "/hours_distribution/self_study_kinds", Level: IssueLevels.Error } && i.Message.Contains("2 семестр"));
     }
 
     [Fact]

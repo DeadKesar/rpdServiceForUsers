@@ -78,7 +78,7 @@ public class DocumentEditingApiTests(DatabaseFixture app)
         Assert.Equal(HttpStatusCode.UnprocessableEntity, renamed.StatusCode);
         Assert.Equal(["/title_page/discipline_name"], await ErrorPathsAsync(renamed));
         Assert.Equal(HttpStatusCode.UnprocessableEntity, moreHours.StatusCode);
-        Assert.Equal(["/hours_distribution"], await ErrorPathsAsync(moreHours));
+        Assert.Equal(["/hours_distribution/semesters"], await ErrorPathsAsync(moreHours));
     }
 
     [Fact]

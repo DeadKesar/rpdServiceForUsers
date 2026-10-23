@@ -59,7 +59,8 @@ public class DocumentsApiTests(DatabaseFixture app)
 
         // Поля из плана — только для чтения.
         Assert.Contains("/title_page/discipline_name", created.Metadata.ReadOnlyPaths);
-        Assert.Contains("/hours_distribution", created.Metadata.ReadOnlyPaths);
+        Assert.Contains("/hours_distribution/semesters", created.Metadata.ReadOnlyPaths);
+        Assert.DoesNotContain("/hours_distribution", created.Metadata.ReadOnlyPaths); // виды самостоятельной работы — автора
         Assert.Contains("/place_in_structure/block", created.Metadata.ReadOnlyPaths);
         Assert.DoesNotContain("/title_page/academic_year", created.Metadata.ReadOnlyPaths);
         // Не предусмотрено планом: курсовой проект. Ссылка на указания к курсовому проектированию и самостоятельной
@@ -99,7 +100,11 @@ public class DocumentsApiTests(DatabaseFixture app)
             Assert.Equal(SectionFill.NotApplicable, s.Fill);
             Assert.Contains("не предусмотрен", s.StubText);
         });
-        Assert.Equal(SectionFill.Complete, sections["hours_distribution"].Fill);
+        // Трудоёмкость из плана, но виды самостоятельной работы расписывает автор — до этого раздел не заполнен.
+        Assert.Equal(SectionFill.Incomplete, sections["hours_distribution"].Fill);
+        var missing = Assert.Single(sections["hours_distribution"].Missing);
+        Assert.Equal("/hours_distribution/self_study_kinds", missing.Path);
+        Assert.Contains("по видам 0 ч", missing.Message);
         Assert.Equal(SectionFill.Incomplete, sections["goals_and_objectives"].Fill);
         // Видимый условный раздел обязателен при отправке — хотя бы одна запись; новый документ его ещё не заполнил.
         Assert.All(sections.Values.Where(s => s.Visible && s.Key is "lab_works" or "practical_classes"), s =>
