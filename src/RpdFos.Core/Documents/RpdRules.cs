@@ -132,7 +132,7 @@ public sealed class CompetencesMatchMatrix : IValidationRule
 /// <summary>
 /// <c>literature_main_recent</c>: издание основной литературы старше заданного числа лет (настройка
 /// <see cref="ValidationRuleSettings.LiteratureMaxAgeYears"/>). Предупреждение: отправку не блокирует —
-/// классический учебник бывает и старым. Издание без года не проверяется.
+/// классический учебник бывает и старым. Издание без года и отмеченное автором как фундаментальное не проверяется.
 /// </summary>
 public sealed class LiteratureMainRecent(IOptions<ValidationRuleSettings> settings) : IValidationRule
 {
@@ -145,8 +145,37 @@ public sealed class LiteratureMainRecent(IOptions<ValidationRuleSettings> settin
         var maxAge = settings.Value.LiteratureMaxAgeYears;
         var items = context.Value.EnumerateArray().ToList();
         for (var i = 0; i < items.Count; i++)
-            if (items[i].ValueKind == JsonValueKind.Object && items[i].TryGetProperty("year", out var y) && y.TryGetInt32(out var year) &&
-                context.Now.Year - year > maxAge)
+            if (LiteratureYear.Of(items[i]) is { } year && !LiteratureYear.IsFundamental(items[i]) && context.Now.Year - year > maxAge)
                 yield return new($"{context.Path}/{i}", $"Издание {year} года — старше {maxAge} лет", IssueLevels.Warning);
     }
+}
+
+/// <summary>
+/// <c>literature_year_not_future</c>: год издания — не позже текущего. JSON Schema «текущий год» не выражает,
+/// поэтому это правило, а не <c>maximum</c> схемы; нижняя граница (1800) — в схеме. Ошибка в данных — проверяется
+/// и при сохранении.
+/// </summary>
+public sealed class LiteratureYearNotFuture : IValidationRule
+{
+    public string Name => "literature_year_not_future";
+    public string Level => IssueLevels.Error;
+    public bool OnSave => true;
+
+    public IEnumerable<DocumentValidationError> Check(RuleContext context)
+    {
+        if (context.Value.ValueKind != JsonValueKind.Array) yield break;
+        var items = context.Value.EnumerateArray().ToList();
+        for (var i = 0; i < items.Count; i++)
+            if (LiteratureYear.Of(items[i]) is { } year && year > context.Now.Year)
+                yield return new($"{context.Path}/{i}/year", $"Год издания {year} — позже текущего ({context.Now.Year})");
+    }
+}
+
+internal static class LiteratureYear
+{
+    public static int? Of(JsonElement item) =>
+        item.ValueKind == JsonValueKind.Object && item.TryGetProperty("year", out var y) && y.TryGetInt32(out var year) ? year : null;
+
+    public static bool IsFundamental(JsonElement item) =>
+        item.ValueKind == JsonValueKind.Object && item.TryGetProperty("fundamental", out var f) && f.ValueKind == JsonValueKind.True;
 }

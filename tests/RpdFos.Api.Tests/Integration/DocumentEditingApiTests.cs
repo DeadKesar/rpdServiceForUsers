@@ -210,6 +210,36 @@ public class DocumentEditingApiTests(DatabaseFixture app)
         Assert.Equal((created.Document.Id, false), forOther.Where(d => d.Code == "Б1.О.08").Select(d => (d.DocumentId, d.CanOpen)).Single());
     }
 
+    [Fact]
+    public async Task Future_publication_year_blocks_saving_old_fundamental_does_not()
+    {
+        var (client, _) = await DocumentData.UserAsync(app);
+        var created = await DocumentData.CreateAsync(app, client, (await DocumentData.PublishedTemplateAsync(app)).Id, "Б1.О.09");
+        var year = DateTime.UtcNow.Year;
+        JsonObject Literature(int mainYear, bool fundamental = false) => new()
+        {
+            ["main"] = new JsonArray(new JsonObject
+            {
+                ["citation"] = "Колмогоров А. Н. Основания теории вероятностей. — Москва : Наука, 1974. — 120 с.",
+                ["year"] = mainYear, ["fundamental"] = fundamental
+            }),
+            ["additional"] = new JsonArray()
+        };
+
+        var future = await PatchAsync(client, created, "literature", 1, Literature(year + 1));
+        var tooOld = await PatchAsync(client, created, "literature", 1, Literature(1700));
+        var fundamental = await PatchAsync(client, created, "literature", 1, Literature(1974, fundamental: true));
+
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, future.StatusCode);
+        Assert.Equal(["/literature/main/0/year"], await ErrorPathsAsync(future));
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, tooOld.StatusCode);
+        Assert.Equal(["/literature/main/0/year"], await ErrorPathsAsync(tooOld));
+        // Старое фундаментальное издание сохраняется и предупреждения о возрасте не даёт.
+        Assert.Equal(HttpStatusCode.OK, fundamental.StatusCode);
+        var section = (await fundamental.Content.ReadFromJsonAsync<SectionSaved>())!.Section;
+        Assert.DoesNotContain(section.Warnings, w => w.Path.StartsWith("/literature/main"));
+    }
+
     private static JsonObject GoalsSection(string extra = "Освоить методы имитационного моделирования") => new()
     {
         ["goals"] = Goals,

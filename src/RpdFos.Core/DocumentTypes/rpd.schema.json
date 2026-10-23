@@ -364,7 +364,7 @@
           "title": "Основная литература",
           "minItems": 1,
           "x-ui-widget": "literature_list",
-          "x-validation-rule": ["literature_main_count", "literature_main_recent"],
+          "x-validation-rule": ["literature_main_count", "literature_main_recent", "literature_year_not_future"],
           "items": { "$ref": "#/$defs/literature_item" },
           "description": "Основная литература"
         },
@@ -372,6 +372,7 @@
           "type": "array",
           "title": "Дополнительная литература",
           "x-ui-widget": "literature_list",
+          "x-validation-rule": "literature_year_not_future",
           "items": { "$ref": "#/$defs/literature_item" },
           "description": "Дополнительная литература"
         },
@@ -549,7 +550,12 @@
           "minLength": 20,
           "description": "Библиографическая запись по ГОСТ Р 7.0.100-2018"
         },
-        "year": { "type": "integer", "title": "Год", "minimum": 1900 },
+        "year": { "type": "integer", "title": "Год", "minimum": 1800, "description": "Год издания: не раньше 1800 и не позже текущего" },
+        "fundamental": {
+          "type": "boolean",
+          "title": "Фундаментальное издание",
+          "description": "Классический труд, который не переиздаётся: предупреждение о возрасте издания не выдаётся"
+        },
         "isbn": { "type": "string", "title": "ISBN" }
       }
     }

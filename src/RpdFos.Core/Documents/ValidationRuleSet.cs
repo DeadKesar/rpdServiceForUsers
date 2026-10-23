@@ -17,6 +17,13 @@ public interface IValidationRule
 {
     string Name { get; }
     string Level { get; }
+
+    /// <summary>
+    /// Ошибка в самих данных (год издания в будущем), а не неполнота: такое правило проверяется и при сохранении
+    /// черновика, как ошибки типов схемы. Остальные — только к отправке и в заполненности разделов.
+    /// </summary>
+    bool OnSave => false;
+
     IEnumerable<DocumentValidationError> Check(RuleContext context);
 }
 
@@ -38,8 +45,9 @@ public sealed class ValidationRuleSet(IEnumerable<IValidationRule> rules, TimePr
 
     public IReadOnlyCollection<string> Names => _rules.Keys;
 
+    /// <param name="onSave">Только правила, которые проверяются и при сохранении (<see cref="IValidationRule.OnSave"/>).</param>
     public IReadOnlyList<DocumentValidationError> Run(JsonElement schema, JsonElement payload, DisciplineFacts facts,
-        Func<string, JsonElement?> resolve, IReadOnlySet<string> hiddenSections)
+        Func<string, JsonElement?> resolve, IReadOnlySet<string> hiddenSections, bool onSave = false)
     {
         var issues = new List<DocumentValidationError>();
         var root = schema;
@@ -51,7 +59,7 @@ public sealed class ValidationRuleSet(IEnumerable<IValidationRule> rules, TimePr
             if (node is not { ValueKind: JsonValueKind.Object } n || depth > 16) return;
             if (path.Length > 0 && n.TryGetProperty("x-validation-rule", out var names))
                 foreach (var name in Names(names))
-                    if (_rules.TryGetValue(name, out var rule))
+                    if (_rules.TryGetValue(name, out var rule) && (!onSave || rule.OnSave))
                         issues.AddRange(rule.Check(new RuleContext(path, value, payload, facts, clock.GetUtcNow()))
                             .Select(i => i with { Level = rule.Level }));
 

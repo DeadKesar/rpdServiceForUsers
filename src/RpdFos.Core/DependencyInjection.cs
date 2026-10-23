@@ -40,6 +40,7 @@ public static class DependencyInjection
         services.AddSingleton<IValidationRule, SelfStudyKindsMatchPlan>();
         services.AddSingleton<IValidationRule, CompetencesMatchMatrix>();
         services.AddSingleton<IValidationRule, LiteratureMainRecent>();
+        services.AddSingleton<IValidationRule, LiteratureYearNotFuture>();
         services.AddSingleton<ValidationRuleSet>();
         services.AddScoped<DocumentProjections>();
         services.AddScoped<DocumentCreation>();

@@ -19,7 +19,7 @@ public class ValidationRulesTests
     [
         new TopicHoursMatchTotal(), new CompetencesMatchMatrix(),
         new LiteratureMainRecent(Options.Create(new ValidationRuleSettings { LiteratureMaxAgeYears = 10 })),
-        new SelfStudyKindsMatchPlan()
+        new SelfStudyKindsMatchPlan(), new LiteratureYearNotFuture()
     ];
 
     // План: два семестра — часы складываются.
@@ -130,6 +130,34 @@ public class ValidationRulesTests
         Assert.Equal(
             [new DocumentValidationError("/literature/main/0", "Издание 2010 года — старше 10 лет", IssueLevels.Warning)],
             Run(rule, main, "/literature/main"));
+    }
+
+    [Fact]
+    public void Fundamental_edition_is_not_too_old()
+    {
+        var main = """[ { "citation": "классический учебник", "year": 1965, "fundamental": true }, { "citation": "старый", "year": 1965 } ]""";
+
+        Assert.Equal(["/literature/main/1"], Run(All[2], main, "/literature/main").Select(e => e.Path));
+    }
+
+    [Fact]
+    public void Future_year_is_an_error_checked_on_save()
+    {
+        var rule = new LiteratureYearNotFuture();
+        var items = $$"""[ { "citation": "этого года", "year": {{Now.Year}} }, { "citation": "будущего", "year": {{Now.Year + 1}} } ]""";
+
+        Assert.True(rule.OnSave);
+        Assert.Equal(
+            [new DocumentValidationError("/literature/additional/1/year", $"Год издания {Now.Year + 1} — позже текущего ({Now.Year})")],
+            Run(rule, items, "/literature/additional"));
+        // При сохранении реестр вызывает только такие правила: предупреждение о возрасте и сверка часов ждут отправки.
+        var payload = JsonDocument.Parse($$"""
+            { "thematic_plan": [ { "hours": { "lectures": 1 } } ],
+              "literature": { "main": [ { "citation": "Учебник", "year": 1990 } ], "additional": {{items}} } }
+            """).RootElement;
+        var onSave = new ValidationRuleSet(All, TimeProvider.System).Run(JsonDocument.Parse(Rpd).RootElement, payload, Facts,
+            Registry.FindSchema, new HashSet<string>(), onSave: true);
+        Assert.Equal(["/literature/additional/1/year"], onSave.Select(e => e.Path));
     }
 
     [Fact]

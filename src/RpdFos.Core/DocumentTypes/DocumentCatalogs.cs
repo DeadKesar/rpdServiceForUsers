@@ -53,8 +53,8 @@ public static class ValidationRules
         "unique_competence_codes", "literature_main_count", "fos_passport_consistent", "control_forms_match",
         // Этап 5: покрытие компетенций матрицы и возраст основной литературы — имён для них в каталоге проекта не было.
         "competences_match_matrix", "literature_main_recent",
-        // Этап 5.1: часы видов самостоятельной работы по семестрам против плана.
-        "self_study_kinds_match_plan"
+        // Этап 5.1: часы видов самостоятельной работы по семестрам против плана, год издания не в будущем.
+        "self_study_kinds_match_plan", "literature_year_not_future"
     };
 }
 

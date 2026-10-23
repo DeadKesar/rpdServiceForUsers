@@ -57,6 +57,10 @@ public sealed class DocumentEditing(
         var element = JsonDocument.Parse(updatedJson).RootElement;
         var errors = validator.Validate(schemaJson, element, ValidationMode.Draft);
         if (errors.Count > 0) return new(SectionUpdateProblem.Invalid, errors, null);
+        // Правила об ошибках в самих данных (год издания в будущем) не дают сохранить и черновик — в этом разделе.
+        var wrong = rules.Run(schema, element, facts, registry.FindSchema, new HashSet<string>(), onSave: true)
+            .Where(e => DocumentSubmission.Section(e.Path) == section).ToList();
+        if (wrong.Count > 0) return new(SectionUpdateProblem.Invalid, wrong, null);
 
         var previous = document.Edit(updatedJson);
         if (previous is not null) history.StatusChanged(document, previous, editorId);
