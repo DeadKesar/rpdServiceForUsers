@@ -88,6 +88,8 @@ public class DocumentsApiTests(DatabaseFixture app)
         var created = await CreateAsync(client, (await PublishedTemplateAsync()).Id, "Б1.В.01");
         var earlier = created.Metadata.PlanDisciplines.Earlier.Select(d => d.Code).ToList();
         var later = created.Metadata.PlanDisciplines.Later.Select(d => d.Code).ToList();
+        // Кандидаты есть — формулировки «выбирать не из чего» нет.
+        Assert.Empty(created.Metadata.NoCandidatesTexts!);
 
         // Порядок плана: обязательная часть, вариативная, затем практики. Учебная практика 1–2 семестров не раньше.
         Assert.Equal(["Б1.О.01", "Б1.О.03", "Б1.О.08", "Б1.О.09", "Б1.О.10", "Б1.В.02", "Б1.В.03", "Б2.О.02(У)"], earlier);

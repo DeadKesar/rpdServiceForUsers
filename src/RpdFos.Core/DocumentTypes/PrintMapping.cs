@@ -11,11 +11,14 @@ namespace RpdFos.Core.DocumentTypes;
 /// поля, место подписанта, имя построителя таблицы или текст с подстановками; <see cref="Part"/> — для места
 /// подписанта: должность, ФИО или формулировка для документа; <see cref="Note"/> — пояснение к цели;
 /// <see cref="Occurrences"/> — переопределения для отдельных вхождений по полному имени закладки; <see cref="Stub"/> —
-/// своя формулировка, когда место не предусмотрено планом, вместо общей заглушки раздела (<c>x-stub-text</c>).
+/// своя формулировка, когда место не предусмотрено планом, вместо общей заглушки раздела (<c>x-stub-text</c>);
+/// <see cref="NoCandidates"/> — формулировка по уровню образования направления (код → текст), когда поле выбора из
+/// плана (<c>x-plan-disciplines</c>) пусто, потому что выбирать не из чего: у дисциплины 1 семестра нет предшественников.
 /// </summary>
 public sealed record BookmarkTarget(
     string Kind, string Target, string? Part = null, string? Note = null,
-    IReadOnlyDictionary<string, BookmarkOccurrence>? Occurrences = null, string? Stub = null);
+    IReadOnlyDictionary<string, BookmarkOccurrence>? Occurrences = null, string? Stub = null,
+    IReadOnlyDictionary<string, string>? NoCandidates = null);
 
 /// <summary>
 /// Переопределение для одного вхождения закладки (полное имя с номером): форма слова и, если вхождение

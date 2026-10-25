@@ -81,7 +81,15 @@
   "AutofillDisciplinePartitionTable": { "kind": "table", "target": "discipline_partition" },
   "AutofillLaboratiesClassTable": { "kind": "table", "target": "lab_works" },
   "AutofillPracticleClassTable": { "kind": "table", "target": "practical_classes" },
-  "AutofillRequirementsLast": { "kind": "field", "target": "/place_in_structure/prerequisites" },
+  "AutofillRequirementsLast": {
+    "kind": "field", "target": "/place_in_structure/prerequisites",
+    "note": "В плане нет дисциплин и практик раньше дисциплины — формулировка по уровню образования направления",
+    "noCandidates": {
+      "master": "результаты обучения, полученные при освоении программы бакалавриата или специалитета",
+      "bachelor": "результаты обучения, полученные при освоении программы среднего общего образования",
+      "specialist": "результаты обучения, полученные при освоении программы среднего общего образования"
+    }
+  },
   "AutofillRequirementsNext": { "kind": "field", "target": "/place_in_structure/postrequisites" },
   "AutofillPredWay": { "kind": "signature", "target": "umk_chair", "part": "name" },
   "AutofillPositionOdimp": { "kind": "signature", "target": "vice_rector_edu", "part": "position" },

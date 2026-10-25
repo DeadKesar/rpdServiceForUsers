@@ -389,7 +389,7 @@ public class DocumentsModule : ICarterModule
         bool isAuthor, bool isReviewer, bool isCorrector = false)
     {
         var template = await db.DocumentTemplates.IgnoreQueryFilters().Where(t => t.Id == document.TemplateId)
-            .Select(t => new { t.Schema, t.DefaultPayload }).SingleAsync(ct);
+            .Select(t => new { t.Schema, t.DefaultPayload, t.PrintMapping }).SingleAsync(ct);
         var schemaJson = template.Schema;
         var facts = (await DisciplineFacts.LoadAsync(db, document.DisciplineId, ct))!;
         var payload = JsonDocument.Parse(document.Payload).RootElement;
@@ -409,7 +409,8 @@ public class DocumentsModule : ICarterModule
             DocumentItem.From(document, facts.Discipline),
             payload,
             JsonDocument.Parse(schemaJson).RootElement,
-            DocumentMetadata.Build(schemaJson, payload, status, facts, validator, rules, registry.FindSchema),
+            DocumentMetadata.Build(schemaJson, payload, status, facts, validator, rules, registry.FindSchema,
+                template.PrintMapping is { } mapping ? PrintMappingJson.ReadMapping(mapping) : null),
             // Остальным редактор показывает документ только для чтения.
             isAuthor && DocumentTransitions.CanEdit(status, DocumentRole.Author) ||
             isReviewer && DocumentTransitions.CanEdit(status, DocumentRole.Reviewer),

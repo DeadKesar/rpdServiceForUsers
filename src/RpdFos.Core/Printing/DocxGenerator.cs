@@ -86,6 +86,13 @@ public static partial class DocxGenerator
                 return;
             }
 
+            // Выбирать из плана не из чего (у дисциплины 1 семестра нет предшественников) — формулировка из сопоставления.
+            if (kind == BookmarkTargetKinds.Field && context.NoCandidatesText(goal, target.NoCandidates) is { } noCandidates)
+            {
+                Place(range, bookmark, baseName, PrintValue.Text(noCandidates), name, Describe(kind, goal, part));
+                return;
+            }
+
             var value = Value(kind, goal, part, form, name);
             Place(range, bookmark, baseName, value, name, Describe(kind, goal, part));
         }

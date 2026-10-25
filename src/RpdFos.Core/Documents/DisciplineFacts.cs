@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using RpdFos.Core.Data;
 using RpdFos.Core.Data.Entities;
@@ -32,6 +33,19 @@ public sealed record DisciplineFacts(
     public IReadOnlyList<PlanDisciplineCandidate> Later => Semesters.Count == 0
         ? []
         : (PlanDisciplines ?? []).Where(c => c.Semesters.Min() > Semesters.Max(s => s.Semester)).ToList();
+
+    /// <summary>
+    /// Формулировка для поля выбора из плана (<c>x-plan-disciplines</c> в <paramref name="fieldSchema"/>), когда выбирать
+    /// не из чего: у дисциплины нет предшественников (или последователей) в плане. Текст — из сопоставления печати
+    /// (<paramref name="texts"/>, по коду уровня образования направления); кандидаты есть — null.
+    /// </summary>
+    public string? NoCandidatesText(JsonElement fieldSchema, IReadOnlyDictionary<string, string>? texts)
+    {
+        if (texts is null || fieldSchema.ValueKind != JsonValueKind.Object ||
+            !fieldSchema.TryGetProperty("x-plan-disciplines", out var relation)) return null;
+        var candidates = relation.GetString() == "later" ? Later : Earlier;
+        return candidates.Count == 0 ? texts.GetValueOrDefault(Direction.EducationLevel) : null;
+    }
 
     /// <summary>
     /// Кандидат в пре- и постреквизиты: дисциплина (в том числе элективная), факультатив или практика с семестрами

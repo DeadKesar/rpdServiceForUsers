@@ -37,6 +37,9 @@ public class DocxGenerationTests(DatabaseFixture app)
         place["prior_outcomes"] = new JsonObject { ["knows"] = PriorKnowledge };
         // Б1.О.10 — в 1 семестре: дисциплин раньше нет, позже — выбираются из плана.
         Assert.Empty(created.Metadata.PlanDisciplines.Earlier);
+        // Вместо пустого списка 2.1 — формулировка магистратуры из сопоставления; редактор показывает её же.
+        const string afterBachelor = "результаты обучения, полученные при освоении программы бакалавриата или специалитета";
+        Assert.Equal(afterBachelor, created.Metadata.NoCandidatesTexts!["/place_in_structure/prerequisites"]);
         var later = created.Metadata.PlanDisciplines.Later.Take(2).ToList();
         place["postrequisites"] = new JsonArray(later.Select(d => (JsonNode)new JsonObject
         {
@@ -109,6 +112,10 @@ public class DocxGenerationTests(DatabaseFixture app)
         Assert.Contains("Освоить методы построения моделей систем", text);            // задачи
         Assert.Contains("основы высшей математики", text);                             // 2.1
         Assert.Contains("методы моделирования систем", text);                          // 2.2
+        var paragraphs = body.Elements<Paragraph>().ToList();
+        var requirements = paragraphs.FindIndex(p => p.InnerText.StartsWith("Для изучения дисциплины «"));
+        Assert.Equal(afterBachelor, paragraphs[requirements + 1].InnerText);
+        Assert.DoesNotContain(item.Unfilled, u => u.StartsWith("AutofillRequirementsLast"));
         // 2.2: где применяются — списком «индекс название» из плана.
         var next = body.Elements<Paragraph>().Where(p => later.Any(d => p.InnerText == $"{d.Code} {d.Name}")).ToList();
         Assert.Equal(2, next.Count);

@@ -30,7 +30,7 @@ public sealed record PlanDisciplineChoices(IReadOnlyList<PlanDisciplineCandidate
 public sealed record DocumentMetadata(
     IReadOnlyList<SectionState> Sections, IReadOnlyList<string> ReadOnlyPaths, IReadOnlyList<string> HiddenPaths,
     IReadOnlyList<CompetenceCandidate> CompetenceCandidates, PlanDisciplineChoices PlanDisciplines,
-    IReadOnlyDictionary<string, JsonNode?> PlanValues)
+    IReadOnlyDictionary<string, JsonNode?> PlanValues, IReadOnlyDictionary<string, string>? NoCandidatesTexts = null)
 {
     /// <summary>
     /// Места, не предусмотренные учебным планом (<c>x-visible-if</c>): разделы и поля внутри разделов —
@@ -58,7 +58,8 @@ public sealed record DocumentMetadata(
     }
 
     public static DocumentMetadata Build(string schemaJson, JsonElement payload, string status, DisciplineFacts facts,
-        IDocumentValidator validator, ValidationRuleSet rules, Func<string, JsonElement?> resolve)
+        IDocumentValidator validator, ValidationRuleSet rules, Func<string, JsonElement?> resolve,
+        IReadOnlyDictionary<string, BookmarkTarget>? printMapping = null)
     {
         var schema = JsonDocument.Parse(schemaJson).RootElement;
         var issues = DocumentSubmission.Check(schemaJson, payload, facts, validator, rules, resolve);
@@ -80,7 +81,24 @@ public sealed record DocumentMetadata(
             }
 
         return new DocumentMetadata(sections, ReadOnly(schema, status, resolve), Hidden(schema, facts, resolve), facts.Competences,
-            new PlanDisciplineChoices(facts.Earlier, facts.Later), PlanFields.Values(schema, facts, resolve));
+            new PlanDisciplineChoices(facts.Earlier, facts.Later), PlanFields.Values(schema, facts, resolve),
+            NoCandidates(schema, facts, resolve, printMapping));
+    }
+
+    /// <summary>
+    /// Что напечатается вместо пустого поля выбора из плана, когда выбирать не из чего: поле → формулировка из
+    /// сопоставления шаблона. Редактор показывает её подсказкой — та же, что в печати.
+    /// </summary>
+    private static IReadOnlyDictionary<string, string>? NoCandidates(JsonElement schema, DisciplineFacts facts,
+        Func<string, JsonElement?> resolve, IReadOnlyDictionary<string, BookmarkTarget>? printMapping)
+    {
+        if (printMapping is null) return null;
+        var result = new Dictionary<string, string>();
+        foreach (var target in printMapping.Values.Where(t => t.Kind == BookmarkTargetKinds.Field && t.NoCandidates is not null))
+            if (SchemaInspector.SubschemaAt(schema, target.Target, resolve) is { } field &&
+                facts.NoCandidatesText(field, target.NoCandidates) is { } text)
+                result[target.Target] = text;
+        return result;
     }
 
     /// <summary>

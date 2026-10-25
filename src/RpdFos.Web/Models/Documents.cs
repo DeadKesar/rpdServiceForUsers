@@ -25,7 +25,7 @@ public sealed record DocumentDetails(DocumentItem Document, JsonElement Payload,
 
 public sealed record DocumentMetadata(List<SectionState> Sections, List<string> ReadOnlyPaths, List<string> HiddenPaths,
     List<CompetenceCandidate> CompetenceCandidates, PlanDisciplineChoices? PlanDisciplines,
-    Dictionary<string, JsonElement?>? PlanValues = null);
+    Dictionary<string, JsonElement?>? PlanValues = null, Dictionary<string, string>? NoCandidatesTexts = null);
 
 /// <summary>Дисциплины и практики плана раньше и позже дисциплины — кандидаты в пре- и постреквизиты.</summary>
 public sealed record PlanDisciplineChoices(List<PlanDisciplineCandidate> Earlier, List<PlanDisciplineCandidate> Later);

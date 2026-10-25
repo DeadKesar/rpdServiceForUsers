@@ -80,6 +80,15 @@ public sealed class PrintContext(
     public JsonElement? SchemaAt(string pointer) => SchemaInspector.SubschemaAt(schema, pointer, resolve);
 
     /// <summary>
+    /// Формулировка вместо пустого поля выбора из плана, когда выбирать не из чего (<see cref="DisciplineFacts.NoCandidatesText"/>).
+    /// Выбранное есть (план переимпортирован, а ссылки остались) — печатается выбранное.
+    /// </summary>
+    public string? NoCandidatesText(string pointer, IReadOnlyDictionary<string, string>? texts) =>
+        At(pointer) is { ValueKind: JsonValueKind.Array } value && value.GetArrayLength() > 0 || SchemaAt(pointer) is not { } field
+            ? null
+            : Facts.NoCandidatesText(field, texts);
+
+    /// <summary>
     /// Стандартная формулировка вместо места, не предусмотренного учебным планом (<c>x-stub-text</c>, FR-TPL-14);
     /// место предусмотрено — null.
     /// </summary>

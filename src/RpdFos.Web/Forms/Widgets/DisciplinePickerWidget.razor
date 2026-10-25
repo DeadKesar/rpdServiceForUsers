@@ -11,7 +11,14 @@
     </label>
     @if (Candidates.Count == 0)
     {
-        <div class="text-muted small">@Empty</div>
+        <div class="text-muted small">
+            @Empty
+            @* Та же формулировка, что напечатается: она в сопоставлении закладок шаблона. *@
+            @if (Context.Metadata.NoCandidatesTexts?.GetValueOrDefault(Path) is { } printed)
+            {
+                <div>В печатной форме вместо списка: «@printed».</div>
+            }
+        </div>
     }
     else
     {
