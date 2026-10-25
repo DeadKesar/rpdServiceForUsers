@@ -132,6 +132,12 @@ else
             {
                 <button class="btn btn-outline-danger" @onclick="DeleteAsync" disabled="@busy">Удалить</button>
             }
+            @if (defaultsDirty)
+            {
+                <span class="small text-warning-emphasis">
+                    Есть несохранённые значения по умолчанию — «Сохранить» и «Опубликовать» сохранят их вместе с шаблоном.
+                </span>
+            }
         </div>
     </AuthorizeView>
 
@@ -344,8 +350,13 @@ else
 
     private async Task ChangeAsync(string action, string done)
     {
-        await RunAsync(async () => await ApplyAsync(
-            await Http.PostAsJsonAsync($"api/templates/{Id}/{action}", new { version = details!.Template.Version }), done));
+        await RunAsync(async () =>
+        {
+            // Шаблон сохраняется и публикуется вместе с несохранёнными значениями по умолчанию: иначе ответ сервера
+            // перестроил бы форму и стёр их. Умолчания с ошибками — действие не выполняется, места ошибок показаны.
+            if (defaultsDirty && action is "save" or "publish" && !await PutDefaultsAsync()) return;
+            await ApplyAsync(await Http.PostAsJsonAsync($"api/templates/{Id}/{action}", new { version = details!.Template.Version }), done);
+        });
     }
 
     private async Task CreateRevisionAsync()
@@ -372,7 +383,11 @@ else
         {
             var response = await Http.DeleteAsync($"api/templates/{Id}?version={details!.Template.Version}");
             if (response.StatusCode == HttpStatusCode.NoContent)
+            {
+                // Удаление уже подтверждено — второй вопрос о несохранённых умолчаниях не нужен.
+                defaultsDirty = false;
                 Navigation.NavigateTo("templates");
+            }
             else
                 await ShowProblemAsync(response);
         });
@@ -383,7 +398,8 @@ else
         if (response.IsSuccessStatusCode && await response.Content.ReadFromJsonAsync<TemplateDetails>() is { } updated)
         {
             details = updated;
-            BuildDefaults();
+            // Несохранённые правки умолчаний переживают другие действия (загрузку оформления): форма остаётся как есть.
+            BuildDefaults(keepUnsaved: true);
             printTemplate = null;
             Show(done, false);
         }
@@ -445,13 +461,25 @@ else
 
     // Умолчания редактируются теми же полями и виджетами, что и документ: содержимое — умолчания шаблона, метаданных
     // документа (план, кандидаты) у шаблона нет.
-    private void BuildDefaults()
+    /// <param name="keepUnsaved">Несохранённые правки остаются в форме — после действий, которые умолчаний не меняют.</param>
+    private void BuildDefaults(bool keepUnsaved = false)
     {
-        defaultsDirty = false;
         if (details is null) return;
-        defaults = details.Defaults is { } d && JsonNode.Parse(d.GetRawText()) is JsonObject o ? o : [];
+        if (!(keepUnsaved && defaultsDirty))
+        {
+            defaultsDirty = false;
+            defaults = details.Defaults is { } d && JsonNode.Parse(d.GetRawText()) is JsonObject o ? o : [];
+        }
+        // Как в редакторе документа: правка отмечается по вводу (oninput), страница перерисовывается при первой —
+        // чтобы кнопка сохранения и подтверждение ухода со страницы узнали о ней сразу.
         defaultsContext = new SchemaContext(details.Schema, defaults, new DocumentMetadata([], [], [], [], null, null),
-            () => { defaultsDirty = true; StateHasChanged(); }, () => defaultsDirty = true)
+            () => { defaultsDirty = true; StateHasChanged(); },
+            () =>
+            {
+                if (defaultsDirty) return;
+                defaultsDirty = true;
+                StateHasChanged();
+            })
         {
             Locked = !CanEditDefaults, Defaults = defaults, IsTemplate = true
         };
@@ -481,20 +509,34 @@ else
     {
         await RunAsync(async () =>
         {
-            var body = new TemplateDefaultsRequest(details!.Template.Version, JsonDocument.Parse(defaults.ToJsonString()).RootElement);
-            var response = await Http.PutAsJsonAsync($"api/templates/{Id}/defaults", body);
-            if (response.StatusCode == HttpStatusCode.UnprocessableEntity)
-            {
-                // Места ошибок — подписями полей формы: «Интернет-ресурсы → № 2 → Адрес».
-                using var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-                Show(problem.RootElement.TryGetProperty("title", out var t) ? t.GetString() ?? "" : "Значения по умолчанию не сохранены", true);
-                problems = problem.RootElement.TryGetProperty("errors", out var errors) && errors.ValueKind == JsonValueKind.Array
-                    ? errors.EnumerateArray().Select(e => $"{defaultsContext!.FieldTitle(e.GetProperty("path").GetString() ?? "")}: {e.GetProperty("message").GetString()}").ToList()
-                    : [];
-                return;
-            }
-            await ApplyAsync(response, "Значения по умолчанию сохранены.");
+            if (await PutDefaultsAsync()) Show("Значения по умолчанию сохранены.", false);
         });
+    }
+
+    /// <summary>Сохраняет значения по умолчанию; false — не сохранены, причина и места ошибок показаны.</summary>
+    private async Task<bool> PutDefaultsAsync()
+    {
+        var body = new TemplateDefaultsRequest(details!.Template.Version, JsonDocument.Parse(defaults.ToJsonString()).RootElement);
+        var response = await Http.PutAsJsonAsync($"api/templates/{Id}/defaults", body);
+        if (response.StatusCode == HttpStatusCode.UnprocessableEntity)
+        {
+            // Места ошибок — подписями полей формы: «Интернет-ресурсы → № 2 → Адрес».
+            using var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            Show(problem.RootElement.TryGetProperty("title", out var t) ? t.GetString() ?? "" : "Значения по умолчанию не сохранены", true);
+            problems = problem.RootElement.TryGetProperty("errors", out var errors) && errors.ValueKind == JsonValueKind.Array
+                ? errors.EnumerateArray().Select(e => $"{defaultsContext!.FieldTitle(e.GetProperty("path").GetString() ?? "")}: {e.GetProperty("message").GetString()}").ToList()
+                : [];
+            return false;
+        }
+        if (!response.IsSuccessStatusCode || await response.Content.ReadFromJsonAsync<TemplateDetails>() is not { } updated)
+        {
+            await ShowProblemAsync(response);
+            return false;
+        }
+        details = updated;
+        defaultsDirty = false;
+        BuildDefaults();
+        return true;
     }
 
     private async Task ConfirmLeaveAsync(LocationChangingContext context)
