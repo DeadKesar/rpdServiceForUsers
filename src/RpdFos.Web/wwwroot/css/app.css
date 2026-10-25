@@ -127,6 +127,11 @@ main {
     overflow-wrap: anywhere;
 }
 
+/* У code Bootstrap задаёт word-wrap: break-word — он перекрывает унаследованное и не даёт таблице закладок сжаться. */
+main code {
+    overflow-wrap: anywhere;
+}
+
 /* Пометки полей («изменено методистом, в плане: …») — тоже переносятся. */
 main .badge {
     white-space: normal;
