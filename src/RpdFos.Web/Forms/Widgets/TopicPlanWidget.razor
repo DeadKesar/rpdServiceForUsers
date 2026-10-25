@@ -64,7 +64,7 @@
             @if (ChosenIndicators.Count > 0)
             {
                 <div class="mt-2 small">
-                    <span class="text-muted">Индикаторы:</span>
+                    <span class="text-muted me-1">Индикаторы:</span>
                     @foreach (var indicatorCode in ChosenIndicators)
                     {
                         <label class="form-check form-check-inline mb-0">
@@ -81,7 +81,7 @@
                 @if (SelfStudyForms.Count > 0)
                 {
                     <div class="small">
-                        <span class="text-muted">Из видов самостоятельной работы:</span>
+                        <span class="text-muted me-1">Из видов самостоятельной работы:</span>
                         @foreach (var (form, kind) in SelfStudyForms)
                         {
                             <label class="form-check form-check-inline mb-0" title="@kind">

@@ -24,6 +24,12 @@ public sealed class SchemaContext(JsonElement root, JsonObject payload, Document
     /// </summary>
     public JsonObject? Defaults { get; set; }
 
+    /// <summary>
+    /// Форма значений по умолчанию на странице шаблона: часть полей имеет смысл только в документе (разделы
+    /// тематического плана, часы по семестрам) — виджеты их не показывают.
+    /// </summary>
+    public bool IsTemplate { get; set; }
+
     /// <summary>Замечания методиста к документу — показываются у полей.</summary>
     public List<CommentItem> Comments { get; set; } = [];
 

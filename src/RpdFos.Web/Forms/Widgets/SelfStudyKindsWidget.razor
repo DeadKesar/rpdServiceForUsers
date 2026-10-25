@@ -30,10 +30,11 @@
                     <td>
                         <input type="text" class="form-control form-control-sm" list="@ListId" readonly="@ReadOnly" value="@Text(row["kind"])"
                                @oninput="e => InputKind(row, e.Value as string)" @onchange="e => SetKind(row, e.Value as string)" />
-                        @if (row["sections"] is JsonArray)
+                        @* Разделы тематического плана выбираются в документе: у шаблона тематического плана нет. *@
+                        @if (row["sections"] is JsonArray && !Context.IsTemplate)
                         {
                             <div class="small mt-1">
-                                <span class="text-muted">Разделы:</span>
+                                <span class="text-muted me-1">Разделы:</span>
                                 @foreach (var section in SectionNumbers)
                                 {
                                     <label class="form-check form-check-inline mb-0">
@@ -95,7 +96,14 @@
     {
         <button class="btn btn-sm btn-outline-primary" type="button" @onclick="Add">Добавить вид</button>
     }
-    @if (Hint is not null)
+    @if (Context.IsTemplate)
+    {
+        <div class="form-text">
+            Стандартный список видов: новый документ получает его, часы по семестрам и разделы тематического плана
+            задаёт автор. Пустой список разделов у вида — признак, что автор выбирает разделы.
+        </div>
+    }
+    else if (Hint is not null)
     {
         <div class="form-text">@Hint. Вид выбирается из списка или вводится свой.</div>
     }
@@ -110,7 +118,9 @@
         Items.ValueKind == JsonValueKind.Object && Items.GetProperty("properties").TryGetProperty(name, out var p) ? Context.Resolve(p) : default;
 
     // Стандартный список — значения по умолчанию шаблона на том же месте: вид, обозначение, признак перечня разделов.
-    private IEnumerable<JsonObject> Examples => DefaultsAt(Context.Defaults, Path) as JsonArray is { } list ? list.OfType<JsonObject>() : [];
+    // На странице шаблона список и есть умолчания — подсказывать нечего.
+    private IEnumerable<JsonObject> Examples =>
+        !Context.IsTemplate && DefaultsAt(Context.Defaults, Path) is JsonArray list ? list.OfType<JsonObject>() : [];
 
     private static JsonNode? DefaultsAt(JsonNode? node, string pointer)
     {

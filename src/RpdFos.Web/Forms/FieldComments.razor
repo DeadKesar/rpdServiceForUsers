@@ -5,7 +5,7 @@
 {
     <div class="alert @(c.IsResolved ? "alert-light text-muted" : "alert-warning") py-1 px-2 small mb-1 d-flex justify-content-between align-items-start gap-2">
         <span>
-            <span class="fw-semibold">Замечание@(c.FieldPath != Path ? $" ({Context.FieldTitle(c.FieldPath)})" : ""):</span>
+            <span class="fw-semibold me-1">Замечание@(c.FieldPath != Path ? $" ({Context.FieldTitle(c.FieldPath)})" : ""):</span>
             @c.Text
             <span class="text-muted">— @c.AuthorName, @c.CreatedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</span>
             @if (c.IsResolved)
