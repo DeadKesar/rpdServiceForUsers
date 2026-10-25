@@ -10,8 +10,12 @@ namespace RpdFos.Core.Documents;
 
 public enum SectionUpdateProblem { UnknownSection, HiddenSection, ReadOnlyChanged, Invalid }
 
-/// <summary>Итог изменения раздела: отказ с ошибками по полям или новое состояние раздела.</summary>
-public sealed record SectionUpdateResult(SectionUpdateProblem? Problem, IReadOnlyList<DocumentValidationError> Errors, SectionState? Section);
+/// <summary>
+/// Итог изменения раздела: отказ с ошибками по полям или новое состояние раздела — и всех разделов: правка одного
+/// меняет заполненность других (тематический план сверяется с трудоёмкостью).
+/// </summary>
+public sealed record SectionUpdateResult(SectionUpdateProblem? Problem, IReadOnlyList<DocumentValidationError> Errors, SectionState? Section,
+    IReadOnlyList<SectionState>? Sections = null);
 
 /// <summary>
 /// Изменение и сохранение документа. Раздел проверяется в режиме черновика, форматированный текст санитизируется,
@@ -91,7 +95,7 @@ public sealed class DocumentEditing(
         await history.SnapshotAsync(document, editorId, VersionTriggers.AutoSave, ct);
 
         var metadata = DocumentMetadata.Build(schemaJson, element, document.Status, facts, validator, rules, registry.FindSchema);
-        return new(null, [], metadata.Sections.Single(s => s.Key == section));
+        return new(null, [], metadata.Sections.Single(s => s.Key == section), metadata.Sections);
     }
 
     /// <summary>«Сохранить»: новый снимок версии; черновик становится сохранённым черновиком.</summary>

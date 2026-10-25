@@ -187,8 +187,10 @@ public class DocumentsModule : ICarterModule
             };
 
         await db.SaveChangesAsync(ct);
-        return Results.Ok(new SectionSaved(document!.Version, document.Status, DocumentStatuses.Title(document.Status),
-            result.Section!, clock.GetUtcNow()));
+        // Состояние всех разделов и история исправлений — редактор обновляет их сразу, без перезагрузки документа.
+        return Results.Ok(new SectionSaved(document.Version, document.Status, DocumentStatuses.Title(document.Status),
+            result.Section!, clock.GetUtcNow(), result.Sections,
+            scope == DocumentEditScope.Content ? null : await CorrectionsAsync(db, document.Id, ct)));
     }
 
     private static async Task<IResult> Save(
@@ -395,15 +397,7 @@ public class DocumentsModule : ICarterModule
         var payload = JsonDocument.Parse(document.Payload).RootElement;
         var status = document.Status;
         var scope = DocumentTransitions.EditScope(status, isAuthor, isReviewer, isCorrector);
-        // Исправления полей из плана — из журнала аудита: кто, когда, было, стало.
-        var corrections = await (
-                from a in db.AuditLog
-                where a.EntityType == AuditEntities.Document && a.EntityId == document.Id && a.EventType == AuditEvents.PlanFieldCorrected
-                join e in db.Employees on a.UserId equals e.Id into editors
-                from e in editors.DefaultIfEmpty()
-                orderby a.OccurredAt
-                select new { a.Payload, a.OccurredAt, Name = e == null ? null : e.ShortName })
-            .ToListAsync(ct);
+        var corrections = await CorrectionsAsync(db, document.Id, ct);
 
         return new DocumentDetails(
             DocumentItem.From(document, facts.Discipline),
@@ -422,8 +416,20 @@ public class DocumentsModule : ICarterModule
                 Print: isAuthor || isReviewer && status is DocumentStatuses.UnderReview or DocumentStatuses.Accepted,
                 CorrectPlan: scope is DocumentEditScope.ContentAndPlan or DocumentEditScope.PlanOnly),
             template.DefaultPayload is { } defaults ? JsonDocument.Parse(defaults).RootElement : null,
-            corrections.Select(c => PlanCorrection.From(c.Payload, c.Name, c.OccurredAt)).ToList());
+            corrections);
     }
+
+    // Исправления полей из плана — из журнала аудита: кто, когда, было, стало.
+    private static async Task<List<PlanCorrection>> CorrectionsAsync(AppDbContext db, Guid documentId, CancellationToken ct) =>
+        (await (
+                from a in db.AuditLog
+                where a.EntityType == AuditEntities.Document && a.EntityId == documentId && a.EventType == AuditEvents.PlanFieldCorrected
+                join e in db.Employees on a.UserId equals e.Id into editors
+                from e in editors.DefaultIfEmpty()
+                orderby a.OccurredAt
+                select new { a.Payload, a.OccurredAt, Name = e == null ? null : e.ShortName })
+            .ToListAsync(ct))
+        .Select(c => PlanCorrection.From(c.Payload, c.Name, c.OccurredAt)).ToList();
 
     private static IResult NotFound() =>
         Results.Problem(statusCode: StatusCodes.Status404NotFound, title: "Документ не найден",
@@ -452,7 +458,8 @@ public record ReturnRequest(int Version, string? Comment);
 public record CommentRequest(string? FieldPath, string? Text);
 
 /// <summary>Раздел сохранён: новая версия, статус (после «Сохранить» правка возвращает черновик) и заполненность раздела.</summary>
-public record SectionSaved(int Version, string Status, string StatusTitle, SectionState Section, DateTimeOffset SavedAt);
+public record SectionSaved(int Version, string Status, string StatusTitle, SectionState Section, DateTimeOffset SavedAt,
+    IReadOnlyList<SectionState>? Sections = null, IReadOnlyList<PlanCorrection>? PlanCorrections = null);
 
 public record DocumentSaved(int Version, string Status, string StatusTitle, DateTimeOffset SavedAt);
 

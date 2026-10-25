@@ -326,7 +326,8 @@ else
             Locked = !details.Editable, Comments = comments, CanComment = details.Actions.Review,
             CanResolve = details.Actions.ResolveComments, AddComment = AddCommentAsync, ResolveComment = ResolveCommentAsync,
             Defaults = details.TemplateDefaults is { } defaults ? JsonNode.Parse(defaults.GetRawText()) as JsonObject : null,
-            CorrectPlan = details.Actions.CorrectPlan, Corrections = details.PlanCorrections ?? []
+            CorrectPlan = details.Actions.CorrectPlan, Corrections = details.PlanCorrections ?? [],
+            PlanFieldChanged = () => _ = InvokeAsync(SavePlanCorrectionAsync)
         };
         sections = details.Metadata.Sections.ToList();
         version = details.Document.Version;
@@ -508,7 +509,14 @@ else
                 version = saved.Version;
                 statusTitle = saved.StatusTitle;
                 savedAt = saved.SavedAt;
-                sections = sections.Select(s => s.Key == saved.Section.Key ? saved.Section : s).ToList();
+                // Правка одного раздела меняет заполненность и предупреждения других (тематический план сверяется
+                // с трудоёмкостью) — сервер присылает все разделы и историю исправлений полей из плана.
+                sections = saved.Sections ?? sections.Select(s => s.Key == saved.Section.Key ? saved.Section : s).ToList();
+                if (saved.PlanCorrections is { } corrections)
+                {
+                    details = details! with { PlanCorrections = corrections };
+                    context!.Corrections = corrections;
+                }
                 // Введённое во время запроса в сохранённое значение не попало — признак остаётся.
                 (dirty, message, fieldErrors) = (edits != at, null, []);
                 return true;
@@ -535,7 +543,30 @@ else
         finally
         {
             busy = false;
+            // Исправление поля из плана пришло во время сохранения — сохраняем его следом.
+            if (planSaveQueued)
+            {
+                planSaveQueued = false;
+                _ = InvokeAsync(SavePlanCorrectionAsync);
+            }
         }
+    }
+
+    private bool planSaveQueued;
+
+    /// <summary>
+    /// Исправление поля из плана (методист, администратор) — сразу на сервер: пометка, предупреждение «отличается от
+    /// учебного плана», ошибки зависимых разделов и история обновляются без перезагрузки.
+    /// </summary>
+    private async Task SavePlanCorrectionAsync()
+    {
+        if (busy)
+        {
+            planSaveQueued = true;
+            return;
+        }
+        await SaveSectionAsync();
+        StateHasChanged();
     }
 
     private async Task SelectSectionAsync(string key)

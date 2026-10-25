@@ -34,7 +34,7 @@ public abstract class FieldBase : ComponentBase
     protected void SetValue(JsonNode? value)
     {
         Assign(value);
-        Context.Changed();
+        Context.Changed(Path);
     }
 
     /// <summary>
@@ -43,7 +43,7 @@ public abstract class FieldBase : ComponentBase
     protected void InputValue(JsonNode? value)
     {
         Assign(value);
-        Context.Edited();
+        Context.Edited(Path);
     }
 
     private void Assign(JsonNode? value)

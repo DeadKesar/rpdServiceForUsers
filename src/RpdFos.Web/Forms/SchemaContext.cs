@@ -55,6 +55,29 @@ public sealed class SchemaContext(JsonElement root, JsonObject payload, Document
     public void Changed() => changed();
 
     /// <summary>
+    /// Правка завершена в поле <paramref name="path"/>. Исправление поля из плана сохраняется сразу
+    /// (<see cref="PlanFieldChanged"/>): пометка, предупреждения проверки и история обновляются без перезагрузки.
+    /// </summary>
+    public void Changed(string path)
+    {
+        changed();
+        if (CorrectPlan && IsPlanPath(path)) PlanFieldChanged?.Invoke();
+    }
+
+    /// <summary>Ввод в поле <paramref name="path"/>; у поля из плана форма перерисовывается — пометка видна при наборе.</summary>
+    public void Edited(string path)
+    {
+        edited();
+        if (CorrectPlan && IsPlanPath(path)) changed();
+    }
+
+    /// <summary>Исправлено поле из плана — редактор сохраняет раздел сразу.</summary>
+    public Action? PlanFieldChanged { get; set; }
+
+    private bool IsPlanPath(string path) =>
+        Metadata.PlanValues is { } values && values.Keys.Any(p => path == p || path.StartsWith(p + "/", StringComparison.Ordinal));
+
+    /// <summary>
     /// Ввод в поле, из которого пользователь ещё не ушёл (oninput): правка сразу отмечается несохранённой — иначе
     /// закрытие вкладки или переход на другой сайт не спросили бы подтверждения. Форма на каждую клавишу не перерисовывается.
     /// </summary>

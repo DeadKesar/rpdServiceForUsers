@@ -180,6 +180,10 @@ public class DocumentReviewApiTests(DatabaseFixture app)
         hours["semesters"]![0]!["lectures"] = planLectures - 2;
         var saved = await DocumentData.PatchAsync(methodist, created.Document.Id, "hours_distribution", version, hours);
         Assert.Equal(DocumentStatuses.UnderReview, saved.Status);
+        // Ответ сохранения — сразу со всеми разделами и историей: редактору не нужна перезагрузка.
+        Assert.Contains(saved.Sections!.Single(s => s.Key == "thematic_plan").Missing, e => e.Message.Contains("по распределению часов"));
+        Assert.Contains(saved.Sections!.Single(s => s.Key == "hours_distribution").Warnings, w => w.Message.StartsWith(PlanFields.DiffersFromPlan));
+        Assert.Equal("/hours_distribution/semesters/0/lectures", Assert.Single(saved.PlanCorrections!).Path);
 
         var after = (await methodist.GetFromJsonAsync<DocumentDetails>(Url(created, "")))!;
         var sections = after.Metadata.Sections.ToDictionary(s => s.Key);

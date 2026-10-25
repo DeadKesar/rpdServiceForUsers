@@ -45,7 +45,9 @@ public sealed record CompetenceCandidate(Guid Id, string Code, string Formulatio
 
 public sealed record IndicatorCandidate(Guid Id, string Code, string Text, string Type);
 
-public sealed record SectionSaved(int Version, string Status, string StatusTitle, SectionState Section, DateTimeOffset SavedAt);
+/// <summary>Раздел сохранён; с ним — состояние всех разделов и история исправлений полей из плана (если исправлял).</summary>
+public sealed record SectionSaved(int Version, string Status, string StatusTitle, SectionState Section, DateTimeOffset SavedAt,
+    List<SectionState>? Sections = null, List<PlanCorrection>? PlanCorrections = null);
 
 public sealed record DocumentSaved(int Version, string Status, string StatusTitle, DateTimeOffset SavedAt);
 
