@@ -47,7 +47,7 @@
                     {
                         var path = $"{Path}/semesters/{row}/{key}";
                         var mark = Context.PlanMark(path, s[key]);
-                        <td class="@(mark is null ? "" : "table-warning")" title="@(mark is null ? null : $"{mark} ({Context.CorrectionInfo(path)})")">
+                        <td class="@(mark is null ? "" : "table-warning")" title="@(mark is null ? null : Context.CorrectionInfo(path) is { } who ? $"{mark} ({who})" : mark)">
                             @if (Editable)
                             {
                                 <ScalarInput Context="Context" Schema="SemesterProperty(key)" Parent="s" Key="@key" Path="@path" Compact="true" />

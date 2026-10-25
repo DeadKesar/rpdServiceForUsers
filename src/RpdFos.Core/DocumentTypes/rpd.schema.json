@@ -243,7 +243,7 @@
         "self_study_kinds": {
           "type": "array",
           "title": "Виды самостоятельной работы",
-          "description": "В каждом семестре сумма часов видов равна самостоятельной работе по учебному плану",
+          "description": "В каждом семестре сумма часов видов равна самостоятельной работе в распределении часов",
           "x-ui-widget": "self_study_table",
           "x-template-default": true,
           "items": { "$ref": "#/$defs/self_study_kind" }
