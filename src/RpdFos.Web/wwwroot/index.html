@@ -44,6 +44,20 @@
                 return;
             }
         };
+        // Многострочные поля с высотой по содержимому (textarea.auto-grow). Браузер с field-sizing: content (CSS) делает
+        // это сам; остальным — высота по прокрутке при вводе и при появлении поля на странице.
+        if (!CSS.supports("field-sizing", "content")) {
+            const grow = el => { el.style.height = "auto"; el.style.height = el.scrollHeight + 2 + "px"; };
+            document.addEventListener("input", e => { if (e.target.matches?.("textarea.auto-grow")) grow(e.target); });
+            new MutationObserver(records => {
+                for (const r of records)
+                    for (const n of r.addedNodes)
+                        if (n.nodeType === 1) {
+                            if (n.matches("textarea.auto-grow")) grow(n);
+                            n.querySelectorAll("textarea.auto-grow").forEach(grow);
+                        }
+            }).observe(document.documentElement, { childList: true, subtree: true });
+        }
         // Файл, полученный запросом с токеном: ссылка на него в памяти браузера — для предпросмотра и скачивания.
         window.rpdfosObjectUrl = (bytes, type) => URL.createObjectURL(new Blob([bytes], { type }));
         window.rpdfosRevokeUrl = (url) => URL.revokeObjectURL(url);

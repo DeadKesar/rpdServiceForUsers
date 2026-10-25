@@ -28,8 +28,9 @@
                @oninput="e => InputText(e.Value as string)" @onchange="e => SetText(e.Value as string)" />
         break;
     case "textarea":
-        <textarea class="form-control @Size" rows="3" readonly="@ReadOnly"
-                  @oninput="e => InputText(e.Value as string)" @onchange="e => SetText(e.Value as string)">@Current</textarea>
+        @* Длинная строка (библиографическая запись, название ресурса) — во всю ширину, высота по содержимому. *@
+        <textarea class="form-control auto-grow @Size" rows="@(Compact ? 1 : 2)" readonly="@ReadOnly"
+                  @oninput="e => InputText(e.Value as string)" @onchange="e => SetText(OneParagraph(e.Value as string))">@Current</textarea>
         break;
     default:
         <input type="text" class="form-control @Size" readonly="@ReadOnly" value="@Current"
@@ -41,16 +42,24 @@
     /// <summary>Ячейка таблицы — компактный размер.</summary>
     [Parameter] public bool Compact { get; set; }
 
+    /// <summary>Длинная строка — многострочное поле с высотой по содержимому (подсказка схемы или решение виджета).</summary>
+    [Parameter] public bool Multiline { get; set; }
+
     private string Size => Compact ? "form-control-sm" : "";
 
     private string Kind => Schema.TryGetProperty("enum", out _) ? "enum"
         : SchemaContext.Text(Schema, "format") == "date" ? "date"
-        : SchemaContext.Text(Schema, "x-ui-widget") == "textarea" ? "textarea"
+        : SchemaContext.Text(Schema, "x-ui-widget") == "textarea" || Multiline && SchemaContext.Type(Schema) == "string" ? "textarea"
         : SchemaContext.Type(Schema);
 
     private string Current => Text(Value) ?? "";
 
     private void SetText(string? text) => SetValue(string.IsNullOrWhiteSpace(text) ? null : JsonValue.Create(text.Trim()));
+
+    // Строка схемы — один абзац: перевод строки из многострочного поля становится пробелом, в печати он разорвал бы запись.
+    private static string? OneParagraph(string? text) => text is null ? null : LineBreaks.Replace(text, " ");
+
+    private static readonly System.Text.RegularExpressions.Regex LineBreaks = new(@"\s*[\r\n]+\s*");
 
     // При вводе текст идёт в содержимое как есть: обрезка на каждой клавише не дала бы набрать пробел между словами.
     // Пробелы по краям снимает уход из поля (SetText).

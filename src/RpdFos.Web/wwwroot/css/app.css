@@ -120,3 +120,28 @@ code {
     border-radius: 4px;
     transition: outline-color 1.5s;
 }
+
+/* Длинная строка без пробелов (адрес, код, библиографическая запись) не раздвигает страницу: слова переносятся
+   в любом месте — в полях, подписях, таблицах, сообщениях. overflow-wrap наследуется. */
+main {
+    overflow-wrap: anywhere;
+}
+
+/* Пометки полей («изменено методистом, в плане: …») — тоже переносятся. */
+main .badge {
+    white-space: normal;
+    text-align: start;
+}
+
+/* Элементы flex и grid по умолчанию не уже своего содержимого (min-width: auto) — содержимое раздвигало бы
+   колонки и страницу. */
+main, .page > *, .row > *, .d-flex > *, .d-inline-flex > *, .input-group > *, .card, .card-body {
+    min-width: 0;
+}
+
+/* Многострочные поля с высотой по содержимому: библиографические записи, пункты списков. */
+textarea.auto-grow {
+    field-sizing: content;
+    overflow: hidden;
+    resize: vertical;
+}

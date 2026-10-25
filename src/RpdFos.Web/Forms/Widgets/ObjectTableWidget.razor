@@ -2,27 +2,42 @@
 @using System.Text.Json.Nodes
 @inherits FieldBase
 
-@* Таблица записей по схеме элемента: занятия, литература, интернет-ресурсы, составители. *@
+@* Таблица записей по схеме элемента: занятия, литература, интернет-ресурсы, составители. Длинные поля записи
+   (библиографическая запись, название) — отдельной строкой во всю ширину с высотой по содержимому, короткие — под
+   ними столбцами. *@
 <div class="mb-3">
     <label class="form-label">@Title</label>
     @{ var rows = Value as JsonArray; }
     <table class="table table-sm align-middle">
         <thead>
             <tr>
-                @foreach (var column in Columns)
+                @foreach (var column in ShortColumns)
                 {
                     <th>@(SchemaContext.Text(column.Schema, "title") ?? column.Name)</th>
                 }
                 <th></th>
             </tr>
         </thead>
-        <tbody>
-            @for (var i = 0; i < (rows?.Count ?? 0); i++)
-            {
-                var index = i;
-                var row = rows![index] as JsonObject;
+        @for (var i = 0; i < (rows?.Count ?? 0); i++)
+        {
+            var index = i;
+            var row = rows![index] as JsonObject;
+            <tbody class="border-top">
+                @if (row is not null && LongColumns.Count > 0)
+                {
+                    <tr>
+                        <td colspan="@(ShortColumns.Count + 1)" class="border-bottom-0">
+                            @foreach (var column in LongColumns)
+                            {
+                                <label class="form-label small text-muted mb-0">@(SchemaContext.Text(column.Schema, "title") ?? column.Name)</label>
+                                <ScalarInput Context="Context" Schema="column.Schema" Parent="row" Key="@column.Name"
+                                             Path="@($"{Path}/{index}/{column.Name}")" Compact="true" Multiline="true" />
+                            }
+                        </td>
+                    </tr>
+                }
                 <tr>
-                    @foreach (var column in Columns)
+                    @foreach (var column in ShortColumns)
                     {
                         <td>
                             @if (row is not null)
@@ -39,8 +54,8 @@
                         }
                     </td>
                 </tr>
-            }
-        </tbody>
+            </tbody>
+        }
     </table>
     @if (!ReadOnly)
     {
@@ -59,6 +74,15 @@
             ? props.EnumerateObject().Select(p => (p.Name, Schema: Context.Resolve(p.Value)))
                 .Where(c => SchemaContext.Type(c.Schema) is not ("array" or "object"))
             : [];
+
+    private List<(string Name, JsonElement Schema)> LongColumns => Columns.Where(c => IsLong(c.Schema)).ToList();
+
+    private List<(string Name, JsonElement Schema)> ShortColumns => Columns.Where(c => !IsLong(c.Schema)).ToList();
+
+    // Длинная строка — с подсказкой x-ui-widget: textarea; в шаблонах до неё — библиографическая запись (minLength 20).
+    private static bool IsLong(JsonElement schema) =>
+        SchemaContext.Text(schema, "x-ui-widget") == "textarea" ||
+        SchemaContext.Type(schema) == "string" && schema.TryGetProperty("minLength", out var m) && m.TryGetInt32(out var n) && n >= 20;
 
     private void Add()
     {

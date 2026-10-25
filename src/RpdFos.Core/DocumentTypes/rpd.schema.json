@@ -391,7 +391,7 @@
             "type": "object",
             "required": ["title", "url"],
             "properties": {
-              "title": { "type": "string", "title": "Название" },
+              "title": { "type": "string", "title": "Название", "x-ui-widget": "textarea" },
               "url": { "type": "string", "title": "Адрес", "format": "uri" },
               "accessed_on": { "type": "string", "title": "Дата обращения", "format": "date", "description": "Дата обращения" }
             }
@@ -492,7 +492,7 @@
       "required": ["number", "title", "hours"],
       "properties": {
         "number": { "type": "integer", "title": "№", "minimum": 1 },
-        "title": { "type": "string", "title": "Тема занятия" },
+        "title": { "type": "string", "title": "Тема занятия", "x-ui-widget": "textarea" },
         "hours": { "type": "integer", "title": "Часов", "minimum": 0 },
         "section_number": { "type": "integer", "title": "Раздел", "minimum": 1, "description": "Раздел тематического плана" },
         "control_form": { "type": "string", "title": "Форма контроля", "description": "Отчёт, собеседование, опрос, тест и т. п." }
@@ -547,6 +547,7 @@
         "citation": {
           "type": "string",
           "title": "Библиографическая запись",
+          "x-ui-widget": "textarea",
           "minLength": 20,
           "description": "Библиографическая запись по ГОСТ Р 7.0.100-2018"
         },
