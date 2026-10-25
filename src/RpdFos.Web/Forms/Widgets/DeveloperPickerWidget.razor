@@ -7,7 +7,8 @@
 @inject HttpClient Http
 
 @* Составители — по порядку в документе. Добавляются выбором из справочника сотрудников: подпись и должность
-   копируются на момент ввода, уточнить их можно в таблице. *@
+   копируются на момент ввода и правятся в таблице; должности нет в справочнике — автор вводит её сам (обязательна
+   к отправке). *@
 <div class="mb-3">
     <label class="form-label">@Title</label>
     @{ var rows = Value as JsonArray; }
@@ -28,7 +29,8 @@
                         {
                             <td>
                                 <ScalarInput Context="Context" Schema="Column(column)" Parent="row" Key="@column"
-                                             Path="@($"{Path}/{index}/{column}")" Compact="true" />
+                                             Path="@($"{Path}/{index}/{column}")" Compact="true"
+                                             Placeholder="@(column == "position" ? "нет в справочнике — введите должность" : null)" />
                             </td>
                         }
                         <td class="text-end">

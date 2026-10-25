@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -78,6 +79,32 @@ public class DocumentsApiTests(DatabaseFixture app)
             var row = Assert.Single(await db.DocumentHours.Where(h => h.DocumentId == created.Document.Id).ToListAsync());
             Assert.Equal((1, 16), (row.Semester, row.LabHours));
         });
+    }
+
+    [Fact]
+    public async Task Developer_position_comes_from_directory_or_is_entered_by_author()
+    {
+        // Должности в справочнике нет: место пустое и обязательно к отправке — автор вводит сам.
+        var (client, _) = await TeacherAsync();
+        var template = await PublishedTemplateAsync();
+        var without = await CreateAsync(client, template.Id, "Б1.О.03");
+        Assert.False(without.Payload.GetProperty("approval_sheet").GetProperty("developers")[0].TryGetProperty("position", out _));
+        Assert.Contains(without.Metadata.Sections.Single(s => s.Key == "approval_sheet").Missing,
+            e => e.Path == "/approval_sheet/developers/0/position");
+
+        // Есть — подставляется и правится как обычное поле.
+        var (other, employee) = await TeacherAsync();
+        await app.WithDbAsync(async db =>
+        {
+            (await db.Employees.SingleAsync(e => e.Id == employee.Id)).Position = "доцент кафедры информационных систем";
+            await db.SaveChangesAsync();
+        });
+        var with = await CreateAsync(other, template.Id, "Б1.О.08");
+        var developers = JsonNode.Parse(with.Payload.GetProperty("approval_sheet").GetRawText())!;
+        Assert.Equal("доцент кафедры информационных систем", (string)developers["developers"]![0]!["position"]!);
+        developers["developers"]![0]!["position"] = "профессор кафедры информационных систем";
+        var saved = await DocumentData.PatchAsync(other, with.Document.Id, "approval_sheet", with.Document.Version, developers);
+        Assert.Equal(SectionFill.Complete, saved.Section.Fill);
     }
 
     [Fact]

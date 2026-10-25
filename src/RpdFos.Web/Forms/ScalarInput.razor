@@ -33,7 +33,7 @@
                   @oninput="e => InputText(e.Value as string)" @onchange="e => SetText(OneParagraph(e.Value as string))">@Current</textarea>
         break;
     default:
-        <input type="text" class="form-control @Size" readonly="@ReadOnly" value="@Current"
+        <input type="text" class="form-control @Size" readonly="@ReadOnly" value="@Current" placeholder="@Placeholder"
                @oninput="e => InputText(e.Value as string)" @onchange="e => SetText(e.Value as string)" />
         break;
 }
@@ -41,6 +41,9 @@
 @code {
     /// <summary>Ячейка таблицы — компактный размер.</summary>
     [Parameter] public bool Compact { get; set; }
+
+    /// <summary>Подсказка в пустом поле — что ввести.</summary>
+    [Parameter] public string? Placeholder { get; set; }
 
     /// <summary>Длинная строка — многострочное поле с высотой по содержимому (подсказка схемы или решение виджета).</summary>
     [Parameter] public bool Multiline { get; set; }

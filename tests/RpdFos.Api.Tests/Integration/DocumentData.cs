@@ -104,6 +104,12 @@ public static class DocumentData
         if (visible.Contains("course_work"))
             sections["course_work"] = new JsonObject { ["kind"] = "course_project", ["topics"] = new JsonArray("Модель системы массового обслуживания") };
 
+        // Должности составителя в справочнике тестов нет — автор вводит её сам.
+        var approval = JsonNode.Parse(created.Payload.GetProperty("approval_sheet").GetRawText())!;
+        foreach (var developer in approval["developers"]!.AsArray().OfType<JsonObject>())
+            developer["position"] ??= "доцент";
+        sections["approval_sheet"] = approval;
+
         foreach (var (section, value) in sections)
             version = (await PatchAsync(client, id, section, version, value)).Version;
         return version;

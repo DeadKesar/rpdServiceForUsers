@@ -458,11 +458,11 @@
           "minItems": 1,
           "items": {
             "type": "object",
-            "required": ["user_id", "name_for_document"],
+            "required": ["user_id", "name_for_document", "position"],
             "properties": {
               "user_id": { "type": "string", "title": "Запись справочника", "format": "uuid", "readOnly": true, "description": "Запись справочника сотрудников (users.id)" },
               "name_for_document": { "type": "string", "title": "И. О. Фамилия", "description": "«И. О. Фамилия» на момент ввода" },
-              "position": { "type": "string", "title": "Должность", "description": "Должность на момент ввода" }
+              "position": { "type": "string", "title": "Должность", "minLength": 3, "description": "Из справочника сотрудников на момент ввода; нет в справочнике — вводит автор" }
             }
           }
         },
