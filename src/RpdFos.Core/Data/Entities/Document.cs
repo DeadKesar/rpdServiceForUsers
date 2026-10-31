@@ -84,6 +84,16 @@ public class Document : IVersioned
         return Move(DocumentStatuses.Returned);
     }
 
+    /// <summary>
+    /// Возврат автору принятого документа, который исправление данных плана сделало неполным (этап 5.2). Возвращает
+    /// прежний статус.
+    /// </summary>
+    public string ReturnAfterPlanCorrection()
+    {
+        Require(DocumentTransitions.CanReturnAfterPlanCorrection(Status), DocumentTransitions.ReturnAction);
+        return Move(DocumentStatuses.Returned);
+    }
+
     /// <summary>Приём методистом. Возвращает прежний статус.</summary>
     public string Accept()
     {
@@ -165,6 +175,12 @@ public static class DocumentTransitions
     /// <summary>Отправка на проверку — из черновика, сохранённого черновика и с доработки (повторная).</summary>
     public static bool CanSubmit(string status) =>
         status is DocumentStatuses.Draft or DocumentStatuses.SavedDraft or DocumentStatuses.Returned;
+
+    /// <summary>
+    /// «Принят → На доработке» — только по исправлению данных плана, после которого полная проверка находит ошибки:
+    /// автор обязан заполнить то, что появилось (этап 5.2).
+    /// </summary>
+    public static bool CanReturnAfterPlanCorrection(string status) => status is DocumentStatuses.Accepted;
 
     /// <summary>Возврат, приём и замечания методиста — пока документ на проверке.</summary>
     public static bool CanReview(string status) => status is DocumentStatuses.UnderReview;

@@ -34,7 +34,8 @@ public sealed class PrintContext(
     public string? Source(string source)
     {
         var d = Facts.Discipline;
-        var semesters = Facts.Semesters.Select(s => s.Semester).ToList();
+        // Семестры, виды аттестации и курсовое проектирование — по трудоёмкости документа (этап 5.2).
+        var semesters = Semesters.Select(s => s.Semester).ToList();
         return source switch
         {
             "parser.discipline.name" => d.Name,
@@ -45,11 +46,11 @@ public sealed class PrintContext(
             "parser.discipline.course" => string.Join(", ", semesters.Select(s => (s + 1) / 2).Distinct()),
             "parser.discipline.ze_total" => d.TotalCredits.ToString(),
             "parser.discipline.hours_total" => d.TotalHours.ToString(),
-            "parser.discipline.course_work_kind" => PlanTitles.CourseWorkKind(Facts.Semesters.SelectMany(s => s.ControlTypes)) is { } kind
+            "parser.discipline.course_work_kind" => PlanTitles.CourseWorkKind(Semesters.SelectMany(s => s.ControlTypes)) is { } kind
                 ? PlanTitles.ControlType(kind)
                 : null,
             "parser.discipline.attestation" =>
-                string.Join(", ", Facts.Semesters.SelectMany(s => s.ControlTypes).Distinct().Select(PlanTitles.ControlType)),
+                string.Join(", ", Semesters.SelectMany(s => s.ControlTypes).Distinct().Select(PlanTitles.ControlType)),
             "reference.direction.code" => Facts.Direction.Code,
             "reference.direction.name" => Facts.Direction.Name,
             "reference.direction.level" => PlanTitles.EducationLevel(Facts.Direction.EducationLevel),

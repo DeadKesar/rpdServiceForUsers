@@ -172,10 +172,16 @@ public class DocumentsModule : ICarterModule
 
         // Сравнивать будем с версией, которую видел клиент; новую проставит перехватчик сохранения.
         db.Entry(document).Property(d => d.Version).OriginalValue = rq.Version;
-        var result = await editing.UpdateSectionAsync(document, section, rq.Value, editorId.Value, ct, scope.Value);
+        var result = await editing.UpdateSectionAsync(document, section, rq.Value, editorId.Value, ct, scope.Value, rq.ConfirmReturn);
         if (result.Problem is { } problem)
             return problem switch
             {
+                SectionUpdateProblem.ReturnNotConfirmed => Results.Problem(statusCode: StatusCodes.Status409Conflict,
+                    title: "Исправление вернёт документ автору",
+                    detail: "После исправления документ не проходит проверку: " +
+                        string.Join(" ", result.Errors.Select(e => $"{e.Path}: {e.Message}.")) +
+                        " Подтвердите возврат на доработку (confirmReturn) или отмените исправление.",
+                    extensions: new Dictionary<string, object?> { ["errors"] = result.Errors, ["confirmReturn"] = true }),
                 SectionUpdateProblem.UnknownSection => Results.Problem(statusCode: StatusCodes.Status404NotFound,
                     title: "Раздел не найден", detail: $"Раздела «{section}» нет в структуре документа."),
                 SectionUpdateProblem.HiddenSection => Results.Problem(statusCode: StatusCodes.Status422UnprocessableEntity,
@@ -267,12 +273,18 @@ public class DocumentsModule : ICarterModule
         if (refusal is not null) return refusal;
 
         db.Entry(document!).Property(d => d.Version).OriginalValue = rq.Version;
-        if (await review.AcceptAsync(document!, reviewerId, ct) is not null)
+        var (problem, issues) = await review.AcceptAsync(document!, reviewerId, ct);
+        if (problem == ReviewProblem.UnresolvedComments)
             return Results.Problem(statusCode: StatusCodes.Status409Conflict, title: "Есть неразрешённые замечания",
                 detail: "Документ с неразрешёнными замечаниями не принимается — верните его на доработку.");
+        // Как при отправке: принимается только документ без ошибок полной проверки (этап 5.2).
+        if (problem == ReviewProblem.CheckFailed)
+            return Results.Problem(statusCode: StatusCodes.Status422UnprocessableEntity, title: "Документ не прошёл проверку",
+                detail: "Исправьте ошибки или оставьте замечание и верните документ на доработку.",
+                extensions: new Dictionary<string, object?> { ["errors"] = issues });
 
         await db.SaveChangesAsync(ct);
-        return Results.Ok(new DocumentReviewed(document!.Version, document.Status, DocumentStatuses.Title(document.Status), []));
+        return Results.Ok(new DocumentReviewed(document!.Version, document.Status, DocumentStatuses.Title(document.Status), issues));
     }
 
     /// <summary>Замечания к документу — всем, кто его видит: от старых к новым.</summary>
@@ -447,7 +459,8 @@ public class DocumentsModule : ICarterModule
 public record CreateDocumentRequest(Guid TemplateId, Guid DisciplineId);
 
 /// <summary>Значение раздела целиком и версия документа, которую видел клиент.</summary>
-public record SectionUpdateRequest(int Version, JsonElement Value);
+/// <param name="ConfirmReturn">Исправляющий подтвердил возврат принятого документа автору, если исправление сделает его неполным.</param>
+public record SectionUpdateRequest(int Version, JsonElement Value, bool ConfirmReturn = false);
 
 public record DocumentVersionRequest(int Version);
 

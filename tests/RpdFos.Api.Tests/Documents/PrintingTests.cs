@@ -60,7 +60,7 @@ public class PrintingTests
             new Discipline { Name = "Дисциплина", Semesters = [new DisciplineSemesterDetails { Semester = 1, Lectures = 16, ControlTypes = ["exam"] }] },
             new CurriculumPlan(), new StudyDirection(), new StudyProfile(), null, []);
         var context = new PrintContext(payload, schema, registry.FindSchema, facts, new SignatoryReport([], []), 2026,
-            DocumentMetadata.Hidden(schema, facts, registry.FindSchema));
+            DocumentMetadata.Hidden(schema, facts.Semesters, registry.FindSchema));
 
         // Литература — нумерованным списком, только библиографическая запись: год в ней уже есть.
         var main = context.Field("/literature/main");
@@ -71,6 +71,35 @@ public class PrintingTests
         // Курсового проекта по плану нет — стандартная формулировка вместо содержимого раздела.
         Assert.Equal("В учебном плане курсовое проектирование для данной дисциплины не предусмотрено.", context.Field("/course_work").Inline);
         Assert.True(context.Field("/goals_and_objectives/goals").IsEmpty);
+    }
+
+    [Fact]
+    public void Section_hidden_by_correction_prints_stub_and_sources_follow_document()
+    {
+        // По плану — лабораторные и экзамен; методист обнулил лабораторные и добавил курсовой проект.
+        var registry = new DocumentTypeRegistry();
+        var schema = JsonDocument.Parse(registry.Get(DocumentTypeRegistry.Rpd).SchemaJson).RootElement;
+        var payload = JsonDocument.Parse("""
+            {
+              "hours_distribution": { "semesters": [ { "semester": 1, "lectures": 16, "lab_hours": 0, "control_types": ["exam", "course_project"] } ] },
+              "lab_works": [ { "number": 1, "title": "Исследование модели", "hours": 16 } ],
+              "course_work": { "kind": "course_project", "topics": ["Модель системы"] }
+            }
+            """).RootElement;
+        var facts = new DisciplineFacts(
+            new Discipline
+            {
+                Name = "Дисциплина",
+                Semesters = [new DisciplineSemesterDetails { Semester = 1, Lectures = 16, LabHours = 16, ControlTypes = ["exam"] }]
+            },
+            new CurriculumPlan(), new StudyDirection(), new StudyProfile(), null, []);
+        var context = new PrintContext(payload, schema, registry.FindSchema, facts, new SignatoryReport([], []), 2026,
+            DocumentMetadata.Hidden(schema, DocumentSemesters.Of(payload, facts), registry.FindSchema));
+
+        Assert.Equal("Лабораторные работы учебным планом не предусмотрены.", context.Field("/lab_works").Inline);
+        Assert.Equal("Курсовой проект", context.Source("parser.discipline.course_work_kind"));
+        Assert.Equal("Экзамен, Курсовой проект", context.Source("parser.discipline.attestation"));
+        Assert.Null(context.Stub("/course_work"));
     }
 
     [Theory]

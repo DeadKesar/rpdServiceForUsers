@@ -80,7 +80,7 @@ public sealed class DocumentCreation(AppDbContext db, DocumentTypeRegistry regis
         var payload = DocumentPrefill.Build(schema, facts, author, registry.FindSchema);
         // Постоянные пункты вуза — из значений по умолчанию шаблона, кроме мест, не предусмотренных планом.
         TemplateDefaults.Apply(payload, template.DefaultPayload, TemplateDefaults.Fields(schema, registry.FindSchema),
-            DocumentMetadata.Hidden(schema, facts, registry.FindSchema));
+            DocumentMetadata.Hidden(schema, facts.Semesters, registry.FindSchema));
 
         var now = clock.GetUtcNow();
         var document = new Document

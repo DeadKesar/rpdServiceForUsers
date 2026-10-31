@@ -4,7 +4,7 @@ using RpdFos.Core.DocumentTypes;
 namespace RpdFos.Core.Documents;
 
 /// <summary>
-/// Полная проверка документа к отправке: схема шаблона в режиме отправки, условные разделы по данным дисциплины
+/// Полная проверка документа к отправке: схема шаблона в режиме отправки, условные разделы по трудоёмкости документа
 /// и именованные правила (<c>x-validation-rule</c>). Видимый условный раздел (лабораторные, практические, курсовой
 /// проект) обязателен — хотя бы одна запись; скрытый не проверяется: в печатной форме вместо него стандартная
 /// заглушка. Результат — ошибки и предупреждения; отправку блокируют только ошибки.
@@ -21,6 +21,7 @@ public static class DocumentSubmission
     {
         var schema = JsonDocument.Parse(schemaJson).RootElement;
         var hidden = new HashSet<string>();
+        var semesters = DocumentSemesters.Of(payload, facts);
         var errors = new List<DocumentValidationError>();
 
         if (schema.TryGetProperty("properties", out var properties))
@@ -30,7 +31,7 @@ public static class DocumentSubmission
                 if (SchemaInspector.Deref(p.Value, ref root, resolve) is not { ValueKind: JsonValueKind.Object } section ||
                     !section.TryGetProperty("x-visible-if", out _))
                     continue;
-                if (!ConditionalSections.IsVisible(section, facts)) hidden.Add(p.Name);
+                if (!ConditionalSections.IsVisible(section, semesters)) hidden.Add(p.Name);
                 else if (!payload.TryGetProperty(p.Name, out var value) || IsEmpty(value))
                     errors.Add(new DocumentValidationError($"/{p.Name}", EmptyVisibleSection));
             }
@@ -41,7 +42,8 @@ public static class DocumentSubmission
         // Поле из плана исправлено методистом — предупреждение: отправку и приём оно не блокирует (этап 5.1).
         errors.AddRange(PlanFields.Differences(schema, payload, facts, resolve)
             .Where(d => !hidden.Contains(Section(d.Path)))
-            .Select(d => new DocumentValidationError(d.Path, $"{PlanFields.DiffersFromPlan}: в плане {PlanFields.Text(d.PlanValue)}",
+            .Select(d => new DocumentValidationError(d.Path,
+                $"{PlanFields.DiffersFromPlan}: в плане {PlanFields.Text(d.PlanValue, SchemaInspector.SubschemaAt(schema, d.Path, resolve))}",
                 IssueLevels.Warning)));
         return errors.Distinct().OrderBy(e => e.Path, StringComparer.Ordinal).ToList();
     }

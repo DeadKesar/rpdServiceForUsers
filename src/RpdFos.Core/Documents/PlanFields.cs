@@ -68,15 +68,64 @@ public static class PlanFields
     public static IReadOnlyList<PlanFieldChange> Changes(JsonNode before, JsonNode after, IEnumerable<string> paths) =>
         paths.SelectMany(p => Leaves(p, At(before, p), At(after, p))).ToList();
 
-    /// <summary>Значение по плану для сообщения: «24», «Экзамен, Зачёт», «—».</summary>
-    public static string Text(JsonNode? value) => value switch
+    /// <summary>
+    /// Вид курсового проектирования (поле с источником <c>parser.discipline.course_work_kind</c>) следует за видами
+    /// аттестации документа: исправление добавило курсовой проект — вид ставится в раздел, при необходимости раздел
+    /// появляется. Курсового проектирования не осталось — раздел скрыт и остаётся в документе как есть.
+    /// </summary>
+    /// <returns>Изменения вида — для журнала аудита, как у исправлений.</returns>
+    public static IReadOnlyList<PlanFieldChange> FollowCourseWorkKind(JsonElement schema, JsonNode before, JsonObject after,
+        DisciplineFacts facts, Func<string, JsonElement?> resolve)
     {
-        null => "—",
-        JsonArray a => a.Count == 0 ? "—" : string.Join(", ", a.Select(Text)),
-        JsonObject o => string.Join(", ", o.Select(p => $"{p.Key}: {Text(p.Value)}")),
-        JsonValue v when v.TryGetValue(out string? s) => s.Length == 0 ? "—" : s,
-        _ => value.ToJsonString()
-    };
+        string? Kind(JsonNode payload) => PlanTitles.CourseWorkKind(
+            DocumentSemesters.Of(JsonDocument.Parse(payload.ToJsonString()).RootElement, facts).SelectMany(s => s.ControlTypes));
+        var kind = Kind(after);
+        if (kind is null || kind == Kind(before)) return [];
+
+        var result = new List<PlanFieldChange>();
+        foreach (var path in Paths(schema, resolve))
+        {
+            if (SchemaInspector.SubschemaAt(schema, path, resolve) is not { } field ||
+                !field.TryGetProperty("x-source", out var source) || source.GetString() != "parser.discipline.course_work_kind")
+                continue;
+            var segments = path.TrimStart('/').Split('/');
+            JsonObject parent = after;
+            foreach (var segment in segments[..^1])
+            {
+                if (parent[segment] is not JsonObject next) parent[segment] = next = new JsonObject();
+                parent = next;
+            }
+            var previous = parent[segments[^1]]?.DeepClone();
+            if (previous is JsonValue v && v.TryGetValue(out string? s) && s == kind) continue;
+            parent[segments[^1]] = kind;
+            result.Add(new PlanFieldChange(path, previous, JsonValue.Create(kind)));
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// Значение по плану для сообщения: «24», «Экзамен, Зачёт», «—». Коды перечислений — названиями из
+    /// <c>x-enum-titles</c> подсхемы поля (у списка — его элементов), если она дана.
+    /// </summary>
+    public static string Text(JsonNode? value, JsonElement? field = null)
+    {
+        var titles = field is { ValueKind: JsonValueKind.Object } f
+            ? f.TryGetProperty("x-enum-titles", out var own) ? own
+            : f.TryGetProperty("items", out var items) && items.ValueKind == JsonValueKind.Object &&
+              items.TryGetProperty("x-enum-titles", out var inner) ? inner : (JsonElement?)null
+            : null;
+        return Render(value);
+
+        string Render(JsonNode? node) => node switch
+        {
+            null => "—",
+            JsonArray a => a.Count == 0 ? "—" : string.Join(", ", a.Select(Render)),
+            JsonObject o => string.Join(", ", o.Select(p => $"{p.Key}: {Render(p.Value)}")),
+            JsonValue v when v.TryGetValue(out string? s) => s.Length == 0 ? "—"
+                : titles is { ValueKind: JsonValueKind.Object } t && t.TryGetProperty(s, out var title) ? title.GetString() ?? s : s,
+            _ => node.ToJsonString()
+        };
+    }
 
     private static IEnumerable<PlanFieldChange> Leaves(string path, JsonNode? a, JsonNode? b)
     {

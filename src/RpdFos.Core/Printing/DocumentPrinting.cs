@@ -54,9 +54,11 @@ public sealed partial class DocumentPrinting(
         var facts = (await DisciplineFacts.LoadAsync(db, document.DisciplineId, ct))!;
         var schema = JsonDocument.Parse(template.Schema).RootElement;
         var seats = PrintMappingJson.ReadSignatures(template.SignaturesConfig);
-        var context = new PrintContext(JsonDocument.Parse(document.Payload).RootElement, schema, registry.FindSchema, facts,
+        var payload = JsonDocument.Parse(document.Payload).RootElement;
+        // Не предусмотренное — по трудоёмкости документа: раздел, скрытый исправлением, печатается заглушкой.
+        var context = new PrintContext(payload, schema, registry.FindSchema, facts,
             await signatories.ResolveAsync(seats, document.DisciplineId, ct), Year(document),
-            DocumentMetadata.Hidden(schema, facts, registry.FindSchema));
+            DocumentMetadata.Hidden(schema, DocumentSemesters.Of(payload, facts), registry.FindSchema));
         var result = DocxGenerator.Generate(content, PrintMappingJson.ReadMapping(template.PrintMapping), context);
         task.Report = JsonSerializer.Serialize(result.Report, Json);
 

@@ -9,7 +9,7 @@ namespace RpdFos.Core.Documents;
 /// <summary>Итог отправки: отправлен ли документ и что нашла полная проверка.</summary>
 public sealed record SubmissionResult(bool Submitted, IReadOnlyList<DocumentValidationError> Issues);
 
-public enum ReviewProblem { NoUnresolvedComments, UnresolvedComments, UnknownField, EmptyText }
+public enum ReviewProblem { NoUnresolvedComments, UnresolvedComments, UnknownField, EmptyText, CheckFailed }
 
 /// <summary>
 /// Проверка документа: отправка автором с полной проверкой, возврат на доработку и приём методистом, замечания
@@ -55,14 +55,20 @@ public sealed class DocumentReview(
         return null;
     }
 
-    /// <summary>Приём: замечаний к документу не осталось (предусловие UC-07).</summary>
-    public async Task<ReviewProblem?> AcceptAsync(Document document, Guid reviewerId, CancellationToken ct = default)
+    /// <summary>
+    /// Приём: замечаний к документу не осталось (предусловие UC-07) и полная проверка не нашла ошибок — исправление
+    /// методистом на проверке могло сделать документ неполным (этап 5.2). Ошибки — вместе с отказом.
+    /// </summary>
+    public async Task<(ReviewProblem? Problem, IReadOnlyList<DocumentValidationError> Issues)> AcceptAsync(
+        Document document, Guid reviewerId, CancellationToken ct = default)
     {
-        if (await UnresolvedAsync(document, ct) > 0) return ReviewProblem.UnresolvedComments;
+        if (await UnresolvedAsync(document, ct) > 0) return (ReviewProblem.UnresolvedComments, []);
+        var issues = await CheckAsync(document, ct);
+        if (DocumentSubmission.HasErrors(issues)) return (ReviewProblem.CheckFailed, issues);
 
         history.StatusChanged(document, document.Accept(), reviewerId);
         await history.SnapshotAsync(document, reviewerId, VersionTriggers.StatusChange, ct);
-        return null;
+        return (null, issues);
     }
 
     /// <summary>Замечание к полю: место должно быть в схеме документа, текст — непустым.</summary>

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using RpdFos.Core.Data.Entities;
 using RpdFos.Core.DocumentTypes;
 
 namespace RpdFos.Core.Documents;
@@ -11,7 +12,7 @@ public static class SectionFill
 }
 
 /// <summary>
-/// Раздел документа для редактора: видимость по данным дисциплины (<c>x-visible-if</c>, FR-TPL-14), заглушка для
+/// Раздел документа для редактора: видимость по трудоёмкости документа (<c>x-visible-if</c>, FR-TPL-14), заглушка для
 /// скрытого раздела, заполненность, чего не хватает для отправки (ошибки) и предупреждения правил.
 /// </summary>
 public sealed record SectionState(
@@ -36,7 +37,8 @@ public sealed record DocumentMetadata(
     /// Места, не предусмотренные учебным планом (<c>x-visible-if</c>): разделы и поля внутри разделов —
     /// например, методические указания к лабораторным работам.
     /// </summary>
-    public static IReadOnlyList<string> Hidden(JsonElement schema, DisciplineFacts facts, Func<string, JsonElement?> resolve)
+    public static IReadOnlyList<string> Hidden(JsonElement schema, IReadOnlyList<DisciplineSemesterDetails> semesters,
+        Func<string, JsonElement?> resolve)
     {
         var result = new List<string>();
         var root = schema;
@@ -51,7 +53,7 @@ public sealed record DocumentMetadata(
                 var childRoot = currentRoot;
                 var child = SchemaInspector.Deref(p.Value, ref childRoot, resolve);
                 var childPath = $"{path}/{p.Name}";
-                if (child is { } c && !ConditionalSections.IsVisible(c, facts)) result.Add(childPath);
+                if (child is { } c && !ConditionalSections.IsVisible(c, semesters)) result.Add(childPath);
                 else Walk(child, childRoot, childPath, depth + 1);
             }
         }
@@ -63,6 +65,7 @@ public sealed record DocumentMetadata(
     {
         var schema = JsonDocument.Parse(schemaJson).RootElement;
         var issues = DocumentSubmission.Check(schemaJson, payload, facts, validator, rules, resolve);
+        var semesters = DocumentSemesters.Of(payload, facts);
         var missing = issues.Where(e => e.Level == IssueLevels.Error).ToLookup(e => DocumentSubmission.Section(e.Path));
         var warnings = issues.Where(e => e.Level == IssueLevels.Warning).ToLookup(e => DocumentSubmission.Section(e.Path));
 
@@ -72,7 +75,7 @@ public sealed record DocumentMetadata(
             {
                 var root = schema;
                 if (SchemaInspector.Deref(p.Value, ref root, resolve) is not { ValueKind: JsonValueKind.Object } section) continue;
-                var visible = ConditionalSections.IsVisible(section, facts);
+                var visible = ConditionalSections.IsVisible(section, semesters);
                 var errors = visible ? missing[p.Name].ToList() : [];
                 sections.Add(new SectionState(p.Name, Text(section, "title") ?? p.Name, visible,
                     visible ? null : Text(section, "x-stub-text"),
@@ -80,7 +83,7 @@ public sealed record DocumentMetadata(
                     errors, visible ? warnings[p.Name].ToList() : []));
             }
 
-        return new DocumentMetadata(sections, ReadOnly(schema, status, resolve), Hidden(schema, facts, resolve), facts.Competences,
+        return new DocumentMetadata(sections, ReadOnly(schema, status, resolve), Hidden(schema, semesters, resolve), facts.Competences,
             new PlanDisciplineChoices(facts.Earlier, facts.Later), PlanFields.Values(schema, facts, resolve),
             NoCandidates(schema, facts, resolve, printMapping));
     }
@@ -137,21 +140,22 @@ public sealed record DocumentMetadata(
 }
 
 /// <summary>
-/// Условные разделы (<c>x-visible-if</c>, FR-TPL-14) по данным дисциплины из плана: практические и лабораторные —
+/// Условные разделы (<c>x-visible-if</c>, FR-TPL-14) по трудоёмкости документа (<see cref="DocumentSemesters"/>): после
+/// исправления методистом состав разделов следует за данными документа, а не плана (этап 5.2). Практические и лабораторные —
 /// по часам, курсовой проект или работа — по видам аттестации. Неизвестное условие раздел не скрывает.
 /// </summary>
 public static class ConditionalSections
 {
-    public static bool IsVisible(JsonElement section, DisciplineFacts facts)
+    public static bool IsVisible(JsonElement section, IReadOnlyList<DisciplineSemesterDetails> semesters)
     {
         if (!section.TryGetProperty("x-visible-if", out var condition) || condition.ValueKind != JsonValueKind.Object) return true;
         var source = condition.TryGetProperty("source", out var s) ? s.GetString() : null;
         return source switch
         {
             "parser.discipline.details" when condition.TryGetProperty("any", out var any) =>
-                facts.Semesters.Any(semester => Values(any).Any(field => Hours(semester, field) > 0)),
+                semesters.Any(semester => Values(any).Any(field => Hours(semester, field) > 0)),
             "parser.discipline.attestation" when condition.TryGetProperty("includes", out var includes) =>
-                facts.Semesters.Any(semester => semester.ControlTypes.Intersect(Values(includes)).Any()),
+                semesters.Any(semester => semester.ControlTypes.Intersect(Values(includes)).Any()),
             _ => true
         };
     }
@@ -160,7 +164,7 @@ public static class ConditionalSections
         ? value.EnumerateArray().Select(v => v.GetString() ?? "")
         : [value.GetString() ?? ""];
 
-    private static int Hours(Data.Entities.DisciplineSemesterDetails s, string field) => field switch
+    private static int Hours(DisciplineSemesterDetails s, string field) => field switch
     {
         "contact_hours" => s.ContactHours,
         "lectures" => s.Lectures,
