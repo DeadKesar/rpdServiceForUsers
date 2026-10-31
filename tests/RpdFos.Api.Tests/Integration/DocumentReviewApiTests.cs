@@ -42,7 +42,7 @@ public class DocumentReviewApiTests(DatabaseFixture app)
         // Лекций по темам на 2 часа меньше плана — ошибка правила, отправка не проходит.
         var topic = new JsonObject
         {
-            ["section_number"] = 1, ["topic_title"] = "Основы моделирования систем",
+            ["section_number"] = 1, ["semester"] = 1, ["topic_title"] = "Основы моделирования систем",
             ["hours"] = new JsonObject
             {
                 ["lectures"] = plan.Lectures - 2, ["practice"] = plan.Practice, ["lab_hours"] = plan.Labs, ["self_study"] = plan.SelfStudy
@@ -54,7 +54,7 @@ public class DocumentReviewApiTests(DatabaseFixture app)
         Assert.Equal(HttpStatusCode.UnprocessableEntity, refused.StatusCode);
         var error = Assert.Single(await ErrorsAsync(refused));
         Assert.Equal(("/thematic_plan", IssueLevels.Error), (error.GetProperty("path").GetString(), error.GetProperty("level").GetString()));
-        Assert.StartsWith("Лекции: по темам", error.GetProperty("message").GetString());
+        Assert.StartsWith("1 семестр: Лекции: по темам", error.GetProperty("message").GetString());
 
         // Часы сходятся, литература старая — предупреждение приходит, но документ отправлен.
         topic["hours"]!["lectures"] = plan.Lectures;
@@ -193,7 +193,7 @@ public class DocumentReviewApiTests(DatabaseFixture app)
         var warnings = sections["hours_distribution"].Warnings.ToDictionary(w => w.Path, w => w.Message);
         Assert.Equal($"{PlanFields.DiffersFromPlan}: в плане {planLectures}", warnings["/hours_distribution/semesters/0/lectures"]);
         Assert.StartsWith(PlanFields.DiffersFromPlan, warnings["/hours_distribution/semesters/0/contact_hours"]);
-        Assert.Contains(sections["thematic_plan"].Missing, e => e.Message == $"Лекции: по темам {planLectures} ч, по распределению часов {planLectures - 2} ч");
+        Assert.Contains(sections["thematic_plan"].Missing, e => e.Message == $"3 семестр: Лекции: по темам {planLectures} ч, по распределению часов {planLectures - 2} ч");
         // Значение по плану — для пометки в редакторе; история — кто, было, стало.
         Assert.Equal(planLectures, (int)after.Metadata.PlanValues["/hours_distribution/semesters"]![0]!["lectures"]!);
         var correction = after.PlanCorrections!.Single(c => c.Path.EndsWith("/lectures"));

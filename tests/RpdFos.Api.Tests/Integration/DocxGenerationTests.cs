@@ -128,6 +128,13 @@ public class DocxGenerationTests(DatabaseFixture app)
         Assert.Equal("По дисциплине Математическое и компьютерное моделирование курсовое проектирование учебным планом не предусмотрено.",
             Line("По дисциплине"));
 
+        // «Разделы дисциплины» одного семестра — одна группа: тема, «Промежуточная аттестация» с экзаменом, «Итого (час.)».
+        Assert.Equal("Разделы дисциплины, изучаемые в 1 семестре:", Line("Разделы дисциплины, изучаемые"));
+        var partition = body.Descendants<Table>().Single(t => t.InnerText.Contains("Раздел дисциплины"));
+        var partitionRows = partition.Elements<TableRow>().Skip(3).Select(r => r.Elements<TableCell>().Select(c => c.InnerText).ToList()).ToList();
+        Assert.Equal(["", "Промежуточная аттестация", "", "", "24", "16", "8", "24/36", "", "Экзамен"], partitionRows[^2]);
+        Assert.Equal(["", "Итого (час.)", "", "", "24", "16", "8", "24/36", "", ""], partitionRows[^1]);
+
         // 3.1: общая трудоёмкость — сумма строк (контактная + контроль + самостоятельная), аттестация — экзамен.
         var laboriousness = Laboriousness(body);
         Assert.Equal(["108", "108"], Cells(laboriousness, "Общая трудоёмкость"));
@@ -145,7 +152,6 @@ public class DocxGenerationTests(DatabaseFixture app)
         Assert.Equal(3, kindRows.Count);
         Assert.DoesNotContain(kindRows.SelectMany(r => r.Descendants<RunProperties>()), p => p.Italic is not null);
         // Разделы дисциплины: самостоятельная работа — общими часами раздела, реферат — обозначением в формах контроля.
-        var partition = body.Descendants<Table>().Single(t => t.InnerText.Contains("Раздел дисциплины"));
         var topicCells = partition.Elements<TableRow>().First(r => r.InnerText.StartsWith("1Основы"))
             .Elements<TableCell>().Select(c => c.InnerText).ToList();
         Assert.Equal(("24", "Опрос, Р"), (topicCells[7], topicCells[9]));
@@ -230,7 +236,8 @@ public class DocxGenerationTests(DatabaseFixture app)
         // а экзамена или зачёта у этой дисциплины по плану нет.
         Assert.Equal(["", ""], Cells(Laboriousness(body), "Вид промежуточного контроля"));
         var partition = body.Descendants<Table>().Single(t => t.InnerText.Contains("Раздел дисциплины"));
-        Assert.Equal("Промежуточный контроль", partition.Elements<TableRow>().Last().InnerText);
+        var attestation = partition.Elements<TableRow>().Single(r => r.InnerText.Contains("Промежуточная аттестация"));
+        Assert.Equal("", attestation.Elements<TableCell>().Last().InnerText);
     }
 
     [Fact]

@@ -1,6 +1,7 @@
 using System.Text.Json;
 using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Wordprocessing;
+using RpdFos.Core.Data.Entities;
 using RpdFos.Core.Documents;
 
 namespace RpdFos.Core.Printing;
@@ -187,8 +188,12 @@ internal static class DocxTables
     }
 
     /// <summary>
-    /// Разделы дисциплины по тематическому плану: номер, тема, семестр (если он один), неделя, часы по видам занятий,
-    /// формируемые индикаторы, формы текущего контроля; затем «Итого» и «Промежуточный контроль».
+    /// Разделы дисциплины по тематическому плану — по образцу РПД вуза (этап 5.2): темы сгруппированы по семестрам
+    /// документа, номер семестра — в объединённой ячейке «Семестр» группы; после тем семестра — «Промежуточная
+    /// аттестация» с суммами часов, «СР/контроль» и видами аттестации (только экзамен и зачёты); последняя строка —
+    /// «Итого (час.)». Вида занятий, которого в семестре нет по распределению часов, — «-». Темы без семестра у
+    /// дисциплины одного семестра относятся к нему; у дисциплины нескольких семестров (шаблоны до этапа 5.2) —
+    /// одной группой без номера семестра.
     /// </summary>
     private static void Partition(Table table, PrintContext context, List<string> unfilled, string bookmark)
     {
@@ -196,28 +201,68 @@ internal static class DocxTables
         var prototype = rows[Math.Min(2, rows.Count - 1)];
         var topics = Items(context.At("/thematic_plan"));
         if (topics.Count == 0) unfilled.Add($"{bookmark} — тематический план не заполнен");
-        var semester = context.Semesters.Count == 1 ? context.Semesters[0].Semester.ToString() : "";
+        var semesters = context.Semesters;
+        int? SemesterOf(JsonElement topic) =>
+            TopicHoursMatchTotal.Semester(topic) ?? (semesters.Count == 1 ? semesters[0].Semester : null);
 
-        foreach (var topic in topics)
+        var groups = topics.Any(t => SemesterOf(t) is null)
+            ? [(Semester: (DisciplineSemesterDetails?)null, Topics: topics)]
+            : semesters.Select(s => (Semester: (DisciplineSemesterDetails?)s, Topics: topics.Where(t => SemesterOf(t) == s.Semester).ToList()))
+                .Concat(topics.Select(t => SemesterOf(t)!.Value).Distinct().Where(n => semesters.All(s => s.Semester != n))
+                    .Select(n => (Semester: (DisciplineSemesterDetails?)new DisciplineSemesterDetails { Semester = n },
+                        Topics: topics.Where(t => SemesterOf(t) == n).ToList())))
+                .Where(g => g.Topics.Count > 0 || g.Semester is not null)
+                .ToList();
+
+        foreach (var (semester, group) in groups)
         {
-            var hours = Property(topic, "hours");
-            Add(false, Number(topic, "section_number"), Text(topic, "topic_title") ?? "", semester, "",
-                Number(hours, "lectures"), Number(hours, "lab_hours"), Number(hours, "practice"), Number(hours, "self_study"),
-                string.Join(", ", Items(Property(topic, "competence_indicators")).Select(i => i.GetString())),
-                string.Join(", ", Items(Property(topic, "current_control_forms")).Select(i => i.GetString())));
-        }
-        int Sum(string key) => topics.Sum(t => int.TryParse(Number(Property(t, "hours"), key), out var n) ? n : 0);
-        Add(true, "", "Итого", "", "", Sum("lectures").ToString(), Sum("lab_hours").ToString(), Sum("practice").ToString(),
-            Sum("self_study").ToString(), "", "");
-        Add(true, "", "Промежуточный контроль", "", "", "", "", "", "", "",
-            PlanTitles.Attestation(context.Semesters.SelectMany(s => s.ControlTypes)));
+            var number = semester?.Semester.ToString() ?? "";
+            var first = true;
+            foreach (var topic in group)
+            {
+                var hours = Property(topic, "hours");
+                Add(false, Merge(), Number(topic, "section_number"), Text(topic, "topic_title") ?? "", number, "",
+                    Hour(hours, "lectures", semester?.Lectures), Hour(hours, "lab_hours", semester?.LabHours),
+                    Hour(hours, "practice", semester?.Practice), Number(hours, "self_study"),
+                    string.Join(", ", Items(Property(topic, "competence_indicators")).Select(i => i.GetString())),
+                    string.Join(", ", Items(Property(topic, "current_control_forms")).Select(i => i.GetString())));
+            }
+            Add(true, Merge(), "", "Промежуточная аттестация", number, "",
+                Total(group, "lectures", semester?.Lectures), Total(group, "lab_hours", semester?.LabHours),
+                Total(group, "practice", semester?.Practice), $"{Sum(group, "self_study")}/{semester?.Control ?? semesters.Sum(s => s.Control)}", "",
+                PlanTitles.Attestation(semester?.ControlTypes ?? semesters.SelectMany(s => s.ControlTypes)));
 
-        void Add(bool bold, params string[] values)
+            // Ячейка «Семестр» объединена по вертикали на темы и строку аттестации группы.
+            MergedCellValues? Merge()
+            {
+                if (semester is null) return null;
+                var value = first ? MergedCellValues.Restart : MergedCellValues.Continue;
+                first = false;
+                return value;
+            }
+        }
+        Add(true, null, "", "Итого (час.)", "", "", Sum(topics, "lectures").ToString(), Sum(topics, "lab_hours").ToString(),
+            Sum(topics, "practice").ToString(), $"{Sum(topics, "self_study")}/{semesters.Sum(s => s.Control)}", "", "");
+
+        // Часы темы; вида занятий нет в семестре по распределению — «-».
+        static string Hour(JsonElement? hours, string key, int? planned) =>
+            planned == 0 ? "-" : Number(hours, key);
+
+        static string Total(List<JsonElement> group, string key, int? planned) =>
+            planned == 0 ? "-" : Sum(group, key).ToString();
+
+        static int Sum(List<JsonElement> group, string key) =>
+            group.Sum(t => int.TryParse(Number(Property(t, "hours"), key), out var n) ? n : 0);
+
+        void Add(bool bold, MergedCellValues? merge, params string[] values)
         {
             var row = DataRow(prototype);
             var cells = row.Elements<TableCell>().ToList();
             for (var i = 0; i < cells.Count && i < values.Length; i++)
-                SetCell(cells[i], [values[i]], bold, i is 1 or 8 or 9 ? JustificationValues.Left : JustificationValues.Center);
+                SetCell(cells[i], [merge == MergedCellValues.Continue && i == 2 ? "" : values[i]], bold,
+                    i is 1 or 8 or 9 ? JustificationValues.Left : JustificationValues.Center);
+            if (merge is { } m && cells.Count > 2)
+                (cells[2].TableCellProperties ??= new TableCellProperties()).VerticalMerge = new VerticalMerge { Val = m };
             table.AppendChild(row);
         }
     }

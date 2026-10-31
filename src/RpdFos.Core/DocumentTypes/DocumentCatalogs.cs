@@ -13,7 +13,7 @@ public static class DocumentSources
         ["parser.discipline.ind"] = "Индекс дисциплины по плану (disciplines.code)",
         ["parser.discipline.block"] = "Блок учебного плана: Б1, ФТД (disciplines.block)",
         ["parser.discipline.part_type"] = "Часть плана: обязательная, формируемая участниками… (disciplines.part_type)",
-        ["parser.discipline.semesters"] = "Семестры изучения (discipline_semester_details.semester)",
+        ["parser.discipline.semesters"] = "Семестры изучения по распределению часов документа: подряд — «2-3», иначе через запятую",
         ["parser.discipline.course"] = "Курс — производное из семестров изучения",
         ["parser.discipline.ze_total"] = "Общая трудоёмкость, з.е. (disciplines.total_credits)",
         ["parser.discipline.hours_total"] = "Академических часов по плану (disciplines.total_hours)",

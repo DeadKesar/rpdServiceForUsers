@@ -42,7 +42,7 @@ public sealed class PrintContext(
             "parser.discipline.ind" => d.Code,
             "parser.discipline.block" => PlanTitles.Block(d.Block),
             "parser.discipline.part_type" => PlanTitles.Part(d.PartType),
-            "parser.discipline.semesters" => string.Join(", ", semesters),
+            "parser.discipline.semesters" => PlanTitles.Semesters(semesters),
             "parser.discipline.course" => string.Join(", ", semesters.Select(s => (s + 1) / 2).Distinct()),
             "parser.discipline.ze_total" => d.TotalCredits.ToString(),
             "parser.discipline.hours_total" => d.TotalHours.ToString(),

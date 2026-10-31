@@ -258,9 +258,10 @@
       "x-validation-rule": ["topic_hours_match_total", "all_indicators_covered"],
       "items": {
         "type": "object",
-        "required": ["section_number", "topic_title", "hours"],
+        "required": ["section_number", "semester", "topic_title", "hours"],
         "properties": {
           "section_number": { "type": "integer", "title": "Раздел", "minimum": 1 },
+          "semester": { "type": "integer", "title": "Семестр", "minimum": 1, "maximum": 12, "description": "Семестр из распределения часов документа" },
           "topic_title": { "type": "string", "title": "Тема", "minLength": 5 },
           "topic_description": { "type": "string", "title": "Содержание" },
           "hours": {

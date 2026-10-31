@@ -2,23 +2,56 @@
 @using System.Text.Json.Nodes
 @inherits FieldBase
 
-@* Тематический план: темы по разделам, часы по видам занятий против плана, индикаторы из выбранных в «Компетенциях». *@
+@* Тематический план: темы по разделам, часы по видам занятий против плана, индикаторы из выбранных в «Компетенциях».
+   У тем новых шаблонов есть семестр (этап 5.2): выбирается из семестров трудоёмкости документа, у дисциплины одного
+   семестра ставится сам; сводка и сверка часов — по семестрам. *@
 <div class="mb-3">
-    <table class="table table-sm table-bordered mb-2">
-        <thead class="table-light">
-            <tr><th>Вид занятий</th><th>В плане тем</th><th>По распределению часов</th></tr>
-        </thead>
-        <tbody>
-            @foreach (var (key, title) in HourKinds)
-            {
-                var planned = PlanHours(key);
-                var topics = TopicHours(key);
-                <tr class="@(topics != planned ? "table-warning" : "")">
-                    <td>@title</td><td>@topics</td><td>@planned</td>
-                </tr>
-            }
-        </tbody>
-    </table>
+    @if (BySemester)
+    {
+        <table class="table table-sm table-bordered mb-2">
+            <thead class="table-light">
+                <tr><th>Семестр</th><th>Вид занятий</th><th>По темам / по распределению часов</th></tr>
+            </thead>
+            <tbody>
+                @foreach (var semester in DocumentSemesters)
+                {
+                    var number = Number(semester["semester"]);
+                    var kinds = HourKinds.Where(k => Number(semester[k.Key]) > 0 || TopicHours(k.Key, number) > 0).ToList();
+                    @for (var k = 0; k < kinds.Count; k++)
+                    {
+                        var (key, title) = kinds[k];
+                        var planned = Number(semester[key]);
+                        var topics = TopicHours(key, number);
+                        <tr class="@(topics != planned ? "table-warning" : "")">
+                            @if (k == 0)
+                            {
+                                <td rowspan="@kinds.Count">@number</td>
+                            }
+                            <td>@title</td><td>@topics / @planned</td>
+                        </tr>
+                    }
+                }
+            </tbody>
+        </table>
+    }
+    else
+    {
+        <table class="table table-sm table-bordered mb-2">
+            <thead class="table-light">
+                <tr><th>Вид занятий</th><th>В плане тем</th><th>По распределению часов</th></tr>
+            </thead>
+            <tbody>
+                @foreach (var (key, title) in HourKinds)
+                {
+                    var planned = PlanHours(key);
+                    var topics = TopicHours(key);
+                    <tr class="@(topics != planned ? "table-warning" : "")">
+                        <td>@title</td><td>@topics</td><td>@planned</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
 
     @{ var rows = Value as JsonArray; }
     @for (var i = 0; i < (rows?.Count ?? 0); i++)
@@ -33,7 +66,23 @@
                     <ScalarInput Context="Context" Schema="SectionNumber" Parent="topic" Key="section_number"
                                  Path="@($"{Path}/{index}/section_number")" Compact="true" />
                 </div>
-                <div class="col-md-9">
+                @if (BySemester && DocumentSemesters.Count > 1)
+                {
+                    var current = Number(topic["semester"]);
+                    <div class="col-md-2">
+                        <label class="form-label small">Семестр</label>
+                        <select class="form-select form-select-sm" disabled="@ReadOnly" value="@(current > 0 ? current.ToString() : "")"
+                                @onchange="e => SetSemester(topic, index, e.Value as string)">
+                            <option value="">—</option>
+                            @foreach (var semester in DocumentSemesters)
+                            {
+                                var n = Number(semester["semester"]);
+                                <option value="@n">@n</option>
+                            }
+                        </select>
+                    </div>
+                }
+                <div class="@(BySemester && DocumentSemesters.Count > 1 ? "col-md-7" : "col-md-9")">
                     <label class="form-label small">Тема</label>
                     <ScalarInput Context="Context" Schema="TopicTitle" Parent="topic" Key="topic_title"
                                  Path="@($"{Path}/{index}/topic_title")" Compact="true" />
@@ -56,8 +105,16 @@
                 {
                     <div class="col-6 col-md-3">
                         <label class="form-label small">@title</label>
-                        <ScalarInput Context="Context" Schema="HoursProperty(key)" Parent="hours" Key="@key"
-                                     Path="@($"{Path}/{index}/hours/{key}")" Compact="true" />
+                        @if (Absent(topic, key))
+                        {
+                            @* Вида занятий в семестре темы по распределению часов нет. *@
+                            <input class="form-control form-control-sm" value="–" disabled title="В этом семестре по распределению часов таких занятий нет" />
+                        }
+                        else
+                        {
+                            <ScalarInput Context="Context" Schema="HoursProperty(key)" Parent="hours" Key="@key"
+                                         Path="@($"{Path}/{index}/hours/{key}")" Compact="true" />
+                        }
                     </div>
                 }
             </div>
@@ -130,6 +187,47 @@
 
     private int TopicHours(string key) => (Value as JsonArray ?? []).OfType<JsonObject>().Sum(t => Number(t["hours"]?[key]));
 
+    private int TopicHours(string key, int semester) =>
+        (Value as JsonArray ?? []).OfType<JsonObject>().Where(t => Number(t["semester"]) == semester).Sum(t => Number(t["hours"]?[key]));
+
+    // Семестр темы есть в схеме шаблона (этап 5.2) — у прежних шаблонов сверка общей суммой.
+    private bool BySemester => Property("semester").ValueKind == JsonValueKind.Object;
+
+    // Семестры трудоёмкости документа — исправленные методистом, если исправлял.
+    private List<JsonObject> DocumentSemesters =>
+        (Context.Payload["hours_distribution"]?["semesters"] as JsonArray ?? []).OfType<JsonObject>()
+            .Where(s => Number(s["semester"]) > 0).OrderBy(s => Number(s["semester"])).ToList();
+
+    // Вида занятий нет в семестре темы по распределению часов — поле недоступно.
+    private bool Absent(JsonObject topic, string key) =>
+        BySemester && DocumentSemesters.FirstOrDefault(s => Number(s["semester"]) == Number(topic["semester"])) is { } semester &&
+        Number(semester[key]) == 0;
+
+    // У дисциплины одного семестра он ставится сам и не показывается: так и у тем, добавленных до исправления часов.
+    protected override void OnParametersSet()
+    {
+        if (!BySemester || ReadOnly || DocumentSemesters is not [var only]) return;
+        var number = Number(only["semester"]);
+        var changed = false;
+        foreach (var topic in (Value as JsonArray ?? []).OfType<JsonObject>().Where(t => Number(t["semester"]) != number))
+        {
+            topic["semester"] = number;
+            changed = true;
+        }
+        if (changed) Context.Edited();
+    }
+
+    // Другой семестр — часы видов, которых в нём нет, снимаются: ввести их там нельзя.
+    private void SetSemester(JsonObject topic, int index, string? value)
+    {
+        if (int.TryParse(value, out var number)) topic["semester"] = number;
+        else topic.Remove("semester");
+        if (topic["hours"] is JsonObject hours)
+            foreach (var (key, _) in HourKinds.Where(k => Absent(topic, k.Key)))
+                hours.Remove(key);
+        Context.Changed($"{Path}/{index}/semester");
+    }
+
     private int PlanHours(string key) =>
         (Context.Payload["hours_distribution"]?["semesters"] as JsonArray ?? []).OfType<JsonObject>().Sum(s => Number(s[key]));
 
@@ -188,7 +286,12 @@
     private void Add()
     {
         var rows = EnsureArray();
-        rows.Add(new JsonObject { ["section_number"] = rows.Count + 1, ["hours"] = new JsonObject() });
+        var topic = new JsonObject { ["section_number"] = rows.Count + 1, ["hours"] = new JsonObject() };
+        // Семестр новой темы — как у предыдущей, первой — первый семестр дисциплины.
+        if (BySemester && (rows.OfType<JsonObject>().LastOrDefault()?["semester"] is JsonValue last ? Number(last) :
+                DocumentSemesters.Select(s => Number(s["semester"])).FirstOrDefault()) is var semester and > 0)
+            topic["semester"] = semester;
+        rows.Add(topic);
         Context.Changed();
     }
 

@@ -7,7 +7,9 @@ namespace RpdFos.Core.Documents;
 /// <summary>
 /// <c>topic_hours_match_total</c> (FR-VAL-01): суммы часов тематического плана по видам занятий — лекции,
 /// практические, лабораторные, самостоятельная работа — равны часам трудоёмкости документа. Трудоёмкость берётся
-/// из плана; исправленную методистом (этап 5.1) правило сверяет уже с исправленными часами. Ошибка.
+/// из плана; исправленную методистом (этап 5.1) правило сверяет уже с исправленными часами. У тем с семестром
+/// (этап 5.2) — по каждому семестру отдельно, тема в семестре, которого у дисциплины нет, — тоже ошибка; без
+/// семестра (шаблоны до этапа 5.2) — общей суммой. Ошибка.
 /// </summary>
 public sealed class TopicHoursMatchTotal : IValidationRule
 {
@@ -25,14 +27,37 @@ public sealed class TopicHoursMatchTotal : IValidationRule
     public IEnumerable<DocumentValidationError> Check(RuleContext context)
     {
         if (context.Value.ValueKind != JsonValueKind.Array) yield break;
-        foreach (var (key, title, plan) in Kinds)
+        var topics = context.Value.EnumerateArray().ToList();
+        var semesters = DocumentSemesters.Of(context.Payload, context.Facts);
+        if (!topics.Any(t => Semester(t) is not null))
         {
-            var byTopics = context.Value.EnumerateArray().Sum(topic => Hours(topic, key));
-            var byPlan = DocumentSemesters.Of(context.Payload, context.Facts).Sum(plan);
-            if (byTopics != byPlan)
-                yield return new(context.Path, $"{title}: по темам {byTopics} ч, по распределению часов {byPlan} ч");
+            foreach (var (key, title, plan) in Kinds)
+            {
+                var byTopics = topics.Sum(topic => Hours(topic, key));
+                var byPlan = semesters.Sum(plan);
+                if (byTopics != byPlan)
+                    yield return new(context.Path, $"{title}: по темам {byTopics} ч, по распределению часов {byPlan} ч");
+            }
+            yield break;
         }
+
+        // Тема без семестра — ошибка схемы (поле обязательно), в суммы она не входит.
+        for (var i = 0; i < topics.Count; i++)
+            if (Semester(topics[i]) is { } s && semesters.All(x => x.Semester != s))
+                yield return new($"{context.Path}/{i}/semester", $"Тема в {s} семестре, а у дисциплины такого семестра нет");
+        foreach (var semester in semesters)
+            foreach (var (key, title, plan) in Kinds)
+            {
+                var byTopics = topics.Where(t => Semester(t) == semester.Semester).Sum(topic => Hours(topic, key));
+                if (byTopics != plan(semester))
+                    yield return new(context.Path,
+                        $"{semester.Semester} семестр: {title}: по темам {byTopics} ч, по распределению часов {plan(semester)} ч");
+            }
     }
+
+    /// <summary>Семестр темы (этап 5.2); у тем шаблонов до него семестра нет.</summary>
+    public static int? Semester(JsonElement topic) =>
+        topic.ValueKind == JsonValueKind.Object && topic.TryGetProperty("semester", out var s) && s.TryGetInt32(out var n) ? n : null;
 
     private static int Hours(JsonElement topic, string key) =>
         topic.ValueKind == JsonValueKind.Object && topic.TryGetProperty("hours", out var hours) &&

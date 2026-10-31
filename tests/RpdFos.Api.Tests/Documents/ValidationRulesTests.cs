@@ -74,6 +74,38 @@ public class ValidationRulesTests
     }
 
     [Fact]
+    public void Topic_hours_by_semester_catch_shift_between_semesters()
+    {
+        // Общая сумма верна (лекций 24 = 16 + 8), но 4 часа лекций 2-го семестра записаны в тему 1-го.
+        var plan = """
+            [ { "semester": 1, "hours": { "lectures": 20, "practice": 16, "self_study": 40 } },
+              { "semester": 2, "hours": { "lectures": 4, "lab_hours": 16, "self_study": 20 } } ]
+            """;
+
+        Assert.Equal(
+            [
+                new DocumentValidationError("/thematic_plan", "1 семестр: Лекции: по темам 20 ч, по распределению часов 16 ч"),
+                new DocumentValidationError("/thematic_plan", "2 семестр: Лекции: по темам 4 ч, по распределению часов 8 ч")
+            ],
+            Run(new TopicHoursMatchTotal(), plan, "/thematic_plan"));
+        // Прежняя схема — тем без семестра: та же раскладка проходит общей суммой.
+        Assert.Empty(Run(new TopicHoursMatchTotal(), plan.Replace("\"semester\": 1, ", "").Replace("\"semester\": 2, ", ""), "/thematic_plan"));
+    }
+
+    [Fact]
+    public void Topic_in_semester_the_discipline_lacks_is_an_error()
+    {
+        var plan = """
+            [ { "semester": 1, "hours": { "lectures": 16, "practice": 16, "self_study": 40 } },
+              { "semester": 2, "hours": { "lectures": 8, "lab_hours": 16, "self_study": 20 } },
+              { "semester": 3, "hours": { } } ]
+            """;
+
+        Assert.Equal([new DocumentValidationError("/thematic_plan/2/semester", "Тема в 3 семестре, а у дисциплины такого семестра нет")],
+            Run(new TopicHoursMatchTotal(), plan, "/thematic_plan"));
+    }
+
+    [Fact]
     public void Hours_rows_must_add_up_to_credits_as_warning()
     {
         // 1 семестр сходится (48 + 36 + 24 = 3 × 36), во 2-м контактная работа не уменьшена вслед за лабораторными.

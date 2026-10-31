@@ -79,14 +79,18 @@ public static class DocumentData
                     ["code"] = c.Code, ["formulation"] = c.Formulation,
                     ["indicators"] = new JsonArray(new JsonObject { ["code"] = c.Indicators[0].Code, ["text"] = c.Indicators[0].Text })
                 }).ToArray()),
-            ["thematic_plan"] = new JsonArray(new JsonObject
-            {
-                ["section_number"] = 1, ["topic_title"] = "Основы моделирования систем",
-                ["hours"] = new JsonObject
+            // По теме на семестр трудоёмкости — с его часами (у тем есть семестр, этап 5.2).
+            ["thematic_plan"] = new JsonArray(created.Payload.GetProperty("hours_distribution").GetProperty("semesters").EnumerateArray()
+                .Select((s, i) => (JsonNode)new JsonObject
                 {
-                    ["lectures"] = plan.Lectures, ["practice"] = plan.Practice, ["lab_hours"] = plan.Labs, ["self_study"] = plan.SelfStudy
-                }
-            }),
+                    ["section_number"] = i + 1, ["semester"] = s.GetProperty("semester").GetInt32(),
+                    ["topic_title"] = $"Основы моделирования систем, часть {i + 1}",
+                    ["hours"] = new JsonObject
+                    {
+                        ["lectures"] = Int(s, "lectures"), ["practice"] = Int(s, "practice"), ["lab_hours"] = Int(s, "lab_hours"),
+                        ["self_study"] = Int(s, "self_study")
+                    }
+                }).ToArray()),
             ["literature"] = new JsonObject
             {
                 ["main"] = new JsonArray(new JsonObject
@@ -144,4 +148,6 @@ public static class DocumentData
         int Sum(string key) => semesters.Sum(s => s.TryGetProperty(key, out var v) ? v.GetInt32() : 0);
         return (Sum("lectures"), Sum("practice"), Sum("lab_hours"), Sum("self_study"));
     }
+
+    private static int Int(JsonElement node, string key) => node.TryGetProperty(key, out var v) ? v.GetInt32() : 0;
 }

@@ -73,6 +73,24 @@ public static class PlanTitles
         .Distinct()
         .Select(ControlType));
 
+    /// <summary>
+    /// Семестры для подписи «Разделы дисциплины, изучаемые в … семестре»: идущие подряд — диапазоном «2-3»,
+    /// остальные — через запятую: «1, 3», «1-2, 4».
+    /// </summary>
+    public static string Semesters(IEnumerable<int> semesters)
+    {
+        var parts = new List<string>();
+        var sorted = semesters.Distinct().Order().ToList();
+        for (var i = 0; i < sorted.Count;)
+        {
+            var j = i;
+            while (j + 1 < sorted.Count && sorted[j + 1] == sorted[j] + 1) j++;
+            parts.Add(j > i ? $"{sorted[i]}-{sorted[j]}" : sorted[i].ToString());
+            i = j + 1;
+        }
+        return string.Join(", ", parts);
+    }
+
     /// <summary>Вид промежуточной аттестации — как в x-enum-titles схемы РПД.</summary>
     public static string ControlType(string type) => type switch
     {
