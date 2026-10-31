@@ -11,7 +11,7 @@ namespace RpdFos.Core.Documents;
 /// </summary>
 public static class DocumentSubmission
 {
-    public const string EmptyVisibleSection = "Раздел предусмотрен учебным планом — добавьте хотя бы одну запись";
+    public const string EmptyVisibleSection = "Раздел предусмотрен распределением часов — добавьте хотя бы одну запись";
 
     public static bool HasErrors(IEnumerable<DocumentValidationError> issues) => issues.Any(i => i.Level == IssueLevels.Error);
 

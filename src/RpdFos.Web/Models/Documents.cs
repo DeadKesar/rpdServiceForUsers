@@ -47,7 +47,8 @@ public sealed record IndicatorCandidate(Guid Id, string Code, string Text, strin
 
 /// <summary>Раздел сохранён; с ним — состояние всех разделов и история исправлений полей из плана (если исправлял).</summary>
 public sealed record SectionSaved(int Version, string Status, string StatusTitle, SectionState Section, DateTimeOffset SavedAt,
-    List<SectionState>? Sections = null, List<PlanCorrection>? PlanCorrections = null, List<string>? HiddenPaths = null);
+    List<SectionState>? Sections = null, List<PlanCorrection>? PlanCorrections = null, List<string>? HiddenPaths = null,
+    JsonElement? Payload = null);
 
 public sealed record DocumentSaved(int Version, string Status, string StatusTitle, DateTimeOffset SavedAt);
 

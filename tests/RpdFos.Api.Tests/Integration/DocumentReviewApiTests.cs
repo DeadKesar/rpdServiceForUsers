@@ -183,23 +183,25 @@ public class DocumentReviewApiTests(DatabaseFixture app)
         // Ответ сохранения — сразу со всеми разделами и историей: редактору не нужна перезагрузка.
         Assert.Contains(saved.Sections!.Single(s => s.Key == "thematic_plan").Missing, e => e.Message.Contains("по распределению часов"));
         Assert.Contains(saved.Sections!.Single(s => s.Key == "hours_distribution").Warnings, w => w.Message.StartsWith(PlanFields.DiffersFromPlan));
-        Assert.Equal("/hours_distribution/semesters/0/lectures", Assert.Single(saved.PlanCorrections!).Path);
+        // Контактная работа следует за лекциями (этап 5.2) — тоже исправление, с той же разницей.
+        Assert.Equal(["/hours_distribution/semesters/0/lectures", "/hours_distribution/semesters/0/contact_hours"],
+            saved.PlanCorrections!.Select(c => c.Path).OrderByDescending(p => p.EndsWith("/lectures")));
 
         var after = (await methodist.GetFromJsonAsync<DocumentDetails>(Url(created, "")))!;
         var sections = after.Metadata.Sections.ToDictionary(s => s.Key);
         // Предупреждение «отличается от плана» отправку и приём не блокирует; правило часов сверяет уже с исправленными.
-        var warning = Assert.Single(sections["hours_distribution"].Warnings);
-        Assert.Equal(("/hours_distribution/semesters/0/lectures", $"{PlanFields.DiffersFromPlan}: в плане {planLectures}"),
-            (warning.Path, warning.Message));
+        var warnings = sections["hours_distribution"].Warnings.ToDictionary(w => w.Path, w => w.Message);
+        Assert.Equal($"{PlanFields.DiffersFromPlan}: в плане {planLectures}", warnings["/hours_distribution/semesters/0/lectures"]);
+        Assert.StartsWith(PlanFields.DiffersFromPlan, warnings["/hours_distribution/semesters/0/contact_hours"]);
         Assert.Contains(sections["thematic_plan"].Missing, e => e.Message == $"Лекции: по темам {planLectures} ч, по распределению часов {planLectures - 2} ч");
         // Значение по плану — для пометки в редакторе; история — кто, было, стало.
         Assert.Equal(planLectures, (int)after.Metadata.PlanValues["/hours_distribution/semesters"]![0]!["lectures"]!);
-        var correction = Assert.Single(after.PlanCorrections!);
+        var correction = after.PlanCorrections!.Single(c => c.Path.EndsWith("/lectures"));
         Assert.Equal(("/hours_distribution/semesters/0/lectures", planLectures, planLectures - 2, reviewer.ShortName),
             (correction.Path, correction.Before!.Value.GetInt32(), correction.After!.Value.GetInt32(), correction.ChangedBy));
         await app.WithDbAsync(async db =>
         {
-            var entry = await db.AuditLog.SingleAsync(a => a.EntityId == created.Document.Id);
+            var entry = await db.AuditLog.FirstAsync(a => a.EntityId == created.Document.Id);
             Assert.Equal((AuditEvents.PlanFieldCorrected, reviewer.Id), (entry.EventType, entry.UserId));
         });
     }

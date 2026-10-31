@@ -74,6 +74,23 @@ public class ValidationRulesTests
     }
 
     [Fact]
+    public void Hours_rows_must_add_up_to_credits_as_warning()
+    {
+        // 1 семестр сходится (48 + 36 + 24 = 3 × 36), во 2-м контактная работа не уменьшена вслед за лабораторными.
+        var hours = """
+            { "semesters": [
+                { "semester": 1, "contact_hours": 48, "control": 36, "self_study": 24, "credits": 3 },
+                { "semester": 2, "contact_hours": 48, "control": 0, "self_study": 40, "credits": 2 } ] }
+            """;
+
+        var warning = Assert.Single(Run(new HoursMatchCurriculum(), hours, "/hours_distribution"));
+        Assert.Equal(new DocumentValidationError("/hours_distribution/semesters/1",
+            "2 семестр: контактная работа 48 + контроль 0 + самостоятельная работа 40 = 88 ч, а 2 з. е. × 36 = 72 ч",
+            IssueLevels.Warning), warning);
+        Assert.Equal(IssueLevels.Warning, new HoursMatchCurriculum().Level);
+    }
+
+    [Fact]
     public void Self_study_kinds_mismatch_names_semester_and_both_sums()
     {
         // Во втором семестре видов нет вовсе, а в третьем у дисциплины нет занятий.

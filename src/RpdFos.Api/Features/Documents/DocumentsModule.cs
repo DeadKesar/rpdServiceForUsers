@@ -196,7 +196,7 @@ public class DocumentsModule : ICarterModule
         // Состояние всех разделов и история исправлений — редактор обновляет их сразу, без перезагрузки документа.
         return Results.Ok(new SectionSaved(document.Version, document.Status, DocumentStatuses.Title(document.Status),
             result.Section!, clock.GetUtcNow(), result.Sections,
-            scope == DocumentEditScope.Content ? null : await CorrectionsAsync(db, document.Id, ct), result.HiddenPaths));
+            scope == DocumentEditScope.Content ? null : await CorrectionsAsync(db, document.Id, ct), result.HiddenPaths, result.Payload));
     }
 
     private static async Task<IResult> Save(
@@ -473,7 +473,7 @@ public record CommentRequest(string? FieldPath, string? Text);
 /// <summary>Раздел сохранён: новая версия, статус (после «Сохранить» правка возвращает черновик) и заполненность раздела.</summary>
 public record SectionSaved(int Version, string Status, string StatusTitle, SectionState Section, DateTimeOffset SavedAt,
     IReadOnlyList<SectionState>? Sections = null, IReadOnlyList<PlanCorrection>? PlanCorrections = null,
-    IReadOnlyList<string>? HiddenPaths = null);
+    IReadOnlyList<string>? HiddenPaths = null, JsonElement? Payload = null);
 
 public record DocumentSaved(int Version, string Status, string StatusTitle, DateTimeOffset SavedAt);
 

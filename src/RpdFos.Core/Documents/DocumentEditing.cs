@@ -16,7 +16,7 @@ public enum SectionUpdateProblem { UnknownSection, HiddenSection, ReadOnlyChange
 /// разделов и скрытые места (этап 5.2).
 /// </summary>
 public sealed record SectionUpdateResult(SectionUpdateProblem? Problem, IReadOnlyList<DocumentValidationError> Errors, SectionState? Section,
-    IReadOnlyList<SectionState>? Sections = null, IReadOnlyList<string>? HiddenPaths = null);
+    IReadOnlyList<SectionState>? Sections = null, IReadOnlyList<string>? HiddenPaths = null, JsonElement? Payload = null);
 
 /// <summary>
 /// Изменение и сохранение документа. Раздел проверяется в режиме черновика, форматированный текст санитизируется,
@@ -79,9 +79,12 @@ public sealed class DocumentEditing(
                 Without(updated[section], section, planPaths)))
             return new(SectionUpdateProblem.ReadOnlyChanged, [new DocumentValidationError($"/{section}", PlanOnlyChanged)], null);
         var corrections = scope == DocumentEditScope.Content ? [] : PlanFields.Changes(payload, updated, planPaths).ToList();
-        // Вид курсового проектирования следует за видами аттестации документа (этап 5.2).
-        if (scope != DocumentEditScope.Content)
-            corrections.AddRange(PlanFields.FollowCourseWorkKind(schema, payload, updated, facts, registry.FindSchema));
+        // Производное следует за исправлением (этап 5.2): вид курсового проектирования — за видами аттестации,
+        // контактная работа — за часами занятий. Клиент получит содержимое обратно: он этих изменений не видел.
+        var followed = scope == DocumentEditScope.Content ? []
+            : PlanFields.FollowCourseWorkKind(schema, payload, updated, facts, registry.FindSchema)
+                .Concat(PlanFields.FollowContactHours(payload, updated)).ToList();
+        corrections.AddRange(followed);
 
         var updatedJson = updated.ToJsonString(Json);
         var element = JsonDocument.Parse(updatedJson).RootElement;
@@ -113,7 +116,8 @@ public sealed class DocumentEditing(
         await history.SnapshotAsync(document, editorId, broken.Count > 0 ? VersionTriggers.StatusChange : VersionTriggers.AutoSave, ct);
 
         var metadata = DocumentMetadata.Build(schemaJson, element, document.Status, facts, validator, rules, registry.FindSchema);
-        return new(null, [], metadata.Sections.Single(s => s.Key == section), metadata.Sections, metadata.HiddenPaths);
+        return new(null, [], metadata.Sections.Single(s => s.Key == section), metadata.Sections, metadata.HiddenPaths,
+            followed.Count > 0 ? element : null);
     }
 
     // «Принят → На доработке»: замечание от исправившего к месту первой ошибки раздела — по одному на раздел, текст —

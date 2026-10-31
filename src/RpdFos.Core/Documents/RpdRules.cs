@@ -83,6 +83,38 @@ public sealed class SelfStudyKindsMatchPlan : IValidationRule
 }
 
 /// <summary>
+/// <c>hours_match_curriculum</c>: в каждом семестре трудоёмкости документа контактная работа, контроль и
+/// самостоятельная работа в сумме равны з. е. × 36. Предупреждение, а не ошибка: эти часы правит только методист,
+/// а ошибка вернула бы документ автору, который исправить их не может (этап 5.2).
+/// </summary>
+public sealed class HoursMatchCurriculum : IValidationRule
+{
+    public const int HoursPerCredit = 36;
+
+    public string Name => "hours_match_curriculum";
+    public string Level => IssueLevels.Warning;
+
+    public IEnumerable<DocumentValidationError> Check(RuleContext context)
+    {
+        if (context.Value.ValueKind != JsonValueKind.Object || !context.Value.TryGetProperty("semesters", out var list) ||
+            list.ValueKind != JsonValueKind.Array) yield break;
+        // Место — строка содержимого, поэтому семестры по одному, в порядке массива.
+        var rows = list.EnumerateArray().ToList();
+        for (var i = 0; i < rows.Count; i++)
+        {
+            if (rows[i].ValueKind != JsonValueKind.Object) continue;
+            var s = DocumentSemesters.Row(rows[i]);
+            var sum = s.ContactHours + s.Control + s.SelfStudy;
+            if (sum != s.Credits * HoursPerCredit)
+                yield return new($"{context.Path}/semesters/{i}",
+                    $"{s.Semester} семестр: контактная работа {s.ContactHours} + контроль {s.Control} + самостоятельная работа " +
+                    $"{s.SelfStudy} = {sum} ч, а {s.Credits} з. е. × {HoursPerCredit} = {s.Credits * HoursPerCredit} ч",
+                    IssueLevels.Warning);
+        }
+    }
+}
+
+/// <summary>
 /// <c>competences_match_matrix</c> (FR-VAL-03): у каждой компетенции дисциплины из матрицы выбран хотя бы один
 /// индикатор, в документе нет компетенций не из матрицы и индикаторов чужих компетенций. Ошибка.
 /// </summary>

@@ -538,6 +538,11 @@ else
                 // Исправление трудоёмкости меняет состав разделов (этап 5.2): появившийся раздел должен получить поля.
                 if (saved.HiddenPaths is { } hidden)
                     context!.Metadata = context.Metadata with { Sections = sections, HiddenPaths = hidden };
+                // Сервер довёл производное (контактная работа, вид курсового проектирования) — содержимое с его
+                // значениями, иначе следующее сохранение вернуло бы прежние. Введённое во время запроса не трогаем.
+                if (saved.Payload is { ValueKind: JsonValueKind.Object } server && edits == at)
+                    foreach (var p in server.EnumerateObject())
+                        payload![p.Name] = JsonNode.Parse(p.Value.GetRawText());
                 if (saved.PlanCorrections is { } corrections)
                 {
                     details = details! with { PlanCorrections = corrections };

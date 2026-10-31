@@ -34,7 +34,10 @@ public class PlanCorrectionApiTests(DatabaseFixture app)
         var details = await DetailsAsync(methodist, created);
         Assert.Equal("course_project", details.Payload.GetProperty("course_work").GetProperty("kind").GetString());
         Assert.DoesNotContain("/course_work", details.Metadata.HiddenPaths);
+        // Вид — производное поле: в истории есть, но своего предупреждения и значения по плану для пометки нет.
         Assert.Contains(details.PlanCorrections!, c => c.Path == "/course_work/kind");
+        Assert.DoesNotContain(details.Metadata.PlanValues.Keys, p => p.StartsWith("/course_work"));
+        Assert.Empty(added.Sections!.Single(s => s.Key == "course_work").Warnings);
 
         var accept = await methodist.PostAsJsonAsync(Url(created, "accept"), new DocumentVersionRequest(added.Version));
         Assert.Equal(HttpStatusCode.UnprocessableEntity, accept.StatusCode);
@@ -58,6 +61,11 @@ public class PlanCorrectionApiTests(DatabaseFixture app)
         Assert.False(zero.Sections!.Single(s => s.Key == "lab_works").Visible);
         // Ответ сохранения несёт скрытые места: редактор обновляет форму без перезагрузки.
         Assert.Contains("/lab_works", zero.HiddenPaths!);
+        // Контактная работа уменьшилась на те же 16 ч, ответ несёт содержимое с ней; сумма строк не сходится с з. е. — предупреждение.
+        var zeroHours = zero.Payload!.Value.GetProperty("hours_distribution").GetProperty("semesters")[0];
+        Assert.Equal(32, zeroHours.GetProperty("contact_hours").GetInt32());
+        Assert.Contains(zero.Sections!.Single(s => s.Key == "hours_distribution").Warnings,
+            w => w.Path == "/hours_distribution/semesters/0" && w.Message.Contains("контактная работа 32"));
         var hidden = (await DetailsAsync(methodist, created)).Metadata.HiddenPaths;
         Assert.Contains("/lab_works", hidden);
         Assert.Contains("/literature/guidelines/lab_works", hidden);
@@ -67,6 +75,8 @@ public class PlanCorrectionApiTests(DatabaseFixture app)
         var back = await PatchHoursAsync(methodist, created, zero.Version, s => s["lab_hours"] = 16);
         Assert.Equal(SectionFill.Complete, back.Sections!.Single(s => s.Key == "lab_works").Fill);
         Assert.DoesNotContain("/lab_works", (await DetailsAsync(methodist, created)).Metadata.HiddenPaths);
+        var restored = (await DetailsAsync(methodist, created)).Payload.GetProperty("hours_distribution").GetProperty("semesters")[0];
+        Assert.Equal(48, restored.GetProperty("contact_hours").GetInt32());
     }
 
     [Fact]

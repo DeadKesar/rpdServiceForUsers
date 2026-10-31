@@ -93,9 +93,14 @@ public sealed class SchemaContext(JsonElement root, JsonObject payload, Document
     // Поле из плана открыто только исправляющему; остальное — по статусу: само место или вложенное в закрытое место.
     public bool IsReadOnly(string path, JsonElement schema)
     {
+        // Производное поле (вид курсового проектирования) следует за видами аттестации и руками не правится (этап 5.2).
+        if (IsDerived(schema)) return true;
         if (IsPlanField(path, schema)) return !CorrectPlan;
         return Locked || Metadata.ReadOnlyPaths.Any(p => path == p || path.StartsWith(p + "/", StringComparison.Ordinal));
     }
+
+    private static bool IsDerived(JsonElement schema) =>
+        schema.ValueKind == JsonValueKind.Object && Text(schema, "x-source") == "parser.discipline.course_work_kind";
 
     private bool IsPlanField(string path, JsonElement schema) =>
         schema.ValueKind == JsonValueKind.Object && schema.TryGetProperty("readOnly", out var r) && r.ValueKind == JsonValueKind.True ||

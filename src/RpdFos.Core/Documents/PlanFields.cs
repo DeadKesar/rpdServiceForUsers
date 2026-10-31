@@ -19,15 +19,29 @@ public static class PlanFields
 {
     public const string DiffersFromPlan = "Значение отличается от учебного плана";
 
-    /// <summary>Поля из плана — JSON Pointer поддеревьев с <c>readOnly</c>.</summary>
-    public static IReadOnlyList<string> Paths(JsonElement schema, Func<string, JsonElement?> resolve)
+    /// <summary>
+    /// Источник производного поля: вид курсового проектирования вычисляется из видов аттестации документа. Своей
+    /// пометки и предупреждения «отличается от плана» у него нет — о правке говорит пометка у видов аттестации; руками
+    /// он не правится (этап 5.2).
+    /// </summary>
+    public const string CourseWorkKindSource = "parser.discipline.course_work_kind";
+
+    /// <summary>Поля из плана — JSON Pointer поддеревьев с <c>readOnly</c>, без производных.</summary>
+    public static IReadOnlyList<string> Paths(JsonElement schema, Func<string, JsonElement?> resolve) =>
+        Walk(schema, resolve, derived: false);
+
+    /// <summary>Производные поля плана (<see cref="CourseWorkKindSource"/>).</summary>
+    public static IReadOnlyList<string> DerivedPaths(JsonElement schema, Func<string, JsonElement?> resolve) =>
+        Walk(schema, resolve, derived: true);
+
+    private static List<string> Walk(JsonElement schema, Func<string, JsonElement?> resolve, bool derived)
     {
         var result = new List<string>();
         var root = schema;
-        Walk(SchemaInspector.Deref(schema, ref root, resolve), root, "", 0);
+        Visit(SchemaInspector.Deref(schema, ref root, resolve), root, "", 0);
         return result;
 
-        void Walk(JsonElement? node, JsonElement currentRoot, string path, int depth)
+        void Visit(JsonElement? node, JsonElement currentRoot, string path, int depth)
         {
             if (node is not { ValueKind: JsonValueKind.Object } n || depth > 16 || !n.TryGetProperty("properties", out var props)) return;
             foreach (var p in props.EnumerateObject())
@@ -35,11 +49,17 @@ public static class PlanFields
                 var childRoot = currentRoot;
                 var child = SchemaInspector.Deref(p.Value, ref childRoot, resolve);
                 var childPath = $"{path}/{p.Name}";
-                if (IsPlan(p.Value) || child is { } c && IsPlan(c)) result.Add(childPath);
-                else Walk(child, childRoot, childPath, depth + 1);
+                if (IsPlan(p.Value) || child is { } c && IsPlan(c))
+                {
+                    if (IsDerived(child ?? p.Value) == derived) result.Add(childPath);
+                }
+                else Visit(child, childRoot, childPath, depth + 1);
             }
         }
     }
+
+    private static bool IsDerived(JsonElement field) =>
+        field.TryGetProperty("x-source", out var source) && source.GetString() == CourseWorkKindSource;
 
     /// <summary>Значения полей из плана по плану: поле → значение предзаполнения (нет в плане — null).</summary>
     public static Dictionary<string, JsonNode?> Values(JsonElement schema, DisciplineFacts facts, Func<string, JsonElement?> resolve)
@@ -83,11 +103,8 @@ public static class PlanFields
         if (kind is null || kind == Kind(before)) return [];
 
         var result = new List<PlanFieldChange>();
-        foreach (var path in Paths(schema, resolve))
+        foreach (var path in DerivedPaths(schema, resolve))
         {
-            if (SchemaInspector.SubschemaAt(schema, path, resolve) is not { } field ||
-                !field.TryGetProperty("x-source", out var source) || source.GetString() != "parser.discipline.course_work_kind")
-                continue;
             var segments = path.TrimStart('/').Split('/');
             JsonObject parent = after;
             foreach (var segment in segments[..^1])
@@ -101,6 +118,33 @@ public static class PlanFields
             result.Add(new PlanFieldChange(path, previous, JsonValue.Create(kind)));
         }
         return result;
+    }
+
+    /// <summary>
+    /// Контактная работа следует за исправлением лекций, практических и лабораторных: меняется на ту же разницу,
+    /// прочая контактная работа (КСР, ИКР) сохраняется. Если контактную работу семестра исправили в том же сохранении
+    /// сами — она не трогается (этап 5.2).
+    /// </summary>
+    /// <returns>Изменения контактной работы — для журнала аудита.</returns>
+    public static IReadOnlyList<PlanFieldChange> FollowContactHours(JsonNode before, JsonObject after)
+    {
+        const string semestersPath = "/hours_distribution/semesters";
+        if (At(before, semestersPath) is not JsonArray old || At(after, semestersPath) is not JsonArray rows) return [];
+        var result = new List<PlanFieldChange>();
+        for (var i = 0; i < rows.Count && i < old.Count; i++)
+        {
+            if (rows[i] is not JsonObject row || old[i] is not JsonObject was || Int(row, "semester") != Int(was, "semester") ||
+                Int(row, "contact_hours") != Int(was, "contact_hours")) continue;
+            var delta = Classes(row) - Classes(was);
+            if (delta == 0) continue;
+            var contact = Math.Max(0, Int(was, "contact_hours") + delta);
+            result.Add(new PlanFieldChange($"{semestersPath}/{i}/contact_hours", was["contact_hours"]?.DeepClone(), JsonValue.Create(contact)));
+            row["contact_hours"] = contact;
+        }
+        return result;
+
+        static int Classes(JsonObject s) => Int(s, "lectures") + Int(s, "practice") + Int(s, "lab_hours");
+        static int Int(JsonObject s, string key) => s[key] is JsonValue v && v.TryGetValue(out int n) ? n : 0;
     }
 
     /// <summary>
@@ -184,17 +228,20 @@ public static class DocumentSemesters
     {
         if (hours.ValueKind != JsonValueKind.Object || !hours.TryGetProperty("semesters", out var list) ||
             list.ValueKind != JsonValueKind.Array) return [];
-        return list.EnumerateArray().Where(s => s.ValueKind == JsonValueKind.Object).Select(s => new DisciplineSemesterDetails
-            {
-                Semester = Int(s, "semester"), ContactHours = Int(s, "contact_hours"), Lectures = Int(s, "lectures"),
-                Practice = Int(s, "practice"), LabHours = Int(s, "lab_hours"), SelfStudy = Int(s, "self_study"),
-                Control = Int(s, "control"), Credits = Int(s, "credits"),
-                ControlTypes = s.TryGetProperty("control_types", out var t) && t.ValueKind == JsonValueKind.Array
-                    ? t.EnumerateArray().Select(x => x.GetString() ?? "").Where(x => x.Length > 0).ToList()
-                    : []
-            })
+        return list.EnumerateArray().Where(s => s.ValueKind == JsonValueKind.Object).Select(Row)
             .Where(s => s.Semester > 0).OrderBy(s => s.Semester).ToList();
     }
+
+    /// <summary>Одна строка трудоёмкости (элемент <c>hours_distribution/semesters</c>).</summary>
+    public static DisciplineSemesterDetails Row(JsonElement s) => new()
+    {
+        Semester = Int(s, "semester"), ContactHours = Int(s, "contact_hours"), Lectures = Int(s, "lectures"),
+        Practice = Int(s, "practice"), LabHours = Int(s, "lab_hours"), SelfStudy = Int(s, "self_study"),
+        Control = Int(s, "control"), Credits = Int(s, "credits"),
+        ControlTypes = s.TryGetProperty("control_types", out var t) && t.ValueKind == JsonValueKind.Array
+            ? t.EnumerateArray().Select(x => x.GetString() ?? "").Where(x => x.Length > 0).ToList()
+            : []
+    };
 
     private static int Int(JsonElement node, string name) =>
         node.TryGetProperty(name, out var v) && v.TryGetInt32(out var n) ? n : 0;

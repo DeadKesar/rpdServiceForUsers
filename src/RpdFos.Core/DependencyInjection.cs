@@ -38,6 +38,7 @@ public static class DependencyInjection
         services.AddOptions<ValidationRuleSettings>();
         services.AddSingleton<IValidationRule, TopicHoursMatchTotal>();
         services.AddSingleton<IValidationRule, SelfStudyKindsMatchPlan>();
+        services.AddSingleton<IValidationRule, HoursMatchCurriculum>();
         services.AddSingleton<IValidationRule, CompetencesMatchMatrix>();
         services.AddSingleton<IValidationRule, LiteratureMainRecent>();
         services.AddSingleton<IValidationRule, LiteratureYearNotFuture>();
