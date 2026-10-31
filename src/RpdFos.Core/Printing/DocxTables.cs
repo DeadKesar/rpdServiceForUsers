@@ -241,8 +241,10 @@ internal static class DocxTables
                 return value;
             }
         }
-        Add(true, null, "", "Итого (час.)", "", "", Sum(topics, "lectures").ToString(), Sum(topics, "lab_hours").ToString(),
-            Sum(topics, "practice").ToString(), $"{Sum(topics, "self_study")}/{semesters.Sum(s => s.Control)}", "", "");
+        // Вида занятий нет ни в одном семестре — «-» и в итоге, как в строках аттестации.
+        Add(true, null, "", "Итого (час.)", "", "", Total(topics, "lectures", semesters.Sum(s => s.Lectures)),
+            Total(topics, "lab_hours", semesters.Sum(s => s.LabHours)), Total(topics, "practice", semesters.Sum(s => s.Practice)),
+            $"{Sum(topics, "self_study")}/{semesters.Sum(s => s.Control)}", "", "");
 
         // Часы темы; вида занятий нет в семестре по распределению — «-».
         static string Hour(JsonElement? hours, string key, int? planned) =>

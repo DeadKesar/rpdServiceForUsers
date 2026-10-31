@@ -70,6 +70,20 @@ public class PartitionPrintingTests
             Rows(table));
     }
 
+    [Fact]
+    public void Kind_absent_in_every_semester_is_a_dash_in_total_too()
+    {
+        // ФТД.В.01: 1 и 2 семестр, зачёты, лабораторных нет ни в одном.
+        var table = Partition(Semester(1, 8, 8, 0, 20, 0, "credit"), Semester(2, 8, 8, 0, 20, 0, "credit"),
+            """
+            [ { "section_number": 1, "semester": 1, "topic_title": "Цели обучения", "hours": { "lectures": 8, "practice": 8, "self_study": 20 } },
+              { "section_number": 2, "semester": 2, "topic_title": "Портфолио", "hours": { "lectures": 8, "practice": 8, "self_study": 20 } } ]
+            """, out var caption);
+
+        Assert.Equal("Разделы дисциплины, изучаемые в 1-2 семестре:", caption);
+        Assert.Equal(["", "Итого (час.)", "", "", "16", "-", "16", "40/0", "", ""], Rows(table)[^1]);
+    }
+
     [Theory]
     [InlineData(new[] { 1 }, "1")]
     [InlineData(new[] { 2, 3 }, "2-3")]
