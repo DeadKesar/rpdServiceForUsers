@@ -72,4 +72,15 @@ public class PrintingTests
         Assert.Equal("В учебном плане курсовое проектирование для данной дисциплины не предусмотрено.", context.Field("/course_work").Inline);
         Assert.True(context.Field("/goals_and_objectives/goals").IsEmpty);
     }
+
+    [Theory]
+    [InlineData("""{ "title_page": { "academic_year": "2026/2027" } }""", "РПД_Моделирование систем_2026-2027.docx")]
+    [InlineData("""{ "title_page": { "academic_year": "2026" } }""", "РПД_Моделирование систем_2025.docx")]
+    [InlineData("{}", "РПД_Моделирование систем_2025.docx")]
+    public void File_name_carries_academic_year_from_title_page(string payload, string expected)
+    {
+        var document = new Document { Payload = payload, CreatedAt = new DateTimeOffset(2025, 9, 1, 0, 0, 0, TimeSpan.Zero) };
+
+        Assert.Equal(expected, DocumentPrinting.FileName(document, "Моделирование: систем", DocumentPrinting.Period(document), "docx"));
+    }
 }

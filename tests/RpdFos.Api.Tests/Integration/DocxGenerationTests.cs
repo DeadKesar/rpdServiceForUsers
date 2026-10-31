@@ -187,7 +187,8 @@ public class DocxGenerationTests(DatabaseFixture app)
             Assert.Equal((GenerationStatuses.Succeeded, author.Id), (task.Status, task.RequestedBy));
             var file = await db.GeneratedFiles.SingleAsync(f => f.GenerationTaskId == task.Id);
             Assert.Equal(file.CreatedAt.AddDays(30), file.ExpiresAt);
-            Assert.Equal($"РПД_Математическое и компьютерное моделирование_{DateTime.UtcNow.Year}.docx", file.FileName);
+            // Учебный год — из титула (план 2023 года, 1 семестр), а не год печати.
+            Assert.Equal("РПД_Математическое и компьютерное моделирование_2023-2024.docx", file.FileName);
             Assert.True(File.Exists(Path.Combine(app.GeneratedFiles, file.StoragePath)));
         });
     }

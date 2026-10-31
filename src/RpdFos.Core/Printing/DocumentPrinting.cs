@@ -76,7 +76,7 @@ public sealed partial class DocumentPrinting(
         var file = new GeneratedFile
         {
             GenerationTaskId = task.Id, Format = task.Format, SizeBytes = bytes.Length,
-            FileName = FileName(document, facts.Discipline.Name, Year(document), task.Format), CreatedAt = now,
+            FileName = FileName(document, facts.Discipline.Name, Period(document), task.Format), CreatedAt = now,
             ExpiresAt = now.AddDays(settings.Value.RetentionDays)
         };
         file.StoragePath = await store.SaveAsync(file.Id, task.Format, bytes, now, ct);
@@ -98,13 +98,31 @@ public sealed partial class DocumentPrinting(
     // Год документа — год утверждения, до него — год создания: перепечатка не меняет год на титуле.
     private static int Year(Document document) => (document.ApprovedAt ?? document.CreatedAt).Year;
 
-    /// <summary>Имя файла по шаблону «Тип_Дисциплина_Год» (FR-GEN-03): «РПД_Программирование_2025.docx».</summary>
-    public static string FileName(Document document, string discipline, int year, string extension)
+    /// <summary>
+    /// Период в имени файла — учебный год из титула документа («2026/2027» → «2026-2027», ЛР Т4); его нет — год
+    /// документа. Отступление от FR-GEN-03 («Тип_Дисциплина_Год»): по одному году не отличить РПД разных наборов.
+    /// </summary>
+    public static string Period(Document document)
+    {
+        using var payload = JsonDocument.Parse(document.Payload);
+        return payload.RootElement is { ValueKind: JsonValueKind.Object } root &&
+               root.TryGetProperty("title_page", out var title) && title.ValueKind == JsonValueKind.Object &&
+               title.TryGetProperty("academic_year", out var value) && value.ValueKind == JsonValueKind.String &&
+               AcademicYear().Match(value.GetString()!) is { Success: true } m
+            ? $"{m.Groups[1].Value}-{m.Groups[2].Value}"
+            : Year(document).ToString();
+    }
+
+    /// <summary>Имя файла «Тип_Дисциплина_Период»: «РПД_Программирование_2026-2027.docx».</summary>
+    public static string FileName(Document document, string discipline, string period, string extension)
     {
         var type = document.Type == TemplateTypes.Fos ? "ФОС" : "РПД";
         var name = Spaces().Replace(InvalidChars().Replace(discipline, ""), " ").Trim();
-        return $"{type}_{name}_{year}.{extension}";
+        return $"{type}_{name}_{period}.{extension}";
     }
+
+    [GeneratedRegex(@"^\s*(\d{4})\s*/\s*(\d{4})\s*$")]
+    private static partial Regex AcademicYear();
 
     [GeneratedRegex(@"[\\/:*?""<>|\x00-\x1F]")]
     private static partial Regex InvalidChars();
