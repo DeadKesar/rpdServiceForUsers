@@ -266,6 +266,27 @@ public class TemplatesApiTests(DatabaseFixture app)
     }
 
     [Fact]
+    public async Task Print_template_downloads_with_original_name_in_any_status()
+    {
+        var (client, plan) = await MethodistWithPlanAsync();
+        var created = await CreateAsync(client, DocumentTypeRegistry.Rpd, plan.Id);
+        var missing = await client.GetAsync($"/api/templates/{created.Template.Id}/print-template");
+        var content = DocxBookmarksTests.Template(DocxBookmarksTests.Rpd);
+        var draft = await UploadAsync(client, created, content, DocxBookmarksTests.Rpd);
+        var published = await PostAsync(client, $"/api/templates/{draft.Template.Id}/publish", draft.Template.Version);
+
+        var response = await client.GetAsync($"/api/templates/{published.Template.Id}/print-template");
+        var teacher = await app.CreateClientFor(AppRoles.Teacher).GetAsync($"/api/templates/{published.Template.Id}/print-template");
+
+        Assert.Equal(HttpStatusCode.NotFound, missing.StatusCode);
+        Assert.Equal("Шаблон оформления не загружен", (await missing.Content.ReadFromJsonAsync<ProblemDetails>())!.Title);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(DocxBookmarksTests.Rpd, response.Content.Headers.ContentDisposition!.FileNameStar);
+        Assert.Equal(content, await response.Content.ReadAsByteArrayAsync());
+        Assert.Equal(HttpStatusCode.Forbidden, teacher.StatusCode);
+    }
+
+    [Fact]
     public async Task Plans_are_listed_for_template_creation()
     {
         var (client, plan) = await MethodistWithPlanAsync();

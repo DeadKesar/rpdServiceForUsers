@@ -95,7 +95,13 @@ else
         <dt class="col-sm-3">Учебный план</dt>
         <dd class="col-sm-9">@(t.Plan?.Title ?? "не привязан")</dd>
         <dt class="col-sm-3">Шаблон оформления</dt>
-        <dd class="col-sm-9">@(details.PrintTemplateName ?? "не загружен")</dd>
+        <dd class="col-sm-9">
+            @(details.PrintTemplateName ?? "не загружен")
+            @if (canManage && details.PrintTemplateName is not null)
+            {
+                <button class="btn btn-link btn-sm p-0 ms-2 align-baseline" @onclick="DownloadPrintTemplateAsync" disabled="@busy">Скачать</button>
+            }
+        </dd>
         @if (t.PublishedAt is { } published)
         {
             <dt class="col-sm-3">Опубликован</dt>
@@ -405,6 +411,21 @@ else
         }
         else
             await ShowProblemAsync(response);
+    }
+
+    private async Task DownloadPrintTemplateAsync()
+    {
+        await RunAsync(async () =>
+        {
+            var response = await Http.GetAsync($"api/templates/{Id}/print-template");
+            if (!response.IsSuccessStatusCode)
+            {
+                await ShowProblemAsync(response);
+                return;
+            }
+            await JS.InvokeVoidAsync("rpdfosDownload", await response.Content.ReadAsByteArrayAsync(), details!.PrintTemplateName,
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+        });
     }
 
     private async Task RunAsync(Func<Task> action)

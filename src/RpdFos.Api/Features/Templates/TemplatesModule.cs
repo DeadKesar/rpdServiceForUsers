@@ -31,6 +31,7 @@ public class TemplatesModule : ICarterModule
         g.MapGet("/", List);
         g.MapGet("/{id:guid}", Get);
         g.MapPost("/", Create).RequireAuthorization(Policies.MethodistOrAdmin);
+        g.MapGet("/{id:guid}/print-template", DownloadPrintTemplate).RequireAuthorization(Policies.MethodistOrAdmin);
         g.MapPost("/{id:guid}/print-template", UploadPrintTemplate)
             .Accepts<IFormFile>("multipart/form-data")
             .RequireAuthorization(Policies.MethodistOrAdmin);
@@ -85,6 +86,22 @@ public class TemplatesModule : ICarterModule
 
         return Results.Created($"/api/templates/{t.Id}", await DetailsAsync(t, db, lifecycle, registry, ct));
     }
+
+    /// <summary>Загруженный DOCX-шаблон оформления с исходным именем — в любом статусе шаблона (ЛР Т9).</summary>
+    private static async Task<IResult> DownloadPrintTemplate(Guid id, AppDbContext db, CancellationToken ct)
+    {
+        var t = await db.DocumentTemplates.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct);
+        if (t is null) return TemplateNotFound();
+        var file = t.PrintTemplateFileId is Guid fileId
+            ? await db.UploadedFiles.AsNoTracking().SingleOrDefaultAsync(f => f.Id == fileId, ct)
+            : null;
+        if (file?.Content is null)
+            return Results.Problem(statusCode: StatusCodes.Status404NotFound, title: "Шаблон оформления не загружен",
+                detail: "У шаблона нет DOCX-шаблона оформления.");
+        return Results.File(file.Content, DocxContentType, file.OriginalName);
+    }
+
+    private const string DocxContentType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
     /// <summary>
     /// DOCX-шаблон оформления: файл — в uploaded_files, закладки читаются из него, сопоставление по умолчанию —
