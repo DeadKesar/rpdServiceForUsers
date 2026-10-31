@@ -58,6 +58,8 @@ dotnet ef migrations add <Имя> -p src/RpdFos.Core -s src/RpdFos.Api
 
 Ветка `main`. Коммиты мелкие, в стиле Conventional Commits: `feat:`, `fix:`, `chore:`, `test:`, `docs:`, `refactor:`. Перед коммитом `dotnet build` и `dotnet test` — зелёные. После каждого коммита — `git push` (разрешено автором; отдельного подтверждения не нужно). Веха этапа — аннотированный тег: `git tag -a v0.N -m "…"`, push вместе с тегами (`git push --follow-tags`).
 
+Задания этапов (`docs/tasks/etap-*.md`) — внутренняя документация автора: в репозиторий их не добавлять, в том числе принудительно (`git add -f`). Уже закоммиченные `etap-2.md` и `etap-3.md` не трогать.
+
 ## Чего не делать
 
 - Не удалять `src/RpdFos.Api/Properties/launchSettings.json`: профиль `https` в окружении Development нужен для входа. OpenIddict принимает только HTTPS, а адрес возврата клиента — `https://localhost:5081`.
