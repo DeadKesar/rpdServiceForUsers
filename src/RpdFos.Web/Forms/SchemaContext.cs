@@ -13,7 +13,8 @@ public sealed class SchemaContext(JsonElement root, JsonObject payload, Document
 {
     public JsonElement Root { get; } = root;
     public JsonObject Payload { get; } = payload;
-    public DocumentMetadata Metadata { get; } = metadata;
+    /// <summary>Метаданные; после исправления трудоёмкости редактор подменяет скрытые места из ответа сохранения.</summary>
+    public DocumentMetadata Metadata { get; set; } = metadata;
 
     /// <summary>Документ целиком только для чтения: статус не позволяет правку или пользователь — не автор.</summary>
     public bool Locked { get; set; }

@@ -56,6 +56,8 @@ public class PlanCorrectionApiTests(DatabaseFixture app)
 
         var zero = await PatchHoursAsync(methodist, created, version, s => s["lab_hours"] = 0);
         Assert.False(zero.Sections!.Single(s => s.Key == "lab_works").Visible);
+        // Ответ сохранения несёт скрытые места: редактор обновляет форму без перезагрузки.
+        Assert.Contains("/lab_works", zero.HiddenPaths!);
         var hidden = (await DetailsAsync(methodist, created)).Metadata.HiddenPaths;
         Assert.Contains("/lab_works", hidden);
         Assert.Contains("/literature/guidelines/lab_works", hidden);

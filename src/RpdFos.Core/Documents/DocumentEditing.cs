@@ -12,10 +12,11 @@ public enum SectionUpdateProblem { UnknownSection, HiddenSection, ReadOnlyChange
 
 /// <summary>
 /// Итог изменения раздела: отказ с ошибками по полям или новое состояние раздела — и всех разделов: правка одного
-/// меняет заполненность других (тематический план сверяется с трудоёмкостью).
+/// меняет заполненность других (тематический план сверяется с трудоёмкостью), исправление трудоёмкости — состав
+/// разделов и скрытые места (этап 5.2).
 /// </summary>
 public sealed record SectionUpdateResult(SectionUpdateProblem? Problem, IReadOnlyList<DocumentValidationError> Errors, SectionState? Section,
-    IReadOnlyList<SectionState>? Sections = null);
+    IReadOnlyList<SectionState>? Sections = null, IReadOnlyList<string>? HiddenPaths = null);
 
 /// <summary>
 /// Изменение и сохранение документа. Раздел проверяется в режиме черновика, форматированный текст санитизируется,
@@ -112,7 +113,7 @@ public sealed class DocumentEditing(
         await history.SnapshotAsync(document, editorId, broken.Count > 0 ? VersionTriggers.StatusChange : VersionTriggers.AutoSave, ct);
 
         var metadata = DocumentMetadata.Build(schemaJson, element, document.Status, facts, validator, rules, registry.FindSchema);
-        return new(null, [], metadata.Sections.Single(s => s.Key == section), metadata.Sections);
+        return new(null, [], metadata.Sections.Single(s => s.Key == section), metadata.Sections, metadata.HiddenPaths);
     }
 
     // «Принят → На доработке»: замечание от исправившего к месту первой ошибки раздела — по одному на раздел, текст —

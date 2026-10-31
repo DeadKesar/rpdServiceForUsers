@@ -535,6 +535,9 @@ else
                 // Правка одного раздела меняет заполненность и предупреждения других (тематический план сверяется
                 // с трудоёмкостью) — сервер присылает все разделы и историю исправлений полей из плана.
                 sections = saved.Sections ?? sections.Select(s => s.Key == saved.Section.Key ? saved.Section : s).ToList();
+                // Исправление трудоёмкости меняет состав разделов (этап 5.2): появившийся раздел должен получить поля.
+                if (saved.HiddenPaths is { } hidden)
+                    context!.Metadata = context.Metadata with { Sections = sections, HiddenPaths = hidden };
                 if (saved.PlanCorrections is { } corrections)
                 {
                     details = details! with { PlanCorrections = corrections };
