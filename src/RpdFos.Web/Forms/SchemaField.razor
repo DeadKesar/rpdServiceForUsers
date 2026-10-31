@@ -37,7 +37,7 @@
                     {
                         <span class="badge text-bg-light border ms-1" title="Заполняется из учебного плана и справочников">из учебного плана</span>
                     }
-                    @if (Context.PlanMark(Path, Value) is { } mark)
+                    @if (Context.PlanMark(Path, Value, Schema) is { } mark)
                     {
                         <span class="badge text-bg-warning ms-1" title="@Context.CorrectionInfo(Path)">@mark</span>
                     }

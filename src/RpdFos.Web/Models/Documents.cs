@@ -52,7 +52,8 @@ public sealed record SectionSaved(int Version, string Status, string StatusTitle
 public sealed record DocumentSaved(int Version, string Status, string StatusTitle, DateTimeOffset SavedAt);
 
 /// <summary>Ответ об ошибке API документов: причины по полям — путь и сообщение.</summary>
-public sealed record DocumentProblem(string? Title, string? Detail, List<FieldError>? Errors, Guid? DocumentId);
+/// <param name="ConfirmReturn">Исправление принятого документа вернёт его автору — сервер ждёт подтверждения (этап 5.2).</param>
+public sealed record DocumentProblem(string? Title, string? Detail, List<FieldError>? Errors, Guid? DocumentId, bool ConfirmReturn = false);
 
 public static class SectionFills
 {

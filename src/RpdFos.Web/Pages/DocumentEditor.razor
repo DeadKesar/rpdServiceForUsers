@@ -504,8 +504,31 @@ else
             var at = edits;
             var value = JsonDocument.Parse(payload![current]?.ToJsonString() ?? "null").RootElement;
             var response = await Http.PatchAsJsonAsync($"api/documents/{Id}/sections/{current}", new { version, value });
+            var problem = response.IsSuccessStatusCode ? null : await ReadProblemAsync(response);
+            // Исправление принятого документа его ломает (этап 5.2): причины — исправляющему, возврат автору — по согласию.
+            if (problem is { ConfirmReturn: true })
+            {
+                var reasons = string.Join("\n", (problem.Errors ?? []).Select(e => $"• {PlaceTitle(e.Path)}: {e.Message}"));
+                if (!await JS.InvokeAsync<bool>("confirm",
+                        $"После исправления документ не проходит проверку:\n{reasons}\n\nВернуть документ автору на доработку?"))
+                {
+                    // Отказ — значение поля возвращается к прежнему: на сервере исправление не сохранено.
+                    await LoadAsync();
+                    (messageIsError, message) = (false, "Исправление отменено, значение возвращено к прежнему.");
+                    return true;
+                }
+                response = await Http.PatchAsJsonAsync($"api/documents/{Id}/sections/{current}", new { version, value, confirmReturn = true });
+                problem = response.IsSuccessStatusCode ? null : await ReadProblemAsync(response);
+            }
             if (response.IsSuccessStatusCode && await response.Content.ReadFromJsonAsync<SectionSaved>() is { } saved)
             {
+                // Документ ушёл автору — права и действия по новому статусу: документ перечитывается.
+                if (saved.Status != details!.Document.Status)
+                {
+                    await LoadAsync();
+                    (messageIsError, message) = (false, $"Документ возвращён автору на доработку, статус — «{saved.StatusTitle}».");
+                    return true;
+                }
                 version = saved.Version;
                 statusTitle = saved.StatusTitle;
                 savedAt = saved.SavedAt;
@@ -522,7 +545,6 @@ else
                 return true;
             }
 
-            var problem = await ReadProblemAsync(response);
             if (response.StatusCode == HttpStatusCode.Conflict && problem?.Title == "Конфликт версий")
             {
                 conflict = true;

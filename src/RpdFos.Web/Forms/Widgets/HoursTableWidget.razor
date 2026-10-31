@@ -3,7 +3,8 @@
 @inherits FieldBase
 
 @* Трудоёмкость из учебного плана: часы по семестрам и видам занятий, виды аттестации — только для чтения.
-   Методист и администратор исправляют часы (этап 5.1): исправленная ячейка помечена значением по плану.
+   Методист и администратор исправляют часы (этап 5.1) и виды аттестации (этап 5.2): исправленная ячейка помечена
+   значением по плану.
    Под ней — виды самостоятельной работы автора: своё поле схемы со своим виджетом из реестра. *@
 <div class="mb-3">
     <p class="text-muted small mb-2">
@@ -59,7 +60,34 @@
                             }
                         </td>
                     }
-                    <td>@string.Join(", ", (s["control_types"] as JsonArray ?? []).Select(t => SchemaContext.EnumTitle(ControlTypes, Text(t) ?? "")))</td>
+                    @{
+                        var typesPath = $"{Path}/semesters/{row}/control_types";
+                        var typesMark = Context.PlanMark(typesPath, s["control_types"], ControlTypes);
+                    }
+                    <td class="text-start @(typesMark is null ? "" : "table-warning")"
+                        title="@(typesMark is null ? null : Context.CorrectionInfo(typesPath) is { } typesWho ? $"{typesMark} ({typesWho})" : typesMark)">
+                        @if (Editable)
+                        {
+                            @* Виды аттестации исправляются как часы (этап 5.2): от них зависят курсовой проект и строки аттестации. *@
+                            @foreach (var code in ControlTypeCodes)
+                            {
+                                var id = $"ct-{row}-{code}";
+                                <div class="form-check form-check-inline me-2 text-nowrap">
+                                    <input class="form-check-input" type="checkbox" id="@id" checked="@Has(s, code)"
+                                           @onchange="e => Toggle(s, typesPath, code, e.Value is true)" />
+                                    <label class="form-check-label small" for="@id">@SchemaContext.EnumTitle(ControlTypes, code)</label>
+                                </div>
+                            }
+                            @if (typesMark is not null)
+                            {
+                                <div class="small text-muted">@typesMark</div>
+                            }
+                        }
+                        else
+                        {
+                            @string.Join(", ", (s["control_types"] as JsonArray ?? []).Select(t => SchemaContext.EnumTitle(ControlTypes, Text(t) ?? "")))
+                        }
+                    </td>
                 </tr>
             }
         </tbody>
@@ -68,8 +96,8 @@
     @if (Editable)
     {
         <div class="form-text">
-            Часы из учебного плана исправляются, когда дешевле поправить документ, чем план: исправленное помечается,
-            в истории — кто, когда, было и стало. Виды аттестации меняются в учебном плане.
+            Часы и виды аттестации из учебного плана исправляются, когда дешевле поправить документ, чем план:
+            исправленное помечается, в истории — кто, когда, было и стало.
         </div>
     }
     @if (Value is JsonObject hours && SelfStudyKinds.ValueKind == JsonValueKind.Object)
@@ -102,6 +130,24 @@
     // Шаблоны, опубликованные до этапа 5.1, видов самостоятельной работы в схеме не имеют.
     private JsonElement SelfStudyKinds =>
         Schema.TryGetProperty("properties", out var p) && p.TryGetProperty("self_study_kinds", out var k) ? Context.Resolve(k) : default;
+
+    // Коды видов аттестации — в порядке перечисления схемы: в том же порядке их пишет предзаполнение из плана.
+    private IEnumerable<string> ControlTypeCodes =>
+        ControlTypes.ValueKind == JsonValueKind.Object && ControlTypes.TryGetProperty("enum", out var e)
+            ? e.EnumerateArray().Select(v => v.GetString() ?? "").Where(v => v.Length > 0)
+            : [];
+
+    private bool Has(JsonObject semester, string code) =>
+        (semester["control_types"] as JsonArray ?? []).Any(t => Text(t) == code);
+
+    private void Toggle(JsonObject semester, string path, string code, bool on)
+    {
+        var current = (semester["control_types"] as JsonArray ?? []).Select(t => Text(t)).OfType<string>().ToHashSet();
+        if (on) current.Add(code);
+        else current.Remove(code);
+        semester["control_types"] = new JsonArray(ControlTypeCodes.Where(current.Contains).Select(c => (JsonNode)JsonValue.Create(c)!).ToArray());
+        Context.Changed(path);
+    }
 
     // Схема видов аттестации — для русских названий кодов (x-enum-titles).
     private JsonElement ControlTypes =>

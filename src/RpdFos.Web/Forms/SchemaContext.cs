@@ -102,13 +102,13 @@ public sealed class SchemaContext(JsonElement root, JsonObject payload, Document
 
     /// <summary>
     /// Пометка исправленного поля из плана: «изменено методистом, в плане: 24»; значение как в плане — null. В печати
-    /// пометок нет.
+    /// пометок нет. Коды перечислений — названиями из <paramref name="enumSchema"/> (виды аттестации — «Экзамен»).
     /// </summary>
-    public string? PlanMark(string path, JsonNode? current)
+    public string? PlanMark(string path, JsonNode? current, JsonElement enumSchema = default)
     {
         if (PlanValueAt(path) is not var (found, plan) || !found) return null;
         if (JsonNode.DeepEquals(Normalize(plan), Normalize(current))) return null;
-        return $"изменено методистом, в плане: {PlanText(plan)}";
+        return $"изменено методистом, в плане: {PlanText(plan, enumSchema)}";
     }
 
     /// <summary>Кто и когда последним исправлял это место — для подсказки у пометки.</summary>
@@ -137,11 +137,11 @@ public sealed class SchemaContext(JsonElement root, JsonObject payload, Document
     // Число из формы и из сервера хранятся по-разному — сравнение через текст JSON.
     private static JsonNode? Normalize(JsonNode? node) => node is null ? null : JsonNode.Parse(node.ToJsonString());
 
-    public static string PlanText(JsonNode? value) => value switch
+    public static string PlanText(JsonNode? value, JsonElement enumSchema = default) => value switch
     {
         null => "—",
-        JsonArray a => a.Count == 0 ? "—" : string.Join(", ", a.Select(PlanText)),
-        JsonValue v when v.TryGetValue(out string? s) => s.Length == 0 ? "—" : s,
+        JsonArray a => a.Count == 0 ? "—" : string.Join(", ", a.Select(x => PlanText(x, enumSchema))),
+        JsonValue v when v.TryGetValue(out string? s) => s.Length == 0 ? "—" : EnumTitle(enumSchema, s),
         _ => value.ToJsonString()
     };
 
