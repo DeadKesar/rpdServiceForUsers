@@ -51,6 +51,9 @@ public class DocumentSubmissionTests
     // Список: обязательный или условный — элемент сам список; записи есть, но ошибка правила — часть.
     [InlineData("""{ "type": "array" }""", true, "[]", 1, SectionFill.Empty)]
     [InlineData("""{ "type": "array", "x-visible-if": { "source": "parser.discipline.details", "any": "lab_hours" } }""", false, """[ { "hours": 4 } ]""", 1, SectionFill.Incomplete)]
+    // Правило на разделе — обязательный элемент: без ошибок — выполнен, с ошибкой при начатом разделе — часть.
+    [InlineData("""{ "type": "object", "x-validation-rule": "hours_match_curriculum" }""", false, """{ "total_hours": 108 }""", 0, SectionFill.Complete)]
+    [InlineData("""{ "type": "object", "x-validation-rule": "hours_match_curriculum" }""", false, """{ "total_hours": 108 }""", 1, SectionFill.Incomplete)]
     // Обязательного нет: без ошибок — серый; необязательный пустой объект ничего не требует.
     [InlineData("""{ "type": "object", "properties": {} }""", false, null, 0, SectionFill.NotApplicable)]
     [InlineData("""{ "type": "object", "required": ["number"] }""", false, null, 0, SectionFill.NotApplicable)]

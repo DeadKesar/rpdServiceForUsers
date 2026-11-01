@@ -23,15 +23,23 @@ public static class SectionFill
     {
         var present = value is { } v && !DocumentSubmission.IsEmpty(v);
         var mandatory = requiredAtRoot || section.TryGetProperty("x-visible-if", out _);
+        // Правило проверки на разделе или его полях (сверка часов) — тоже обязательный элемент: раздел, где его
+        // ошибку исправили, — выполнен, а не «обязательного нет» (найдено при проверке B4 в браузере).
+        var rule = HasRule(section) ? (1, present ? 1 : 0) : (0, 0);
         if (section.TryGetProperty("type", out var type) && type.GetString() == "array")
-            return mandatory ? (1, present ? 1 : 0) : (0, 0);
+            return mandatory ? (1, present ? 1 : 0) : rule;
         if (!section.TryGetProperty("required", out var required) || required.ValueKind != JsonValueKind.Array || !mandatory && !present)
-            return (0, 0);
+            return rule;
         var names = required.EnumerateArray().Select(n => n.GetString() ?? "").ToList();
         var filled = names.Count(n => value is { ValueKind: JsonValueKind.Object } o && o.TryGetProperty(n, out var field) &&
             !DocumentSubmission.IsEmpty(field));
-        return (names.Count, filled);
+        return (names.Count + rule.Item1, filled + rule.Item2);
     }
+
+    private static bool HasRule(JsonElement section) =>
+        section.TryGetProperty("x-validation-rule", out _) ||
+        section.TryGetProperty("properties", out var props) && props.ValueKind == JsonValueKind.Object &&
+        props.EnumerateObject().Any(p => p.Value.ValueKind == JsonValueKind.Object && p.Value.TryGetProperty("x-validation-rule", out _));
 
     /// <summary>
     /// Состояние по ошибкам полной проверки и обязательным элементам: ошибок нет — всё заполнено (или требовать нечего);
