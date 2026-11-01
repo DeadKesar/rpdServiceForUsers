@@ -153,11 +153,12 @@ public class DocumentsApiTests(DatabaseFixture app)
         var missing = Assert.Single(sections["hours_distribution"].Missing);
         Assert.Equal("/hours_distribution/self_study_kinds", missing.Path);
         Assert.Contains("по видам 0 ч", missing.Message);
-        Assert.Equal(SectionFill.Incomplete, sections["goals_and_objectives"].Fill);
+        // Ни одного обязательного элемента (цели, задачи) ещё нет — «ни одного», красный индикатор (этап 5.2).
+        Assert.Equal(SectionFill.Empty, sections["goals_and_objectives"].Fill);
         // Видимый условный раздел обязателен при отправке — хотя бы одна запись; новый документ его ещё не заполнил.
         Assert.All(sections.Values.Where(s => s.Visible && s.Key is "lab_works" or "practical_classes"), s =>
         {
-            Assert.Equal(SectionFill.Incomplete, s.Fill);
+            Assert.Equal(SectionFill.Empty, s.Fill);
             Assert.Equal(DocumentSubmission.EmptyVisibleSection, Assert.Single(s.Missing).Message);
         });
         // Курсовой: вид — из плана, примерные темы пишет автор.

@@ -161,6 +161,19 @@ public sealed class SchemaContext(JsonElement root, JsonObject payload, Document
 
     public bool IsHidden(string path) => Metadata.HiddenPaths.Contains(path);
 
+    /// <summary>
+    /// Ошибка полной проверки у самого поля — из <c>Missing</c> его раздела (этап 5.2): рамка и подпись под полем.
+    /// Незаполненное обязательное — «Обязательное поле», остальное — текстом ошибки. Ошибок нет — null.
+    /// </summary>
+    public string? MissingAt(string path)
+    {
+        var section = path.TrimStart('/').Split('/')[0];
+        var error = Metadata.Sections.FirstOrDefault(s => s.Key == section)?.Missing.FirstOrDefault(m => m.Path == path);
+        return error is null ? null
+            : error.Message.StartsWith("Обязательное поле", StringComparison.Ordinal) ? "Обязательное поле"
+            : error.Message;
+    }
+
     /// <summary>Переход по локальным ссылкам схемы «#/$defs/…».</summary>
     public JsonElement Resolve(JsonElement node)
     {

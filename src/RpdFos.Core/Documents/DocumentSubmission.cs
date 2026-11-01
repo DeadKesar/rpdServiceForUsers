@@ -52,7 +52,7 @@ public static class DocumentSubmission
     public static string Section(string path) => path.TrimStart('/').Split('/')[0];
 
     // Запись — элемент списка или заполненное поле раздела-объекта.
-    private static bool IsEmpty(JsonElement value) => value.ValueKind switch
+    public static bool IsEmpty(JsonElement value) => value.ValueKind switch
     {
         JsonValueKind.Array => value.GetArrayLength() == 0,
         JsonValueKind.Object => !value.EnumerateObject().Any(p => p.Value.ValueKind is not (JsonValueKind.Null or JsonValueKind.Undefined)

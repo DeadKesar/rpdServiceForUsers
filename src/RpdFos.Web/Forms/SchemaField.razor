@@ -7,15 +7,27 @@
 @if (!Context.IsHidden(Path))
 {
     var widget = WidgetRegistry.Find(Schema, Context);
+    // Список или объект с ошибкой у самого места (пустой обязательный список, раздел без записей) — в красной рамке.
+    var missing = SchemaContext.Type(Schema) is "array" or "object" && !Context.IsReadOnly(Path, Schema) ? Context.MissingAt(Path) : null;
     <div id="@SchemaContext.Anchor(Path)">
         @if (widget is not null)
         {
-            <DynamicComponent Type="widget" Parameters="Parameters" />
+            <div class="@(missing is null ? "" : "field-missing-box p-2 mb-1")">
+                <DynamicComponent Type="widget" Parameters="Parameters" />
+            </div>
+            @if (missing is not null)
+            {
+                <div class="field-missing-text mb-3">@missing</div>
+            }
             <FieldComments Context="Context" Path="@Path" Subtree="true" />
         }
         else if (SchemaContext.Type(Schema) == "object")
         {
-            <fieldset class="mb-3 @(Nested ? "border rounded p-2" : "")">
+            @if (missing is not null)
+            {
+                <div class="field-missing-text">@missing</div>
+            }
+            <fieldset class="mb-3 @(Nested ? "border rounded p-2" : "") @(missing is null ? "" : "field-missing-box p-2")">
                 @if (Nested)
                 {
                     <legend class="fs-6 fw-semibold w-auto px-1">@Title</legend>

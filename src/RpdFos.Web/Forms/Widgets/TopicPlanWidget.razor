@@ -22,12 +22,12 @@
                         var (key, title) = kinds[k];
                         var planned = Number(semester[key]);
                         var topics = TopicHours(key, number);
-                        <tr class="@(topics != planned ? "table-warning" : "")">
+                        <tr>
                             @if (k == 0)
                             {
                                 <td rowspan="@kinds.Count">@number</td>
                             }
-                            <td>@title</td><td>@topics / @planned</td>
+                            <td>@title</td><td><HoursSum Actual="topics" Planned="planned" ShowPlanned="true" /></td>
                         </tr>
                     }
                 }
@@ -45,8 +45,8 @@
                 {
                     var planned = PlanHours(key);
                     var topics = TopicHours(key);
-                    <tr class="@(topics != planned ? "table-warning" : "")">
-                        <td>@title</td><td>@topics</td><td>@planned</td>
+                    <tr>
+                        <td>@title</td><td><HoursSum Actual="topics" Planned="planned" /></td><td>@planned</td>
                     </tr>
                 }
             </tbody>

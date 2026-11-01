@@ -206,12 +206,24 @@ else
                             {
                                 <span class="badge text-bg-warning me-1" title="Неразрешённые замечания">💬 @open</span>
                             }
-                            <span title="@FillTitle(s)">@FillMark(s)</span>
+                            @* Круг по палитре и число недостающего рядом: цвет — не единственный признак. *@
+                            <span title="@FillTitle(s)" class="d-inline-flex align-items-center gap-1">
+                                @if (s.Fill is SectionFills.Incomplete or SectionFills.Empty)
+                                {
+                                    <span>@s.Missing.Count</span>
+                                }
+                                <span class="fill-dot fill-@s.Fill" role="img" aria-label="@FillTitle(s)"></span>
+                            </span>
                         </span>
                     </button>
                 }
             </div>
-            <div class="small text-muted mt-2">✓ заполнен · ● не хватает обязательного · — не предусмотрен учебным планом</div>
+            <ul class="list-unstyled small text-muted mt-2 mb-0">
+                <li><span class="fill-dot fill-complete me-1"></span>выполнено всё обязательное</li>
+                <li><span class="fill-dot fill-incomplete me-1"></span>выполнено частично (число — сколько не хватает)</li>
+                <li><span class="fill-dot fill-empty me-1"></span>не выполнено ни одного</li>
+                <li><span class="fill-dot fill-not_applicable me-1"></span>обязательного нет или раздел не предусмотрен</li>
+            </ul>
         </nav>
 
         <section class="col-md-9">
@@ -536,8 +548,8 @@ else
                 // с трудоёмкостью) — сервер присылает все разделы и историю исправлений полей из плана.
                 sections = saved.Sections ?? sections.Select(s => s.Key == saved.Section.Key ? saved.Section : s).ToList();
                 // Исправление трудоёмкости меняет состав разделов (этап 5.2): появившийся раздел должен получить поля.
-                if (saved.HiddenPaths is { } hidden)
-                    context!.Metadata = context.Metadata with { Sections = sections, HiddenPaths = hidden };
+                // Поля узнают свои ошибки из Missing раздела — разделы в контексте обновляются при каждом сохранении.
+                context!.Metadata = context.Metadata with { Sections = sections, HiddenPaths = saved.HiddenPaths ?? context.Metadata.HiddenPaths };
                 // Сервер довёл производное (контактная работа, вид курсового проектирования) — содержимое с его
                 // значениями, иначе следующее сохранение вернуло бы прежние. Введённое во время запроса не трогаем.
                 if (saved.Payload is { ValueKind: JsonValueKind.Object } server && edits == at)
@@ -704,18 +716,13 @@ else
         void Add(string path, string text) => texts.Add($"{context!.FieldTitle(path)}: {text}");
     }
 
-    private static string FillMark(SectionState s) => s.Fill switch
-    {
-        SectionFills.Complete => "✓",
-        SectionFills.Incomplete => $"● {s.Missing.Count}",
-        _ => "—"
-    };
-
+    // Подсказка индикатора — то же словами, с числом недостающего.
     private static string FillTitle(SectionState s) => s.Fill switch
     {
-        SectionFills.Complete => "Заполнен",
-        SectionFills.Incomplete => "Не хватает обязательного для отправки",
-        _ => "Не предусмотрен учебным планом"
+        SectionFills.Complete => "Выполнены все обязательные элементы",
+        SectionFills.Incomplete => $"Выполнена часть обязательного, не хватает: {s.Missing.Count}",
+        SectionFills.Empty => $"Не выполнено ни одного обязательного элемента, не хватает: {s.Missing.Count}",
+        _ => s.Visible ? "Обязательных элементов нет" : "Раздел не предусмотрен учебным планом"
     };
 
     private static async Task<DocumentProblem?> ReadProblemAsync(HttpResponseMessage response)

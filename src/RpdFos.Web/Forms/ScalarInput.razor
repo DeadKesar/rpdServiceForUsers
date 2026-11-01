@@ -7,7 +7,7 @@
 @switch (Kind)
 {
     case "enum":
-        <select class="form-select @Size" disabled="@ReadOnly" value="@Current" @onchange="e => SetText(e.Value as string)">
+        <select class="form-select @Size @MissingClass" disabled="@ReadOnly" value="@Current" @onchange="e => SetText(e.Value as string)">
             <option value="">—</option>
             @foreach (var option in Schema.GetProperty("enum").EnumerateArray().Select(v => v.ToString()))
             {
@@ -20,25 +20,34 @@
                @onchange="e => SetValue(e.Value is true ? JsonValue.Create(true) : null)" />
         break;
     case "integer" or "number":
-        <input type="number" class="form-control @Size" readonly="@ReadOnly" value="@Current"
+        <input type="number" class="form-control @Size @MissingClass" readonly="@ReadOnly" value="@Current"
                step="@(Kind == "integer" ? "1" : "any")" @oninput="e => InputNumber(e.Value as string)" @onchange="e => SetNumber(e.Value as string)" />
         break;
     case "date":
-        <input type="date" class="form-control @Size" readonly="@ReadOnly" value="@Current"
+        <input type="date" class="form-control @Size @MissingClass" readonly="@ReadOnly" value="@Current"
                @oninput="e => InputText(e.Value as string)" @onchange="e => SetText(e.Value as string)" />
         break;
     case "textarea":
         @* Длинная строка (библиографическая запись, название ресурса) — во всю ширину, высота по содержимому. *@
-        <textarea class="form-control auto-grow @Size" rows="@(Compact ? 1 : 2)" readonly="@ReadOnly"
+        <textarea class="form-control auto-grow @Size @MissingClass" rows="@(Compact ? 1 : 2)" readonly="@ReadOnly"
                   @oninput="e => InputText(e.Value as string)" @onchange="e => SetText(OneParagraph(e.Value as string))">@Current</textarea>
         break;
     default:
-        <input type="text" class="form-control @Size" readonly="@ReadOnly" value="@Current" placeholder="@Placeholder"
+        <input type="text" class="form-control @Size @MissingClass" readonly="@ReadOnly" value="@Current" placeholder="@Placeholder"
                @oninput="e => InputText(e.Value as string)" @onchange="e => SetText(e.Value as string)" />
         break;
 }
+@if (Missing is { } missing)
+{
+    <div class="field-missing-text">@missing</div>
+}
 
 @code {
+    // Ошибка полной проверки у этого поля (этап 5.2): красная рамка 2 px и подпись под полем.
+    private string? Missing => ReadOnly ? null : Context.MissingAt(Path);
+
+    private string MissingClass => Missing is null ? "" : "field-missing-box";
+
     /// <summary>Ячейка таблицы — компактный размер.</summary>
     [Parameter] public bool Compact { get; set; }
 

@@ -80,7 +80,7 @@
                 @foreach (var (semester, plan) in Semesters)
                 {
                     var sum = Sum(semester);
-                    <td class="@(sum != plan ? "table-warning" : "")">@sum / @plan</td>
+                    <td><HoursSum Actual="sum" Planned="plan" ShowPlanned="true" /></td>
                 }
                 <td></td>
             </tr>

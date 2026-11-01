@@ -5,10 +5,43 @@ using RpdFos.Core.DocumentTypes;
 
 namespace RpdFos.Core.Documents;
 
-/// <summary>Заполненность раздела по обязательным полям режима отправки.</summary>
+/// <summary>
+/// Заполненность раздела по обязательным элементам режима отправки: всё (complete), часть (incomplete), ни одного
+/// (empty, этап 5.2); not_applicable — раздел не предусмотрен или обязательных элементов у него нет.
+/// </summary>
 public static class SectionFill
 {
-    public const string Complete = "complete", Incomplete = "incomplete", NotApplicable = "not_applicable";
+    public const string Complete = "complete", Incomplete = "incomplete", Empty = "empty", NotApplicable = "not_applicable";
+
+    /// <summary>
+    /// Обязательные элементы раздела и сколько из них заполнено. Раздел-список — один элемент, если он обязателен
+    /// в корне схемы или условный (предусмотрен — значит, нужна хотя бы одна запись): заполнен, когда в нём есть записи.
+    /// Раздел-объект — его обязательные поля (<c>required</c>), если объект обязателен или уже начат: необязательный
+    /// пустой объект ничего не требует, как и проверка схемы.
+    /// </summary>
+    public static (int Total, int Filled) Required(JsonElement section, bool requiredAtRoot, JsonElement? value)
+    {
+        var present = value is { } v && !DocumentSubmission.IsEmpty(v);
+        var mandatory = requiredAtRoot || section.TryGetProperty("x-visible-if", out _);
+        if (section.TryGetProperty("type", out var type) && type.GetString() == "array")
+            return mandatory ? (1, present ? 1 : 0) : (0, 0);
+        if (!section.TryGetProperty("required", out var required) || required.ValueKind != JsonValueKind.Array || !mandatory && !present)
+            return (0, 0);
+        var names = required.EnumerateArray().Select(n => n.GetString() ?? "").ToList();
+        var filled = names.Count(n => value is { ValueKind: JsonValueKind.Object } o && o.TryGetProperty(n, out var field) &&
+            !DocumentSubmission.IsEmpty(field));
+        return (names.Count, filled);
+    }
+
+    /// <summary>
+    /// Состояние по ошибкам полной проверки и обязательным элементам: ошибок нет — всё заполнено (или требовать нечего);
+    /// есть — ни одного элемента или часть. Ошибка правила при заполненных элементах — тоже часть.
+    /// </summary>
+    public static string Of(bool visible, int errors, (int Total, int Filled) required) =>
+        !visible ? NotApplicable
+        : errors == 0 ? required.Total == 0 ? NotApplicable : Complete
+        : required is { Total: > 0, Filled: 0 } ? Empty
+        : Incomplete;
 }
 
 /// <summary>
@@ -69,6 +102,9 @@ public sealed record DocumentMetadata(
         var missing = issues.Where(e => e.Level == IssueLevels.Error).ToLookup(e => DocumentSubmission.Section(e.Path));
         var warnings = issues.Where(e => e.Level == IssueLevels.Warning).ToLookup(e => DocumentSubmission.Section(e.Path));
 
+        var rootRequired = schema.TryGetProperty("required", out var r) && r.ValueKind == JsonValueKind.Array
+            ? r.EnumerateArray().Select(n => n.GetString()).ToHashSet()
+            : [];
         var sections = new List<SectionState>();
         if (schema.TryGetProperty("properties", out var properties))
             foreach (var p in properties.EnumerateObject())
@@ -77,9 +113,10 @@ public sealed record DocumentMetadata(
                 if (SchemaInspector.Deref(p.Value, ref root, resolve) is not { ValueKind: JsonValueKind.Object } section) continue;
                 var visible = ConditionalSections.IsVisible(section, semesters);
                 var errors = visible ? missing[p.Name].ToList() : [];
+                var required = SectionFill.Required(section, rootRequired.Contains(p.Name),
+                    payload.ValueKind == JsonValueKind.Object && payload.TryGetProperty(p.Name, out var value) ? value : null);
                 sections.Add(new SectionState(p.Name, Text(section, "title") ?? p.Name, visible,
-                    visible ? null : Text(section, "x-stub-text"),
-                    !visible ? SectionFill.NotApplicable : errors.Count == 0 ? SectionFill.Complete : SectionFill.Incomplete,
+                    visible ? null : Text(section, "x-stub-text"), SectionFill.Of(visible, errors.Count, required),
                     errors, visible ? warnings[p.Name].ToList() : []));
             }
 

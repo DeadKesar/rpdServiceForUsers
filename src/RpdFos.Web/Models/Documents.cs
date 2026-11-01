@@ -58,7 +58,7 @@ public sealed record DocumentProblem(string? Title, string? Detail, List<FieldEr
 
 public static class SectionFills
 {
-    public const string Complete = "complete", Incomplete = "incomplete", NotApplicable = "not_applicable";
+    public const string Complete = "complete", Incomplete = "incomplete", Empty = "empty", NotApplicable = "not_applicable";
 }
 
 public static class DocumentTitles

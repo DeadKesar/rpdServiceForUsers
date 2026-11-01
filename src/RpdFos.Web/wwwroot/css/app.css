@@ -150,3 +150,57 @@ textarea.auto-grow {
     overflow: hidden;
     resize: vertical;
 }
+
+/* Цветовая индикация редактора (этап 5.2, ЛР Т3, Т6): одна палитра для разделов, полей и сумм часов.
+   Цвет — не единственный признак: рядом всегда число, текст или значок. */
+:root {
+    --rf-ok: rgb(46, 125, 50);        /* выполнено, совпадает */
+    --rf-partial: rgb(249, 168, 37);  /* выполнено частично */
+    --rf-error: rgb(198, 40, 40);     /* ошибка, не заполнено, не совпадает */
+    --rf-none: rgb(158, 158, 158);    /* обязательного нет, раздел не предусмотрен */
+}
+
+/* Индикатор заполненности раздела в навигации — круг 12 px. */
+.fill-dot {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    vertical-align: middle;
+    flex: none;
+}
+
+.fill-complete { background: var(--rf-ok); }
+.fill-incomplete { background: var(--rf-partial); }
+.fill-empty { background: var(--rf-error); }
+.fill-not_applicable { background: var(--rf-none); }
+
+/* На активном (синем) пункте навигации круг обведён, чтобы не терялся на фоне. */
+.list-group-item.active .fill-dot {
+    box-shadow: 0 0 0 2px #fff;
+}
+
+/* Незаполненное обязательное поле или список — красная рамка 2 px и подпись под полем. */
+.field-missing > .form-control,
+.field-missing > .form-select,
+.field-missing .field-missing-box,
+.field-missing-box {
+    border: 2px solid var(--rf-error) !important;
+    border-radius: var(--bs-border-radius);
+}
+
+.field-missing-text {
+    color: var(--rf-error);
+    font-size: .875em;
+    margin-top: .25rem;
+}
+
+/* Суммы часов: совпадает — зелёным, нет — красным с подписью «по плану: M». */
+.hours-sum-ok { color: var(--rf-ok); font-weight: 600; }
+.hours-sum-bad { color: var(--rf-error); font-weight: 600; }
+
+.hours-sum-plan {
+    font-weight: normal;
+    font-size: .875em;
+    margin-left: .35em;
+}

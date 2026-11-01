@@ -43,6 +43,25 @@ public class DocumentSubmissionTests
         Assert.DoesNotContain(errors, e => e.Path.StartsWith("/course_work"));
     }
 
+    [Theory]
+    // Раздел-объект с обязательными полями: ничего — «ни одного», одно из двух — часть, всё и без ошибок — выполнен.
+    [InlineData("""{ "type": "object", "required": ["goals", "objectives"] }""", true, null, 2, SectionFill.Empty)]
+    [InlineData("""{ "type": "object", "required": ["goals", "objectives"] }""", true, """{ "goals": "Цель" }""", 1, SectionFill.Incomplete)]
+    [InlineData("""{ "type": "object", "required": ["goals", "objectives"] }""", true, """{ "goals": "Цель", "objectives": ["З"] }""", 0, SectionFill.Complete)]
+    // Список: обязательный или условный — элемент сам список; записи есть, но ошибка правила — часть.
+    [InlineData("""{ "type": "array" }""", true, "[]", 1, SectionFill.Empty)]
+    [InlineData("""{ "type": "array", "x-visible-if": { "source": "parser.discipline.details", "any": "lab_hours" } }""", false, """[ { "hours": 4 } ]""", 1, SectionFill.Incomplete)]
+    // Обязательного нет: без ошибок — серый; необязательный пустой объект ничего не требует.
+    [InlineData("""{ "type": "object", "properties": {} }""", false, null, 0, SectionFill.NotApplicable)]
+    [InlineData("""{ "type": "object", "required": ["number"] }""", false, null, 0, SectionFill.NotApplicable)]
+    public void Section_fill_counts_required_elements(string schema, bool requiredAtRoot, string? value, int errors, string expected)
+    {
+        var section = JsonDocument.Parse(schema).RootElement;
+        JsonElement? payload = value is null ? null : JsonDocument.Parse(value).RootElement;
+
+        Assert.Equal(expected, SectionFill.Of(true, errors, SectionFill.Required(section, requiredAtRoot, payload)));
+    }
+
     private static DisciplineFacts Facts(params DisciplineSemesterDetails[] semesters) => new(
         new Discipline { Name = "Дисциплина", Code = "Б1.О.99", Semesters = [.. semesters] },
         new CurriculumPlan { Year = 2026 }, new StudyDirection(), new StudyProfile(), null, []);
