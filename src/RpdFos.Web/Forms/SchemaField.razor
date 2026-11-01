@@ -7,8 +7,12 @@
 @if (!Context.IsHidden(Path))
 {
     var widget = WidgetRegistry.Find(Schema, Context);
-    // Список или объект с ошибкой у самого места (пустой обязательный список, раздел без записей) — в красной рамке.
-    var missing = SchemaContext.Type(Schema) is "array" or "object" && !Context.IsReadOnly(Path, Schema) ? Context.MissingAt(Path) : null;
+    // Виджет, список или объект с ошибкой у самого места (пустой обязательный список, раздел без записей) — в красной
+    // рамке; простые поля рамку рисуют сами (ScalarInput). Не начатый раздел-объект — рамки у его полей.
+    var missing = (widget is not null || SchemaContext.Type(Schema) is "array" or "object") && !Context.IsReadOnly(Path, Schema) &&
+                  !Context.FramesChildren(Path)
+        ? Context.MissingAt(Path)
+        : null;
     <div id="@SchemaContext.Anchor(Path)">
         @if (widget is not null)
         {

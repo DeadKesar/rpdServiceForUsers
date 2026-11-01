@@ -167,11 +167,43 @@ public sealed class SchemaContext(JsonElement root, JsonObject payload, Document
     /// </summary>
     public string? MissingAt(string path)
     {
-        var section = path.TrimStart('/').Split('/')[0];
-        var error = Metadata.Sections.FirstOrDefault(s => s.Key == section)?.Missing.FirstOrDefault(m => m.Path == path);
-        return error is null ? null
-            : error.Message.StartsWith("Обязательное поле", StringComparison.Ordinal) ? "Обязательное поле"
-            : error.Message;
+        var segments = path.TrimStart('/').Split('/');
+        var errors = Metadata.Sections.FirstOrDefault(s => s.Key == segments[0])?.Missing ?? [];
+        var error = errors.FirstOrDefault(m => m.Path == path);
+        if (error is not null) return IsRequired(error) ? "Обязательное поле" : error.Message;
+
+        // Объекта ещё нет в содержимом (раздел не начат) — проверка называет пустым его самого; рамку получают его
+        // обязательные поля, где автор и будет их заполнять.
+        if (segments.Length < 2) return null;
+        var parent = "/" + string.Join('/', segments[..^1]);
+        return errors.Any(m => m.Path == parent && IsRequired(m)) && SchemaAt(parent) is { } schema &&
+               schema.TryGetProperty("required", out var required) && required.ValueKind == JsonValueKind.Array &&
+               required.EnumerateArray().Any(r => r.GetString() == segments[^1])
+            ? "Обязательное поле"
+            : null;
+
+        static bool IsRequired(FieldError e) => e.Message.StartsWith("Обязательное поле", StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Раздел верхнего уровня с ошибкой «обязательное поле» — это не начатый раздел: рамки у его полей, не у раздела.
+    /// </summary>
+    public bool FramesChildren(string path) =>
+        path.Count(c => c == '/') == 1 && SchemaAt(path) is { } s && Type(s) == "object" &&
+        Metadata.Sections.FirstOrDefault(x => "/" + x.Key == path)?.Missing.Any(m => m.Path == path &&
+            m.Message.StartsWith("Обязательное поле", StringComparison.Ordinal)) == true;
+
+    // Подсхема места: свойства объектов и элементы списков, с переходом по $ref.
+    private JsonElement? SchemaAt(string path)
+    {
+        var node = Root;
+        foreach (var raw in path.TrimStart('/').Split('/', StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (int.TryParse(raw, out _) && node.TryGetProperty("items", out var items)) node = Resolve(items);
+            else if (node.TryGetProperty("properties", out var props) && props.TryGetProperty(raw, out var next)) node = Resolve(next);
+            else return null;
+        }
+        return node;
     }
 
     /// <summary>Переход по локальным ссылкам схемы «#/$defs/…».</summary>
