@@ -71,7 +71,8 @@ public static class PlanTitles
     public static string Attestation(IEnumerable<string> controlTypes) => string.Join(", ", controlTypes
         .Where(t => t is ControlTypeCodes.Exam or ControlTypeCodes.Credit or ControlTypeCodes.GradedCredit)
         .Distinct()
-        .Select(ControlType));
+        // Строчными, как в образце РПД вуза: «экзамен», «зачёт с оценкой» (этап 5.2).
+        .Select(t => ControlType(t).ToLowerInvariant()));
 
     /// <summary>
     /// Семестры для подписи «Разделы дисциплины, изучаемые в … семестре»: идущие подряд — диапазоном «2-3»,

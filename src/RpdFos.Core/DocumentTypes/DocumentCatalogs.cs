@@ -54,7 +54,9 @@ public static class ValidationRules
         // Этап 5: покрытие компетенций матрицы и возраст основной литературы — имён для них в каталоге проекта не было.
         "competences_match_matrix", "literature_main_recent",
         // Этап 5.1: часы видов самостоятельной работы по семестрам против плана, год издания не в будущем.
-        "self_study_kinds_match_plan", "literature_year_not_future"
+        "self_study_kinds_match_plan", "literature_year_not_future",
+        // Этап 5.2: часы таблиц лабораторных и практических против часов документа.
+        "class_hours_match_total"
     };
 }
 

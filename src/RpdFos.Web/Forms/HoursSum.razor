@@ -1,0 +1,21 @@
+@* Сумма часов против часов документа (этап 5.2): совпадает — зелёным, нет — красным с подписью «по плану: M».
+   Цвет не единственный признак: числа и подпись видны всегда. *@
+<span class="hours-sum @(Actual == Planned ? "hours-sum-ok" : "hours-sum-bad")"
+      title="@(Actual == Planned ? "Совпадает с распределением часов" : $"Не совпадает с распределением часов: {Planned} ч")">
+    @Actual@if (ShowPlanned)
+    {
+        <text> / @Planned</text>
+    }
+    @if (Actual != Planned)
+    {
+        <span class="hours-sum-plan">по плану: @Planned</span>
+    }
+</span>
+
+@code {
+    [Parameter, EditorRequired] public int Actual { get; set; }
+    [Parameter, EditorRequired] public int Planned { get; set; }
+
+    /// <summary>Показывать «X / M» — там, где столбец так и называется («по темам / по распределению часов»).</summary>
+    [Parameter] public bool ShowPlanned { get; set; }
+}

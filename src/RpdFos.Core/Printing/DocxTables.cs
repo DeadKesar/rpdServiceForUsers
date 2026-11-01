@@ -100,18 +100,20 @@ internal static class DocxTables
         SetCell(head, ["Трудоёмкость, академических часов"], bold: null, align: JustificationValues.Center);
         rows[0].AppendChild(head);
 
-        foreach (var c in columns)
+        // Как в образце РПД вуза: нулевые часы — «-», у вида промежуточного контроля «всего» пусто.
+        for (var i = 0; i < columns.Count; i++)
         {
+            var c = columns[i];
             Append(1, c.Title);
-            Append(2, c.Total.ToString());
-            Append(3, c.ContactHours.ToString());
-            Append(4, c.Lectures.ToString());
-            Append(5, c.Practice.ToString());
-            Append(6, c.LabHours.ToString());
-            Append(7, c.Control.ToString());
-            Append(8, c.SelfStudy.ToString());
+            Append(2, Hours(c.Total));
+            Append(3, Hours(c.ContactHours));
+            Append(4, Hours(c.Lectures));
+            Append(5, Hours(c.Practice));
+            Append(6, Hours(c.LabHours));
+            Append(7, Hours(c.Control));
+            Append(8, Hours(c.SelfStudy));
             Append(9, "");
-            Append(10, c.Attestation);
+            Append(10, i == columns.Count - 1 ? "" : c.Attestation);
         }
 
         SelfStudyKinds(rows[9], semesters.Select(s => s.Semester).ToList(), context, unfilled, bookmark);
@@ -148,7 +150,7 @@ internal static class DocxTables
             var row = DataRow(hint);
             var cells = row.Elements<TableCell>().ToList();
             SetCell(cells[0], [label], bold: false, JustificationValues.Left);
-            string[] values = [.. semesters.Select(s => hours.GetValueOrDefault(s).ToString()), hours.Values.Sum().ToString()];
+            string[] values = [.. semesters.Select(s => Hours(hours.GetValueOrDefault(s))), Hours(hours.Values.Sum())];
             for (var i = 0; i < values.Length && i + 1 < cells.Count; i++)
                 SetCell(cells[i + 1], [values[i]], bold: null, JustificationValues.Center);
             Upright(row);
@@ -391,6 +393,9 @@ internal static class DocxTables
         properties.BoldComplexScript = null;
         return properties;
     }
+
+    // Часы в таблице 3.1: ноль — «-», как в образце РПД вуза.
+    private static string Hours(int hours) => hours == 0 ? "-" : hours.ToString();
 
     private static List<JsonElement> Items(JsonElement? array) =>
         array is { ValueKind: JsonValueKind.Array } a ? a.EnumerateArray().ToList() : [];

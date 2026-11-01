@@ -108,6 +108,33 @@ public sealed class SelfStudyKindsMatchPlan : IValidationRule
 }
 
 /// <summary>
+/// <c>class_hours_match_total</c> (этап 5.2): сумма часов таблицы лабораторных работ (3.3) или практических занятий
+/// (3.4) равна часам документа этого вида за все семестры. Вид — по месту правила в схеме. Ошибка.
+/// </summary>
+public sealed class ClassHoursMatchTotal : IValidationRule
+{
+    public string Name => "class_hours_match_total";
+    public string Level => IssueLevels.Error;
+
+    public IEnumerable<DocumentValidationError> Check(RuleContext context)
+    {
+        if (context.Value.ValueKind != JsonValueKind.Array) yield break;
+        (string Title, Func<DisciplineSemesterDetails, int> Hours)? kind = context.Path switch
+        {
+            "/lab_works" => ("Лабораторные работы", s => s.LabHours),
+            "/practical_classes" => ("Практические занятия", s => s.Practice),
+            _ => null
+        };
+        if (kind is not var (title, hours)) yield break;
+        var byTable = context.Value.EnumerateArray().Sum(item =>
+            item.ValueKind == JsonValueKind.Object && item.TryGetProperty("hours", out var h) && h.TryGetInt32(out var n) ? n : 0);
+        var byPlan = DocumentSemesters.Of(context.Payload, context.Facts).Sum(hours);
+        if (byTable != byPlan)
+            yield return new(context.Path, $"{title}: по таблице {byTable} ч, по распределению часов {byPlan} ч");
+    }
+}
+
+/// <summary>
 /// <c>hours_match_curriculum</c>: в каждом семестре трудоёмкости документа контактная работа, контроль и
 /// самостоятельная работа в сумме равны з. е. × 36. Предупреждение, а не ошибка: эти часы правит только методист,
 /// а ошибка вернула бы документ автору, который исправить их не может (этап 5.2).

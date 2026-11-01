@@ -41,9 +41,9 @@ public class PartitionPrintingTests
             [
                 ["1", "Инициация проекта", "2", "", "10", "6", "4", "34", "УК-2.1", ""],
                 ["2", "Планирование проекта", "", "", "10", "6", "4", "34", "", ""],
-                ["", "Промежуточная аттестация", "", "", "20", "12", "8", "68/36", "", "Экзамен"],
+                ["", "Промежуточная аттестация", "", "", "20", "12", "8", "68/36", "", "экзамен"],
                 ["3", "Командная работа в проекте", "3", "", "20", "-", "20", "68", "", "Р"],
-                ["", "Промежуточная аттестация", "", "", "20", "-", "20", "68/0", "", "Зачёт"],
+                ["", "Промежуточная аттестация", "", "", "20", "-", "20", "68/0", "", "зачёт"],
                 ["", "Итого (час.)", "", "", "40", "12", "28", "136/36", "", ""]
             ],
             Rows(table));
@@ -64,7 +64,7 @@ public class PartitionPrintingTests
         Assert.Equal(
             [
                 ["1", "Основы моделирования", "1", "", "24", "16", "8", "24", "", ""],
-                ["", "Промежуточная аттестация", "", "", "24", "16", "8", "24/36", "", "Экзамен"],
+                ["", "Промежуточная аттестация", "", "", "24", "16", "8", "24/36", "", "экзамен"],
                 ["", "Итого (час.)", "", "", "24", "16", "8", "24/36", "", ""]
             ],
             Rows(table));
@@ -84,6 +84,21 @@ public class PartitionPrintingTests
         Assert.Equal(["", "Итого (час.)", "", "", "16", "-", "16", "40/0", "", ""], Rows(table)[^1]);
     }
 
+    [Fact]
+    public void Laboriousness_prints_dashes_for_zero_and_lowercase_attestation_without_total()
+    {
+        // ФТД.В.01: лабораторных и контроля нет — «-»; у вида промежуточного контроля «всего» пусто, виды — строчными.
+        var body = Print(Semester(1, 8, 8, 0, 20, 0, "credit"), Semester(2, 8, 8, 0, 20, 0, "graded_credit"), "[]");
+        var table = body.Descendants<Table>().First(t => t.InnerText.Contains("Общая трудоёмкость"));
+        List<string> Cells(string start) => table.Elements<TableRow>().First(r => r.InnerText.StartsWith(start))
+            .Elements<TableCell>().Skip(1).Select(c => c.InnerText).ToList();
+
+        Assert.Equal(["-", "-", "-"], Cells("Лабораторные"));
+        Assert.Equal(["-", "-", "-"], Cells("Промежуточный контроль"));
+        Assert.Equal(["8", "8", "16"], Cells("Лекции"));
+        Assert.Equal(["зачёт", "зачёт с оценкой", ""], Cells("Вид промежуточного контроля"));
+    }
+
     [Theory]
     [InlineData(new[] { 1 }, "1")]
     [InlineData(new[] { 2, 3 }, "2-3")]
@@ -101,6 +116,13 @@ public class PartitionPrintingTests
 
     private static Table Partition(DisciplineSemesterDetails first, DisciplineSemesterDetails? second, string topics, out string caption)
     {
+        var body = Print(first, second, topics);
+        caption = body.Elements<Paragraph>().First(p => p.InnerText.StartsWith("Разделы дисциплины, изучаемые")).InnerText;
+        return body.Descendants<Table>().Single(t => t.InnerText.Contains("Раздел дисциплины"));
+    }
+
+    private static Body Print(DisciplineSemesterDetails first, DisciplineSemesterDetails? second, string topics)
+    {
         var semesters = second is null ? new[] { first } : [first, second];
         var hours = string.Join(", ", semesters.Select(s =>
             $$"""{ "semester": {{s.Semester}}, "lectures": {{s.Lectures}}, "practice": {{s.Practice}}, "lab_hours": {{s.LabHours}}, "self_study": {{s.SelfStudy}}, "control": {{s.Control}}, "control_types": ["{{s.ControlTypes[0]}}"] }"""));
@@ -115,9 +137,7 @@ public class PartitionPrintingTests
             Registry.Get(DocumentTypeRegistry.Rpd).PrintMapping, context);
         var docx = WordprocessingDocument.Open(new MemoryStream(result.Content), false);
         Assert.Empty(new OpenXmlValidator(FileFormatVersions.Office2019).Validate(docx));
-        var body = docx.MainDocumentPart!.Document!.Body!;
-        caption = body.Elements<Paragraph>().First(p => p.InnerText.StartsWith("Разделы дисциплины, изучаемые")).InnerText;
-        return body.Descendants<Table>().Single(t => t.InnerText.Contains("Раздел дисциплины"));
+        return docx.MainDocumentPart!.Document!.Body!;
     }
 
     // Строки данных — после трёх строк шапки (заголовки и нумерация столбцов).

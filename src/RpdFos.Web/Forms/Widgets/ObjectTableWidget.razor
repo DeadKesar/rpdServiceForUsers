@@ -56,6 +56,28 @@
                 </tr>
             </tbody>
         }
+        @if (ClassHoursKey is { } planKey)
+        {
+            @* Таблица занятий (3.3, 3.4): итог часов против часов документа этого вида (правило class_hours_match_total). *@
+            <tfoot class="border-top">
+                <tr>
+                    @foreach (var column in ShortColumns)
+                    {
+                        <td class="fw-semibold">
+                            @if (column.Name == "hours")
+                            {
+                                <HoursSum Actual="@((rows ?? []).OfType<JsonObject>().Sum(r => Number(r["hours"])))" Planned="@PlannedHours(planKey)" />
+                            }
+                            else if (column.Name == ShortColumns[0].Name)
+                            {
+                                <text>Итого</text>
+                            }
+                        </td>
+                    }
+                    <td></td>
+                </tr>
+            </tfoot>
+        }
     </table>
     @if (!ReadOnly)
     {
@@ -83,6 +105,17 @@
     private static bool IsLong(JsonElement schema) =>
         SchemaContext.Text(schema, "x-ui-widget") == "textarea" ||
         SchemaContext.Type(schema) == "string" && schema.TryGetProperty("minLength", out var m) && m.TryGetInt32(out var n) && n >= 20;
+
+    // Вид часов трудоёмкости для таблицы занятий: лабораторные или практические; у остальных таблиц итога нет.
+    private string? ClassHoursKey => SchemaContext.Text(Schema, "x-ui-widget") != "class_table" ? null : Path switch
+    {
+        "/lab_works" => "lab_hours",
+        "/practical_classes" => "practice",
+        _ => null
+    };
+
+    private int PlannedHours(string key) =>
+        (Context.Payload["hours_distribution"]?["semesters"] as JsonArray ?? []).OfType<JsonObject>().Sum(s => Number(s[key]));
 
     private void Add()
     {

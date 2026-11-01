@@ -132,7 +132,7 @@ public class DocxGenerationTests(DatabaseFixture app)
         Assert.Equal("Разделы дисциплины, изучаемые в 1 семестре:", Line("Разделы дисциплины, изучаемые"));
         var partition = body.Descendants<Table>().Single(t => t.InnerText.Contains("Раздел дисциплины"));
         var partitionRows = partition.Elements<TableRow>().Skip(3).Select(r => r.Elements<TableCell>().Select(c => c.InnerText).ToList()).ToList();
-        Assert.Equal(["", "Промежуточная аттестация", "", "", "24", "16", "8", "24/36", "", "Экзамен"], partitionRows[^2]);
+        Assert.Equal(["", "Промежуточная аттестация", "", "", "24", "16", "8", "24/36", "", "экзамен"], partitionRows[^2]);
         Assert.Equal(["", "Итого (час.)", "", "", "24", "16", "8", "24/36", "", ""], partitionRows[^1]);
 
         // 3.1: общая трудоёмкость — сумма строк (контактная + контроль + самостоятельная), аттестация — экзамен.
@@ -141,7 +141,8 @@ public class DocxGenerationTests(DatabaseFixture app)
         Assert.Equal(["48", "48"], Cells(laboriousness, "Контактная работа"));
         Assert.Equal(["36", "36"], Cells(laboriousness, "Промежуточный контроль"));
         Assert.Equal(["24", "24"], Cells(laboriousness, "Самостоятельная работа"));
-        Assert.Equal(["Экзамен", "Экзамен"], Cells(laboriousness, "Вид промежуточного контроля"));
+        // Как в образце: вид строчными, у «всего» пусто; нулевые часы — «-».
+        Assert.Equal(["экзамен", ""], Cells(laboriousness, "Вид промежуточного контроля"));
         // Виды самостоятельной работы с часами — подстроками прямым шрифтом вместо курсивной подсказки шаблона.
         Assert.Equal(["6", "6"], Cells(laboriousness, "- написание реферата (Р)"));
         Assert.Equal(["8", "8"], Cells(laboriousness, "- самостоятельное изучение разделов 1"));

@@ -19,7 +19,7 @@ public class ValidationRulesTests
     [
         new TopicHoursMatchTotal(), new CompetencesMatchMatrix(),
         new LiteratureMainRecent(Options.Create(new ValidationRuleSettings { LiteratureMaxAgeYears = 10 })),
-        new SelfStudyKindsMatchPlan(), new LiteratureYearNotFuture()
+        new SelfStudyKindsMatchPlan(), new LiteratureYearNotFuture(), new HoursMatchCurriculum(), new ClassHoursMatchTotal()
     ];
 
     // План: два семестра — часы складываются.
@@ -230,6 +230,31 @@ public class ValidationRulesTests
         Assert.Contains(issues, i => i is { Path: "/competences", Level: IssueLevels.Error } && i.Message.StartsWith("ОПК-2"));
         Assert.Contains(issues, i => i is { Path: "/literature/main/0", Level: IssueLevels.Warning });
         Assert.Contains(issues, i => i is { Path: "/hours_distribution/self_study_kinds", Level: IssueLevels.Error } && i.Message.Contains("2 семестр"));
+    }
+
+    [Fact]
+    public void Class_tables_match_document_hours_of_their_kind()
+    {
+        // По плану: практических 16 ч (1 семестр), лабораторных 16 ч (2 семестр).
+        var rule = new ClassHoursMatchTotal();
+
+        Assert.Empty(Run(rule, """[ { "hours": 10 }, { "hours": 6 } ]""", "/practical_classes"));
+        Assert.Equal([new DocumentValidationError("/lab_works", "Лабораторные работы: по таблице 12 ч, по распределению часов 16 ч")],
+            Run(rule, """[ { "hours": 8 }, { "hours": 4 } ]""", "/lab_works"));
+    }
+
+    [Fact]
+    public void Class_hours_rule_is_only_in_new_schema()
+    {
+        // Таблица лабораторных на 4 ч из 16: в новой схеме — ошибка правила, в снимке схемы прежнего шаблона правила нет.
+        var payload = JsonDocument.Parse("""{ "lab_works": [ { "number": 1, "title": "Модель", "hours": 4 } ] }""").RootElement;
+        var rules = new ValidationRuleSet(All, TimeProvider.System);
+        var old = Rpd.Replace("\"x-validation-rule\": \"class_hours_match_total\",", "");
+
+        Assert.Contains(rules.Run(JsonDocument.Parse(Rpd).RootElement, payload, Facts, Registry.FindSchema, new HashSet<string>()),
+            e => e.Path == "/lab_works");
+        Assert.DoesNotContain(rules.Run(JsonDocument.Parse(old).RootElement, payload, Facts, Registry.FindSchema, new HashSet<string>()),
+            e => e.Path == "/lab_works");
     }
 
     [Fact]
