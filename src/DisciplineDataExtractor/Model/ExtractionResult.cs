@@ -10,7 +10,8 @@ public sealed record ExtractionResult(
     IReadOnlyList<Competence> Competences,
     IReadOnlyList<MatrixLink> Matrix,
     IReadOnlyList<Employee> Employees,
-    IReadOnlyList<ParseIssue> Issues)
+    IReadOnlyList<ParseIssue> Issues,
+    IReadOnlyList<UnmatchedMatrixRow>? UnmatchedMatrixRows = null)
 {
     public bool HasErrors => Issues.Any(i => i.Severity == IssueSeverity.Error);
 }

@@ -1,0 +1,140 @@
+@using System.Net.Http.Json
+@using Microsoft.AspNetCore.Components.WebAssembly.Authentication
+@inject HttpClient Http
+
+@* Строки матрицы без дисциплины плана (этап 5.2, ЛР Т1): у запуска, создавшего план, методист привязывает строку
+   к дисциплине этой версии плана или отмечает «Не учитывать»; привязку можно отменить. *@
+@if (rows is { Count: > 0 })
+{
+    <h3 class="h5 mt-4">Строки матрицы без дисциплины плана</h3>
+    <p class="small text-muted">
+        Строка не найдена в плане по названию или неоднозначна — её связи с компетенциями не загружены. Привязка добавляет
+        дисциплине связи строки на уровне компетенций; документы, уже созданные по дисциплине, не меняются.
+    </p>
+    @if (message is not null)
+    {
+        <div class="alert @(messageIsError ? "alert-danger" : "alert-info") py-2 small" role="status">@message</div>
+    }
+    <table class="table table-sm align-middle">
+        <thead>
+            <tr><th>Строка матрицы</th><th>Семестры</th><th>Коды</th><th>Дисциплина плана</th><th></th></tr>
+        </thead>
+        <tbody>
+            @foreach (var row in rows)
+            {
+                <tr>
+                    <td>@row.Name <div class="small text-muted">@row.Sheet, строка @row.Row</div></td>
+                    <td>@row.Semesters</td>
+                    <td>@string.Join(", ", row.Codes)</td>
+                    @if (row.Status == "pending")
+                    {
+                        <td>
+                            <select class="form-select form-select-sm" @bind="choice[row.Id]">
+                                <option value="">— выберите</option>
+                                <option value="ignore">Не учитывать</option>
+                                @foreach (var o in row.Options)
+                                {
+                                    <option value="@o.Id">@o.Code @o.Name@(o.Candidate ? " — кандидат" : o.WithoutMatrix ? " — без связей с матрицей" : "")</option>
+                                }
+                            </select>
+                        </td>
+                        <td>
+                            <button class="btn btn-sm btn-primary" disabled="@(busy || string.IsNullOrEmpty(choice.GetValueOrDefault(row.Id)))"
+                                    @onclick="() => ApplyAsync(row)">Применить</button>
+                        </td>
+                    }
+                    else
+                    {
+                        <td>
+                            @(row.Status == "ignored" ? "Не учитывать" : row.Discipline)
+                            <div class="small text-muted">@row.ResolvedBy, @row.ResolvedAt?.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</div>
+                        </td>
+                        <td><button class="btn btn-sm btn-outline-secondary" disabled="@busy" @onclick="() => UndoAsync(row)">Отменить</button></td>
+                    }
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    [Parameter, EditorRequired] public Guid RunId { get; set; }
+
+    private List<MatrixRow>? rows;
+    private readonly Dictionary<Guid, string> choice = new();
+    private string? message;
+    private bool messageIsError, busy;
+    private Guid loaded;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (loaded == RunId) return;
+        loaded = RunId;
+        message = null;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            rows = await Http.GetFromJsonAsync<List<MatrixRow>>($"api/imports/{RunId}/matrix-rows");
+            foreach (var r in rows ?? []) choice.TryAdd(r.Id, "");
+        }
+        catch (AccessTokenNotAvailableException e)
+        {
+            e.Redirect();
+        }
+    }
+
+    private async Task ApplyAsync(MatrixRow row)
+    {
+        var value = choice[row.Id];
+        var body = value == "ignore" ? new { DisciplineId = (Guid?)null, Ignore = true } : new { DisciplineId = (Guid?)Guid.Parse(value), Ignore = false };
+        await RunAsync(() => Http.PostAsJsonAsync($"api/imports/matrix-rows/{row.Id}/apply", body), async response =>
+        {
+            var applied = await response.Content.ReadFromJsonAsync<Applied>();
+            message = applied?.Warnings is { Count: > 0 } w ? $"Строка «{row.Name}» привязана. {string.Join(" ", w)}" : $"Строка «{row.Name}» привязана.";
+        });
+    }
+
+    private Task UndoAsync(MatrixRow row) =>
+        RunAsync(() => Http.PostAsync($"api/imports/matrix-rows/{row.Id}/undo", null), _ =>
+        {
+            message = $"Привязка строки «{row.Name}» отменена.";
+            choice[row.Id] = "";
+            return Task.CompletedTask;
+        });
+
+    private async Task RunAsync(Func<Task<HttpResponseMessage>> send, Func<HttpResponseMessage, Task> done)
+    {
+        busy = true;
+        try
+        {
+            var response = await send();
+            if (response.IsSuccessStatusCode)
+            {
+                messageIsError = false;
+                await done(response);
+                await LoadAsync();
+                return;
+            }
+            var problem = await response.Content.ReadFromJsonAsync<Problem>();
+            (messageIsError, message) = (true, problem?.Detail is { } d ? $"{problem.Title}. {d}" : problem?.Title ?? $"Ответ сервера: {(int)response.StatusCode}");
+        }
+        catch (AccessTokenNotAvailableException e)
+        {
+            e.Redirect();
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private sealed record Option(Guid Id, string Code, string Name, bool Candidate, bool WithoutMatrix);
+    private sealed record MatrixRow(Guid Id, string Name, string Sheet, int Row, string Semesters, List<string> Codes, string Status,
+        Guid? DisciplineId, string? Discipline, string? ResolvedBy, DateTimeOffset? ResolvedAt, List<Option> Options);
+    private sealed record Applied(List<string> Warnings);
+    private sealed record Problem(string? Title, string? Detail);
+}

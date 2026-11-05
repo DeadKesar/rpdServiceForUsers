@@ -34,7 +34,52 @@ public class ImportsModule : ICarterModule
             .Produces<ImportAccepted>(StatusCodes.Status202Accepted);
         g.MapGet("/{id:guid}", Get);
         g.MapGet("/", List);
+        // Строки матрицы без дисциплины плана (этап 5.2): у запуска, создавшего план, — список и ручная привязка.
+        g.MapGet("/{id:guid}/matrix-rows", MatrixRows);
+        g.MapPost("/matrix-rows/{rowId:guid}/apply", ApplyMatrixRow);
+        g.MapPost("/matrix-rows/{rowId:guid}/undo", UndoMatrixRow);
     }
+
+    private static async Task<IResult> MatrixRows(Guid id, AppDbContext db, MatrixRowBinding binding, CancellationToken ct)
+    {
+        var planId = await db.ParserRuns.Where(r => r.Id == id).Select(r => (Guid?)r.CreatedCurriculumPlanId).SingleOrDefaultAsync(ct);
+        return planId is Guid plan ? Results.Ok(await binding.ListAsync(plan, ct)) : Results.Ok(Array.Empty<MatrixRowState>());
+    }
+
+    private static async Task<IResult> ApplyMatrixRow(Guid rowId, MatrixRowRequest rq, HttpContext http, AppDbContext db,
+        DirectoryAccounts directory, MatrixRowBinding binding, CancellationToken ct)
+    {
+        if (await directory.FindIdAsync(http.User, ct) is not Guid by) return NoDirectoryRecord();
+        if (!rq.Ignore && rq.DisciplineId is null) return MatrixProblem(MatrixRowProblem.WrongDiscipline);
+        var (problem, warnings) = await binding.ApplyAsync(rowId, rq.Ignore ? null : rq.DisciplineId, by, ct);
+        if (problem is not null) return MatrixProblem(problem.Value);
+        await db.SaveChangesAsync(ct);
+        return Results.Ok(new MatrixRowApplied(warnings));
+    }
+
+    private static async Task<IResult> UndoMatrixRow(Guid rowId, HttpContext http, AppDbContext db, DirectoryAccounts directory,
+        MatrixRowBinding binding, CancellationToken ct)
+    {
+        if (await directory.FindIdAsync(http.User, ct) is not Guid by) return NoDirectoryRecord();
+        if (await binding.UndoAsync(rowId, by, ct) is { } problem) return MatrixProblem(problem);
+        await db.SaveChangesAsync(ct);
+        return Results.NoContent();
+    }
+
+    private static IResult MatrixProblem(MatrixRowProblem problem) => problem switch
+    {
+        MatrixRowProblem.NotFound => Results.Problem(statusCode: StatusCodes.Status404NotFound, title: "Строка матрицы не найдена"),
+        MatrixRowProblem.AlreadyResolved => Results.Problem(statusCode: StatusCodes.Status409Conflict, title: "Строка уже привязана",
+            detail: "Сначала отмените прежнюю привязку."),
+        MatrixRowProblem.NotResolved => Results.Problem(statusCode: StatusCodes.Status409Conflict, title: "Строка не привязана",
+            detail: "Отменять нечего."),
+        _ => Results.Problem(statusCode: StatusCodes.Status422UnprocessableEntity, title: "Дисциплина не подходит",
+            detail: "Выберите дисциплину, практику или факультатив этой версии плана либо «Не учитывать».")
+    };
+
+    private static IResult NoDirectoryRecord() =>
+        Results.Problem(statusCode: StatusCodes.Status403Forbidden, title: "Нет записи в справочнике сотрудников",
+            detail: "Учётная запись не связана со справочником сотрудников — обратитесь к администратору.");
 
     private static async Task<IResult> Upload(
         HttpRequest request, AppDbContext db, DirectoryAccounts directory, IBackgroundJobClient jobs,
@@ -163,3 +208,9 @@ public record ImportRunDetails(
 public record ImportRunItem(
     Guid Id, string Status, DateTimeOffset StartedAt, DateTimeOffset? CompletedAt, ImportCounts Counts,
     int Errors, int Warnings);
+
+/// <summary>Привязка строки матрицы: дисциплина плана или «Не учитывать» (<paramref name="Ignore"/>).</summary>
+public record MatrixRowRequest(Guid? DisciplineId, bool Ignore = false);
+
+/// <summary>Строка привязана; замечания — коды, которых нет в списке компетенций плана.</summary>
+public record MatrixRowApplied(IReadOnlyList<string> Warnings);

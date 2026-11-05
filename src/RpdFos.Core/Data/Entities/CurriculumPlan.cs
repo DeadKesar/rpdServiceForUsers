@@ -101,3 +101,39 @@ public static class ControlTypeCodes
 
     public static readonly string[] All = [Exam, Credit, GradedCredit, CourseProject, CourseWork];
 }
+
+/// <summary>
+/// Строка матрицы с отметками, не сопоставленная с дисциплиной плана при импорте (таблица matrix_unmatched_rows,
+/// этап 5.2 — дополнение к модели данных): название, место в файле, семестры, коды и кандидаты неоднозначной строки.
+/// Методист привязывает её к дисциплине этой версии плана или отмечает «Не учитывать»; добавленные привязкой связи
+/// матрицы (<see cref="AddedCompetenceIds"/>) снимаются отменой.
+/// </summary>
+public class MatrixUnmatchedRow
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid CurriculumPlanId { get; set; }
+    public string Sheet { get; set; } = "";
+    public int RowNumber { get; set; }
+    public string Name { get; set; } = "";
+    public string Semesters { get; set; } = "";
+
+    /// <summary>Отметки как в матрице — компетенция или индикатор.</summary>
+    public List<string> Codes { get; set; } = [];
+
+    /// <summary>Компетенции отметок: матрица в проекте — на уровне компетенций.</summary>
+    public List<string> CompetenceCodes { get; set; } = [];
+
+    /// <summary>Индексы кандидатов неоднозначной строки; пусто — строка не найдена в плане.</summary>
+    public List<string> Candidates { get; set; } = [];
+
+    public string Status { get; set; } = MatrixRowStatuses.Pending;
+    public Guid? DisciplineId { get; set; }
+    public List<Guid> AddedCompetenceIds { get; set; } = [];
+    public Guid? ResolvedBy { get; set; }
+    public DateTimeOffset? ResolvedAt { get; set; }
+}
+
+public static class MatrixRowStatuses
+{
+    public const string Pending = "pending", Linked = "linked", Ignored = "ignored";
+}

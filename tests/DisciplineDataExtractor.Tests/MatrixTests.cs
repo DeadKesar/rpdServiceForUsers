@@ -37,6 +37,17 @@ public class MatrixTests(RealFiles files) : IClassFixture<RealFiles>
     }
 
     [Fact]
+    public void Unmatched_row_with_marks_is_returned_as_data()
+    {
+        // Этап 5.2 прототипа: строку не потерять — её привяжут к дисциплине плана вручную.
+        var row = Assert.Single(files.Result.UnmatchedMatrixRows!);
+        Assert.Equal(("Внедрение и эксплуатация информационных систем", "Таблица 3", 39), (row.Name, row.Sheet, row.Row));
+        Assert.Equal(["ПК-1", "ПК-2"], row.CompetenceCodes);
+        Assert.Equal(["ПК-1", "ПК-2"], row.Codes);
+        Assert.Empty(row.Candidates);
+    }
+
+    [Fact]
     public void Unknown_discipline_is_reported_with_location()
     {
         var error = Assert.Single(files.Result.Issues, i => i.Severity == IssueSeverity.Error);

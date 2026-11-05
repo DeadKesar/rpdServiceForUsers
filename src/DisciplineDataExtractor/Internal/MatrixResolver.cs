@@ -4,19 +4,20 @@ namespace DisciplineDataExtractor.Internal;
 /// Сопоставляет строки матрицы с дисциплинами плана. В матрице нет индексов, только названия,
 /// и они расходятся с планом в мелочах («ИТ-продуктов» / «ИТ продуктов») и в формулировках.
 /// Порядок: точное совпадение ключа названия → совпадение набора слов (с предупреждением) →
-/// при нескольких кандидатах — уточнение по семестрам. Иначе — замечание, связи строки не загружаются.
+/// при нескольких кандидатах — уточнение по семестрам. Иначе — замечание, а строка с отметками возвращается
+/// данными (<see cref="UnmatchedMatrixRow"/>) для ручной привязки.
 /// </summary>
 internal static class MatrixResolver
 {
-    public static IReadOnlyList<MatrixLink> Resolve(
+    public static (IReadOnlyList<MatrixLink> Links, IReadOnlyList<UnmatchedMatrixRow> Unmatched) Resolve(
         string file, IReadOnlyList<MatrixRow> rows, IReadOnlyList<Discipline> disciplines,
         IReadOnlyList<Competence> competences, IssueLog log)
     {
-        if (rows.Count == 0) return [];
+        if (rows.Count == 0) return ([], []);
         if (disciplines.Count == 0)
         {
             log.Error(file, null, null, "Матрица не сопоставлена с планом: дисциплины плана не прочитаны");
-            return [];
+            return ([], []);
         }
 
         var byName = disciplines.ToLookup(d => TextRules.NameKey(d.Name));
@@ -26,11 +27,22 @@ internal static class MatrixResolver
         var reported = new HashSet<string>();
 
         var links = new List<MatrixLink>();
+        var unmatched = new List<UnmatchedMatrixRow>();
         var seen = new HashSet<MatrixLink>();
         var covered = new HashSet<string>();
         foreach (var row in rows)
         {
-            if (Match(file, row, byName, byWords, log) is not { } discipline) continue;
+            var (discipline, candidates) = Match(file, row, byName, byWords, log);
+            if (discipline is null)
+            {
+                // Строка без отметок ничего не теряет — данными не возвращается.
+                if (row.Codes.Count > 0)
+                    unmatched.Add(new UnmatchedMatrixRow(row.Sheet, row.Row, row.Name, row.Semesters,
+                        row.Codes.Select(c => c.Indicator ?? c.Competence).Distinct().ToList(),
+                        row.Codes.Select(c => c.Competence).Distinct().ToList(),
+                        candidates.Select(c => c.Code).ToList()));
+                continue;
+            }
             covered.Add(discipline.Code);
 
             foreach (var code in row.Codes)
@@ -49,10 +61,11 @@ internal static class MatrixResolver
                      d.Kind != EntryKind.Module && d.Part != PlanPart.ElectiveGroup && !covered.Contains(d.Code)))
             log.Warning(file, null, null, $"Дисциплины плана {d.Code} «{d.Name}» нет в матрице компетенций");
 
-        return links;
+        return (links, unmatched);
     }
 
-    private static Discipline? Match(
+    // Найденная дисциплина или null и кандидаты неоднозначной строки (пусто — не найдена).
+    private static (Discipline? Discipline, IReadOnlyList<Discipline> Candidates) Match(
         string file, MatrixRow row, ILookup<string, Discipline> byName, ILookup<string, Discipline> byWords, IssueLog log)
     {
         var candidates = byName[TextRules.NameKey(row.Name)].ToList();
@@ -66,8 +79,11 @@ internal static class MatrixResolver
         if (candidates.Count > 1)
         {
             var semesters = row.Semesters.Select(TextRules.SemesterOf).OfType<int>().ToHashSet();
-            if (semesters.Count > 0)
-                candidates = candidates.Where(d => semesters.SetEquals(d.Semesters.Select(s => s.Semester))).ToList();
+            var bySemesters = semesters.Count > 0
+                ? candidates.Where(d => semesters.SetEquals(d.Semesters.Select(s => s.Semester))).ToList()
+                : candidates;
+            // Семестры не помогли — кандидаты остаются все: из них методист и выберет.
+            if (bySemesters.Count > 0) candidates = bySemesters;
         }
 
         if (candidates.Count == 1)
@@ -75,7 +91,7 @@ internal static class MatrixResolver
             if (byWordsOnly)
                 log.Warning(file, row.Sheet, row.Row,
                     $"«{row.Name}» сопоставлена с {candidates[0].Code} «{candidates[0].Name}» по совпадению слов");
-            return candidates[0];
+            return (candidates[0], []);
         }
 
         // Связи строки теряются — это ошибка; строка без отметок ничего не теряет — предупреждение.
@@ -87,6 +103,6 @@ internal static class MatrixResolver
             : $"Дисциплина «{row.Name}» неоднозначна ({string.Join(", ", candidates.Select(c => c.Code))}){lost}";
         if (row.Codes.Count > 0) log.Error(file, row.Sheet, row.Row, message);
         else log.Warning(file, row.Sheet, row.Row, message);
-        return null;
+        return (null, candidates);
     }
 }

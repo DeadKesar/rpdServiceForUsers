@@ -32,6 +32,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<Discipline> Disciplines => Set<Discipline>();
     public DbSet<DisciplineSemesterDetails> DisciplineSemesterDetails => Set<DisciplineSemesterDetails>();
     public DbSet<CompetenceMatrixEntry> CompetenceMatrix => Set<CompetenceMatrixEntry>();
+    public DbSet<MatrixUnmatchedRow> MatrixUnmatchedRows => Set<MatrixUnmatchedRow>();
     public DbSet<Employee> Employees => Set<Employee>();
 
     // Импорт исходных файлов (контекст Infrastructure).

@@ -32,8 +32,8 @@ public sealed class DataExtractor
             CheckDirection(input.CompetenceMatrix, matrixDirection, direction, log);
         }
 
-        var matrix = MatrixResolver.Resolve(input.CompetenceMatrix.FileName, matrixRows, disciplines, competences, log);
-        return new ExtractionResult(plan, disciplines, competences, matrix, employees, log.Items);
+        var (matrix, unmatched) = MatrixResolver.Resolve(input.CompetenceMatrix.FileName, matrixRows, disciplines, competences, log);
+        return new ExtractionResult(plan, disciplines, competences, matrix, employees, log.Items, unmatched);
     }
 
     /// <summary>

@@ -30,6 +30,7 @@ public static class DependencyInjection
         services.AddScoped<DirectoryAccounts>();
         services.AddScoped<ImportJob>();
         services.AddScoped<DirectoryImportJob>();
+        services.AddScoped<MatrixRowBinding>();
         services.AddScoped<EmployeeDirectory>();
         services.AddSingleton<DocumentTypeRegistry>();
         services.AddScoped<TemplateLifecycle>();

@@ -172,3 +172,20 @@ internal sealed class CompetenceMatrixEntryConfiguration : IEntityTypeConfigurat
         e.HasOne<Competence>().WithMany().HasForeignKey(x => x.CompetenceId).OnDelete(DeleteBehavior.Restrict);
     }
 }
+
+internal sealed class MatrixUnmatchedRowConfiguration : IEntityTypeConfiguration<MatrixUnmatchedRow>
+{
+    public void Configure(EntityTypeBuilder<MatrixUnmatchedRow> e)
+    {
+        e.ToTable("matrix_unmatched_rows", t => t.HasCheckConstraint("ck_matrix_unmatched_rows_status",
+            $"status IN ('{MatrixRowStatuses.Pending}', '{MatrixRowStatuses.Linked}', '{MatrixRowStatuses.Ignored}')"));
+        e.Property(x => x.Sheet).HasMaxLength(100);
+        e.Property(x => x.Name).HasMaxLength(500);
+        e.Property(x => x.Semesters).HasMaxLength(100);
+        e.Property(x => x.Status).HasMaxLength(20);
+        e.HasIndex(x => x.CurriculumPlanId);
+        e.HasOne<CurriculumPlan>().WithMany().HasForeignKey(x => x.CurriculumPlanId).OnDelete(DeleteBehavior.Cascade);
+        e.HasOne<Discipline>().WithMany().HasForeignKey(x => x.DisciplineId).OnDelete(DeleteBehavior.Restrict);
+        e.HasOne<Employee>().WithMany().HasForeignKey(x => x.ResolvedBy).OnDelete(DeleteBehavior.Restrict);
+    }
+}

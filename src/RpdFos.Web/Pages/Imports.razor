@@ -81,6 +81,10 @@
             </tbody>
         </table>
     }
+    @if (current.Status is "succeeded" or "partial")
+    {
+        <MatrixRowsPanel RunId="current.Id" />
+    }
 }
 
 <h2 class="h4 mt-4">Последние запуски</h2>

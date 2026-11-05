@@ -25,3 +25,13 @@ public sealed record CompetenceIndicator(string Code, string Text, IndicatorType
 /// на уровне индикаторов; если на уровне компетенций — null.
 /// </summary>
 public sealed record MatrixLink(string DisciplineCode, string CompetenceCode, string? IndicatorCode);
+
+/// <summary>
+/// Строка матрицы с отметками, не сопоставленная с дисциплиной плана: не найдена по названию или неоднозначна
+/// (<see cref="Candidates"/> — индексы кандидатов). Возвращается данными, чтобы методист привязал её вручную:
+/// иначе её связи с компетенциями теряются. <see cref="Codes"/> — отметки как в матрице (компетенция или
+/// индикатор), <see cref="CompetenceCodes"/> — компетенции этих отметок.
+/// </summary>
+public sealed record UnmatchedMatrixRow(
+    string Sheet, int Row, string Name, string Semesters, IReadOnlyList<string> Codes, IReadOnlyList<string> CompetenceCodes,
+    IReadOnlyList<string> Candidates);

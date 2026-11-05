@@ -1864,6 +1864,95 @@ namespace RpdFos.Core.Migrations
                     b.ToTable("institutes", (string)null);
                 });
 
+            modelBuilder.Entity("RpdFos.Core.Data.Entities.MatrixUnmatchedRow", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.PrimitiveCollection<List<Guid>>("AddedCompetenceIds")
+                        .IsRequired()
+                        .HasColumnType("uuid[]")
+                        .HasColumnName("added_competence_ids");
+
+                    b.PrimitiveCollection<List<string>>("Candidates")
+                        .IsRequired()
+                        .HasColumnType("text[]")
+                        .HasColumnName("candidates");
+
+                    b.PrimitiveCollection<List<string>>("Codes")
+                        .IsRequired()
+                        .HasColumnType("text[]")
+                        .HasColumnName("codes");
+
+                    b.PrimitiveCollection<List<string>>("CompetenceCodes")
+                        .IsRequired()
+                        .HasColumnType("text[]")
+                        .HasColumnName("competence_codes");
+
+                    b.Property<Guid>("CurriculumPlanId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("curriculum_plan_id");
+
+                    b.Property<Guid?>("DisciplineId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("discipline_id");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("name");
+
+                    b.Property<DateTimeOffset?>("ResolvedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("resolved_at");
+
+                    b.Property<Guid?>("ResolvedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("resolved_by");
+
+                    b.Property<int>("RowNumber")
+                        .HasColumnType("integer")
+                        .HasColumnName("row_number");
+
+                    b.Property<string>("Semesters")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("semesters");
+
+                    b.Property<string>("Sheet")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("sheet");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("status");
+
+                    b.HasKey("Id")
+                        .HasName("pk_matrix_unmatched_rows");
+
+                    b.HasIndex("CurriculumPlanId")
+                        .HasDatabaseName("ix_matrix_unmatched_rows_curriculum_plan_id");
+
+                    b.HasIndex("DisciplineId")
+                        .HasDatabaseName("ix_matrix_unmatched_rows_discipline_id");
+
+                    b.HasIndex("ResolvedBy")
+                        .HasDatabaseName("ix_matrix_unmatched_rows_resolved_by");
+
+                    b.ToTable("matrix_unmatched_rows", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_matrix_unmatched_rows_status", "status IN ('pending', 'linked', 'ignored')");
+                        });
+                });
+
             modelBuilder.Entity("RpdFos.Core.Data.Entities.ParserRun", b =>
                 {
                     b.Property<Guid>("Id")
@@ -2496,6 +2585,28 @@ namespace RpdFos.Core.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_generation_tasks_users_requested_by");
+                });
+
+            modelBuilder.Entity("RpdFos.Core.Data.Entities.MatrixUnmatchedRow", b =>
+                {
+                    b.HasOne("RpdFos.Core.Data.Entities.CurriculumPlan", null)
+                        .WithMany()
+                        .HasForeignKey("CurriculumPlanId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_matrix_unmatched_rows_curriculum_plans_curriculum_plan_id");
+
+                    b.HasOne("RpdFos.Core.Data.Entities.Discipline", null)
+                        .WithMany()
+                        .HasForeignKey("DisciplineId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_matrix_unmatched_rows_disciplines_discipline_id");
+
+                    b.HasOne("RpdFos.Core.Data.Entities.Employee", null)
+                        .WithMany()
+                        .HasForeignKey("ResolvedBy")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_matrix_unmatched_rows_users_resolved_by");
                 });
 
             modelBuilder.Entity("RpdFos.Core.Data.Entities.ParserRun", b =>

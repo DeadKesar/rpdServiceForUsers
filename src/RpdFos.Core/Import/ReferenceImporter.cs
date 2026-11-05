@@ -111,6 +111,7 @@ public sealed class ReferenceImporter(AppDbContext db, TimeProvider clock)
 
             var plan = await CreatePlanAsync(run, direction, profile, p, r.Disciplines, ct);
             AddMatrix(plan, r.Matrix);
+            AddUnmatchedRows(plan, r.UnmatchedMatrixRows ?? []);
             return plan;
         }
 
@@ -367,6 +368,18 @@ public sealed class ReferenceImporter(AppDbContext db, TimeProvider clock)
             Parsed.ControlType.CourseworkProject => ControlTypeCodes.CourseProject,
             _ => ControlTypeCodes.CourseWork
         };
+
+        // Строки матрицы с отметками, не сопоставленные с дисциплиной плана, — для ручной привязки (этап 5.2):
+        // иначе их связи с компетенциями терялись бы, оставаясь только замечанием.
+        private void AddUnmatchedRows(CurriculumPlan plan, IReadOnlyList<Parsed.UnmatchedMatrixRow> rows)
+        {
+            foreach (var row in rows)
+                db.MatrixUnmatchedRows.Add(new MatrixUnmatchedRow
+                {
+                    CurriculumPlanId = plan.Id, Sheet = row.Sheet, RowNumber = row.Row, Name = row.Name, Semesters = row.Semesters,
+                    Codes = row.Codes.ToList(), CompetenceCodes = row.CompetenceCodes.ToList(), Candidates = row.Candidates.ToList()
+                });
+        }
 
         private void AddMatrix(CurriculumPlan plan, IReadOnlyList<Parsed.MatrixLink> links)
         {
