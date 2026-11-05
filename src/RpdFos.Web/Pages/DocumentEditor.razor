@@ -339,7 +339,8 @@ else
             CanResolve = details.Actions.ResolveComments, AddComment = AddCommentAsync, ResolveComment = ResolveCommentAsync,
             Defaults = details.TemplateDefaults is { } defaults ? JsonNode.Parse(defaults.GetRawText()) as JsonObject : null,
             CorrectPlan = details.Actions.CorrectPlan, Corrections = details.PlanCorrections ?? [],
-            PlanFieldChanged = () => _ = InvokeAsync(SavePlanCorrectionAsync)
+            PlanFieldChanged = () => _ = InvokeAsync(SavePlanCorrectionAsync),
+            SectionCheckRequested = () => _ = InvokeAsync(CheckSectionAsync)
         };
         sections = details.Metadata.Sections.ToList();
         version = details.Document.Version;
@@ -595,6 +596,32 @@ else
     }
 
     private bool planSaveQueued;
+    private int checks;
+
+    /// <summary>
+    /// Проверка раздела без сохранения при уходе из поля (этап 5.2, B4.1): рамки и индикаторы — по ответу, без новой
+    /// версии. Ввод не блокируется; ответ применяется, только если с запроса не было новых правок и новых проверок —
+    /// иначе он об устаревшем содержимом.
+    /// </summary>
+    private async Task CheckSectionAsync()
+    {
+        if (conflict || current is null || payload is null || details is null || !details.Editable && !details.Actions.CorrectPlan) return;
+        var (section, at, seq) = (current, edits, ++checks);
+        try
+        {
+            var value = JsonDocument.Parse(payload[section]?.ToJsonString() ?? "null").RootElement;
+            var response = await Http.PostAsJsonAsync($"api/documents/{Id}/sections/{section}/check", new { version, value });
+            if (!response.IsSuccessStatusCode || await response.Content.ReadFromJsonAsync<SectionChecked>() is not { } result) return;
+            if (seq != checks || at != edits || section != current) return;
+            sections = result.Sections;
+            context!.Metadata = context.Metadata with { Sections = sections, HiddenPaths = result.HiddenPaths };
+            StateHasChanged();
+        }
+        catch (AccessTokenNotAvailableException e)
+        {
+            e.Redirect();
+        }
+    }
 
     /// <summary>
     /// Исправление поля из плана (методист, администратор) — сразу на сервер: пометка, предупреждение «отличается от

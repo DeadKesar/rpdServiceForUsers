@@ -29,6 +29,7 @@ public class DocumentsModule : ICarterModule
         g.MapGet("/{id:guid}", Get);
         g.MapPost("/", Create).RequireAuthorization(Policies.DocumentAuthors);
         g.MapPatch("/{id:guid}/sections/{section}", UpdateSection).RequireAuthorization(Policies.DocumentAuthors);
+        g.MapPost("/{id:guid}/sections/{section}/check", CheckSection).RequireAuthorization(Policies.DocumentAuthors);
         g.MapPost("/{id:guid}/save", Save).RequireAuthorization(Policies.DocumentAuthors);
         g.MapDelete("/{id:guid}", Delete).RequireAuthorization(Policies.DocumentAuthors);
 
@@ -153,28 +154,66 @@ public class DocumentsModule : ICarterModule
     /// синхронизация нормализованных таблиц. Правит автор или методист на проверке. Ответ — новая версия и
     /// заполненность раздела.
     /// </summary>
+    // Кто и в каком объёме правит раздел: автор — своё содержимое, методист на проверке — всё, после приёма методист
+    // и администратор — поля из плана. Те же права — у проверки раздела без сохранения.
+    private static async Task<(Document? Document, Guid EditorId, DocumentEditScope Scope, IResult? Refusal)> SectionEditorAsync(
+        Guid id, HttpContext http, AppDbContext db, DirectoryAccounts directory, CancellationToken ct)
+    {
+        var document = await db.Documents.SingleOrDefaultAsync(d => d.Id == id, ct);
+        if (document is null) return (null, default, default, NotFound());
+        var editorId = await directory.FindIdAsync(http.User, ct);
+        if (editorId is null) return (null, default, default, NoDirectoryRecord());
+        var isAuthor = document.AuthorId == editorId;
+        var scope = DocumentTransitions.EditScope(document.Status, isAuthor, IsReviewer(http.User), IsCorrector(http.User));
+        if (scope is null)
+            return (null, default, default, isAuthor || IsCorrector(http.User)
+                ? Refused(document, DocumentTransitions.EditAction)
+                : Results.Problem(statusCode: StatusCodes.Status403Forbidden, title: "Изменяет только автор",
+                    detail: "Документ изменяет его автор, а на проверке — методист."));
+        return (document, editorId.Value, scope.Value, null);
+    }
+
+    /// <summary>
+    /// Проверка раздела без сохранения (этап 5.2, B4.1): редактор присылает содержимое раздела при уходе из поля и
+    /// получает состояние разделов — рамки и индикаторы обновляются сразу. Документ, версия и история не меняются;
+    /// ошибки черновика — в ответе.
+    /// </summary>
+    private static async Task<IResult> CheckSection(
+        Guid id, string section, SectionUpdateRequest rq, HttpContext http, AppDbContext db, DirectoryAccounts directory,
+        DocumentEditing editing, CancellationToken ct)
+    {
+        var (document, editorId, scope, refusal) = await SectionEditorAsync(id, http, db, directory, ct);
+        if (refusal is not null) return refusal;
+
+        var result = await editing.UpdateSectionAsync(document!, section, rq.Value, editorId, ct, scope, checkOnly: true);
+        return result.Sections is { } sections
+            ? Results.Ok(new SectionChecked(sections, result.HiddenPaths ?? [], result.Errors))
+            : SectionProblem(section, result);
+    }
+
     private static async Task<IResult> UpdateSection(
         Guid id, string section, SectionUpdateRequest rq, HttpContext http, AppDbContext db, DirectoryAccounts directory,
         DocumentEditing editing, TimeProvider clock, CancellationToken ct)
     {
-        var document = await db.Documents.SingleOrDefaultAsync(d => d.Id == id, ct);
-        if (document is null) return NotFound();
-        var editorId = await directory.FindIdAsync(http.User, ct);
-        if (editorId is null) return NoDirectoryRecord();
-        var isAuthor = document.AuthorId == editorId;
-        // Автор — своё содержимое, методист на проверке — всё, после приёма методист и администратор — поля из плана.
-        var scope = DocumentTransitions.EditScope(document.Status, isAuthor, IsReviewer(http.User), IsCorrector(http.User));
-        if (scope is null)
-            return isAuthor || IsCorrector(http.User)
-                ? Refused(document, DocumentTransitions.EditAction)
-                : Results.Problem(statusCode: StatusCodes.Status403Forbidden, title: "Изменяет только автор",
-                    detail: "Документ изменяет его автор, а на проверке — методист.");
+        var (document, editorId, scope, refusal) = await SectionEditorAsync(id, http, db, directory, ct);
+        if (refusal is not null) return refusal;
 
         // Сравнивать будем с версией, которую видел клиент; новую проставит перехватчик сохранения.
-        db.Entry(document).Property(d => d.Version).OriginalValue = rq.Version;
-        var result = await editing.UpdateSectionAsync(document, section, rq.Value, editorId.Value, ct, scope.Value, rq.ConfirmReturn);
-        if (result.Problem is { } problem)
-            return problem switch
+        db.Entry(document!).Property(d => d.Version).OriginalValue = rq.Version;
+        var result = await editing.UpdateSectionAsync(document!, section, rq.Value, editorId, ct, scope, rq.ConfirmReturn);
+        if (result.Problem is not null) return SectionProblem(section, result);
+
+        await db.SaveChangesAsync(ct);
+        // Состояние всех разделов и история исправлений — редактор обновляет их сразу, без перезагрузки документа.
+        return Results.Ok(new SectionSaved(document!.Version, document.Status, DocumentStatuses.Title(document.Status),
+            result.Section!, clock.GetUtcNow(), result.Sections,
+            scope == DocumentEditScope.Content ? null : await CorrectionsAsync(db, document.Id, ct), result.HiddenPaths, result.Payload));
+    }
+
+    private static IResult SectionProblem(string section, SectionUpdateResult result)
+    {
+        var problem = result.Problem!.Value;
+        return problem switch
             {
                 SectionUpdateProblem.ReturnNotConfirmed => Results.Problem(statusCode: StatusCodes.Status409Conflict,
                     title: "Исправление вернёт документ автору",
@@ -191,12 +230,6 @@ public class DocumentsModule : ICarterModule
                     detail: string.Join(" ", result.Errors.Select(e => $"{e.Path}: {e.Message}.")),
                     extensions: new Dictionary<string, object?> { ["errors"] = result.Errors })
             };
-
-        await db.SaveChangesAsync(ct);
-        // Состояние всех разделов и история исправлений — редактор обновляет их сразу, без перезагрузки документа.
-        return Results.Ok(new SectionSaved(document.Version, document.Status, DocumentStatuses.Title(document.Status),
-            result.Section!, clock.GetUtcNow(), result.Sections,
-            scope == DocumentEditScope.Content ? null : await CorrectionsAsync(db, document.Id, ct), result.HiddenPaths, result.Payload));
     }
 
     private static async Task<IResult> Save(
@@ -471,6 +504,10 @@ public record ReturnRequest(int Version, string? Comment);
 public record CommentRequest(string? FieldPath, string? Text);
 
 /// <summary>Раздел сохранён: новая версия, статус (после «Сохранить» правка возвращает черновик) и заполненность раздела.</summary>
+/// <summary>Раздел проверен без сохранения: состояние всех разделов по присланному и ошибки черновика.</summary>
+public record SectionChecked(IReadOnlyList<SectionState> Sections, IReadOnlyList<string> HiddenPaths,
+    IReadOnlyList<DocumentValidationError> Errors);
+
 public record SectionSaved(int Version, string Status, string StatusTitle, SectionState Section, DateTimeOffset SavedAt,
     IReadOnlyList<SectionState>? Sections = null, IReadOnlyList<PlanCorrection>? PlanCorrections = null,
     IReadOnlyList<string>? HiddenPaths = null, JsonElement? Payload = null);

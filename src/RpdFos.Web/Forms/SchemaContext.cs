@@ -53,7 +53,11 @@ public sealed class SchemaContext(JsonElement root, JsonObject payload, Document
     public static string Anchor(string path) => "field" + path.Replace('/', '-');
 
     /// <summary>Правка завершена (уход из поля, кнопка, флажок): форма перерисовывается целиком — итоги, заполненность.</summary>
-    public void Changed() => changed();
+    public void Changed()
+    {
+        changed();
+        SectionCheckRequested?.Invoke();
+    }
 
     /// <summary>
     /// Правка завершена в поле <paramref name="path"/>. Исправление поля из плана сохраняется сразу
@@ -63,7 +67,14 @@ public sealed class SchemaContext(JsonElement root, JsonObject payload, Document
     {
         changed();
         if (CorrectPlan && IsPlanPath(path)) PlanFieldChanged?.Invoke();
+        else SectionCheckRequested?.Invoke();
     }
+
+    /// <summary>
+    /// Правка поля завершена — редактор проверяет раздел без сохранения (этап 5.2, B4.1): рамки и индикаторы
+    /// обновляются сразу, а не при автосохранении.
+    /// </summary>
+    public Action? SectionCheckRequested { get; set; }
 
     /// <summary>Ввод в поле <paramref name="path"/>; у поля из плана форма перерисовывается — пометка видна при наборе.</summary>
     public void Edited(string path)

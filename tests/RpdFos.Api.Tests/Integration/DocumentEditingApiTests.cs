@@ -19,6 +19,39 @@ public class DocumentEditingApiTests(DatabaseFixture app)
         "<p>Сформировать у обучающихся <strong>умения</strong> строить математические и компьютерные модели систем.</p>";
 
     [Fact]
+    public async Task Section_check_returns_state_without_saving()
+    {
+        // Этап 5.2, B4.1: при уходе из поля редактор проверяет раздел без сохранения.
+        var (client, _) = await DocumentData.UserAsync(app);
+        var created = await DocumentData.CreateAsync(app, client, (await DocumentData.PublishedTemplateAsync(app)).Id, "Б1.О.10");
+        Assert.Contains(created.Metadata.Sections.Single(s => s.Key == "goals_and_objectives").Missing,
+            m => m.Path == "/goals_and_objectives");
+
+        var response = await client.PostAsJsonAsync($"/api/documents/{created.Document.Id}/sections/goals_and_objectives/check",
+            new SectionUpdateRequest(created.Document.Version, JsonDocument.Parse(new JsonObject { ["goals"] = Goals }.ToJsonString()).RootElement));
+        var invalid = await client.PostAsJsonAsync($"/api/documents/{created.Document.Id}/sections/goals_and_objectives/check",
+            new SectionUpdateRequest(created.Document.Version, JsonDocument.Parse("""{ "goals": 5 }""").RootElement));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var checkedState = (await response.Content.ReadFromJsonAsync<SectionChecked>())!;
+        var goals = checkedState.Sections.Single(s => s.Key == "goals_and_objectives");
+        // Цель заполнена — её нет среди недостающего, остались задачи; раздел — частично.
+        Assert.Equal(["/goals_and_objectives/objectives"], goals.Missing.Select(m => m.Path));
+        Assert.Equal(SectionFill.Incomplete, goals.Fill);
+        Assert.Empty(checkedState.Errors);
+        // Ошибка черновика — в ответе, ничего не сохранено.
+        Assert.Equal(HttpStatusCode.OK, invalid.StatusCode);
+        Assert.Contains((await invalid.Content.ReadFromJsonAsync<SectionChecked>())!.Errors, e => e.Path == "/goals_and_objectives/goals");
+        await app.WithDbAsync(async db =>
+        {
+            var document = await db.Documents.SingleAsync(d => d.Id == created.Document.Id);
+            Assert.Equal(created.Document.Version, document.Version);
+            Assert.False(JsonNode.Parse(document.Payload)!.AsObject().ContainsKey("goals_and_objectives"));
+            Assert.False(await db.DocumentVersions.AnyAsync(v => v.DocumentId == created.Document.Id && v.TriggerEvent == VersionTriggers.AutoSave));
+        });
+    }
+
+    [Fact]
     public async Task Section_is_saved_and_version_grows()
     {
         var (client, _) = await DocumentData.UserAsync(app);

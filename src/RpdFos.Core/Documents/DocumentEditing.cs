@@ -43,9 +43,14 @@ public sealed class DocumentEditing(
     /// Исправление принятого документа, после которого полная проверка находит ошибки, возвращает его автору — только
     /// с подтверждением исправляющего; без него — <see cref="SectionUpdateProblem.ReturnNotConfirmed"/> с причинами.
     /// </param>
+    /// <param name="checkOnly">
+    /// Проверка без сохранения (этап 5.2, B4.1): тот же путь до проверки черновика, затем — состояние разделов по
+    /// присланному содержимому. Документ, версия, снимки, история и журнал аудита не меняются; ошибки черновика —
+    /// в ответе вместе с разделами.
+    /// </param>
     public async Task<SectionUpdateResult> UpdateSectionAsync(
         Document document, string section, JsonElement value, Guid editorId, CancellationToken ct = default,
-        DocumentEditScope scope = DocumentEditScope.Content, bool confirmReturn = false)
+        DocumentEditScope scope = DocumentEditScope.Content, bool confirmReturn = false, bool checkOnly = false)
     {
         var schemaJson = await SchemaAsync(document, ct);
         var schema = JsonDocument.Parse(schemaJson).RootElement;
@@ -89,10 +94,16 @@ public sealed class DocumentEditing(
         var updatedJson = updated.ToJsonString(Json);
         var element = JsonDocument.Parse(updatedJson).RootElement;
         var errors = validator.Validate(schemaJson, element, ValidationMode.Draft);
-        if (errors.Count > 0) return new(SectionUpdateProblem.Invalid, errors, null);
         // Правила об ошибках в самих данных (год издания в будущем) не дают сохранить и черновик — в этом разделе.
-        var wrong = rules.Run(schema, element, facts, registry.FindSchema, new HashSet<string>(), onSave: true)
+        var wrong = errors.Count > 0 ? errors : rules.Run(schema, element, facts, registry.FindSchema, new HashSet<string>(), onSave: true)
             .Where(e => DocumentSubmission.Section(e.Path) == section).ToList();
+        if (checkOnly)
+        {
+            // Состояние разделов — по присланному, как если бы его сохранили: рамки и индикаторы без сохранения.
+            var check = DocumentMetadata.Build(schemaJson, element, document.Status, facts, validator, rules, registry.FindSchema);
+            return new(wrong.Count > 0 ? SectionUpdateProblem.Invalid : null, wrong, check.Sections.Single(s => s.Key == section),
+                check.Sections, check.HiddenPaths);
+        }
         if (wrong.Count > 0) return new(SectionUpdateProblem.Invalid, wrong, null);
 
         // Принятый документ после исправления должен оставаться полным: иначе — возврат автору, с подтверждением.
