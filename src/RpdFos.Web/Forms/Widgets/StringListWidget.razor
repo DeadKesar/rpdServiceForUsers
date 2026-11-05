@@ -10,15 +10,21 @@
     @for (var i = 0; i < (items?.Count ?? 0); i++)
     {
         var index = i;
+        // Ошибка проверки у самого пункта (пустой, слишком короткий) — рамка и подпись, как у простых полей (этап 5.2).
+        var missing = ReadOnly ? null : Context.MissingAt($"{Path}/{index}");
         <div class="input-group input-group-sm mb-1">
             <span class="input-group-text align-items-start">@(index + 1)</span>
-            <textarea class="form-control auto-grow" rows="1" readonly="@ReadOnly"
+            <textarea class="form-control auto-grow @(missing is null ? "" : "field-missing-box")" rows="1" readonly="@ReadOnly"
                       @oninput="e => Input(index, e.Value as string)" @onchange="e => Change(index, e.Value as string)">@Text(items![index])</textarea>
             @if (!ReadOnly)
             {
                 <button class="btn btn-outline-secondary" type="button" title="Удалить" @onclick="() => Remove(index)">✕</button>
             }
         </div>
+        @if (missing is not null)
+        {
+            <div class="field-missing-text mb-1">@missing</div>
+        }
     }
     @if (!ReadOnly)
     {

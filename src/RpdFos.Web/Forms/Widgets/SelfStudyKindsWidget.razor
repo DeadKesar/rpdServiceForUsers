@@ -29,8 +29,14 @@
                 if (rows![index] is not JsonObject row) continue;
                 <tr>
                     <td>
-                        <input type="text" class="form-control form-control-sm" list="@ListId" readonly="@ReadOnly" value="@Text(row["kind"])"
+                        @{ var kindMissing = ReadOnly ? null : Context.MissingAt($"{Path}/{index}/kind"); }
+                        <input type="text" class="form-control form-control-sm @(kindMissing is null ? "" : "field-missing-box")" list="@ListId"
+                               readonly="@ReadOnly" value="@Text(row["kind"])"
                                @oninput="e => InputKind(row, e.Value as string)" @onchange="e => SetKind(row, e.Value as string)" />
+                        @if (kindMissing is not null)
+                        {
+                            <div class="field-missing-text">@kindMissing</div>
+                        }
                         @* Разделы тематического плана выбираются в документе: у шаблона тематического плана нет. *@
                         @if (row["sections"] is JsonArray && !Context.IsTemplate)
                         {
