@@ -11,7 +11,8 @@ using RpdFos.Core.Import;
 namespace RpdFos.Api.Features.Imports;
 
 /// <summary>
-/// Срез «Импорт данных»: методист загружает исходные файлы, разбор и импорт идут в фоне (очередь parsing),
+/// Срез «Импорт данных»: методист загружает исходные файлы — комплект из трёх (план, список и матрица компетенций;
+/// должности с этапа 5.2 загружает администратор в «Справочнике сотрудников»), разбор и импорт идут в фоне (очередь parsing),
 /// итог — в parser_runs. Повторная загрузка тех же файлов разрешена: она создаёт новую версию плана.
 /// </summary>
 public class ImportsModule : ICarterModule
@@ -21,8 +22,7 @@ public class ImportsModule : ICarterModule
     [
         ("plan", UploadedFileTypes.CurriculumPlan, ".xlsx", true, "Учебный план"),
         ("competences", UploadedFileTypes.CompetenceReference, ".docx", true, "Список компетенций"),
-        ("matrix", UploadedFileTypes.CompetenceMatrix, ".docx", true, "Матрица компетенций"),
-        ("positions", UploadedFileTypes.Employees, ".xlsx", false, "Должности сотрудников")
+        ("matrix", UploadedFileTypes.CompetenceMatrix, ".docx", true, "Матрица компетенций")
     ];
 
     public void AddRoutes(IEndpointRouteBuilder app)
@@ -107,7 +107,7 @@ public class ImportsModule : ICarterModule
         var run = new ParserRun
         {
             StartedBy = startedBy.Value, PlanFileId = ids["plan"], CompListFileId = ids["competences"],
-            CompMatrixFileId = ids["matrix"], EmployeesFileId = ids.TryGetValue("positions", out var p) ? p : null,
+            CompMatrixFileId = ids["matrix"],
             StartedAt = now
         };
         db.ParserRuns.Add(run);

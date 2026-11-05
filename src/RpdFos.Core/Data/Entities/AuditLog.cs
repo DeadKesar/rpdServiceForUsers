@@ -28,9 +28,17 @@ public static class AuditEvents
 {
     /// <summary>Исправлено поле из учебного плана: <c>{ "path", "before", "after" }</c>.</summary>
     public const string PlanFieldCorrected = "document.plan_field_corrected";
+
+    /// <summary>Справочник сотрудников со страницы администратора (этап 5.2): <c>{ "before", "after" }</c>.</summary>
+    public const string EmployeeCreated = "employee.created", EmployeeUpdated = "employee.updated",
+        EmployeeDeactivated = "employee.deactivated", EmployeeReactivated = "employee.reactivated",
+        EmployeeReplaced = "employee.replaced";
+
+    /// <summary>Привязка строки матрицы к дисциплине плана и её отмена (этап 5.2).</summary>
+    public const string MatrixRowLinked = "matrix_row.linked", MatrixRowUnlinked = "matrix_row.unlinked";
 }
 
 public static class AuditEntities
 {
-    public const string Document = "document";
+    public const string Document = "document", Employee = "employee", MatrixRow = "matrix_row";
 }

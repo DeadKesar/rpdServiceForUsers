@@ -1,0 +1,485 @@
+@page "/directory"
+@attribute [Authorize(Roles = "admin")]
+@implements IDisposable
+@using System.Net.Http.Headers
+@using System.Net.Http.Json
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.WebAssembly.Authentication
+@inject HttpClient Http
+@inject IJSRuntime JS
+
+<PageTitle>Справочник сотрудников</PageTitle>
+
+@* S-51 «Справочники» (этап 5.2): справочник сотрудников ведёт администратор — записи, места подписантов, смена
+   человека на должности; файл должностей — необязательная начальная загрузка. Правила — на сервере. *@
+<h1>Справочник сотрудников</h1>
+
+@if (message is not null)
+{
+    <div class="alert @(messageIsError ? "alert-danger" : "alert-success")" role="status">@message</div>
+}
+
+<div class="card mb-3">
+    <div class="card-body">
+        <h2 class="h6">Загрузить файл должностей (.xlsx)</h2>
+        <p class="small text-muted mb-2">
+            Записи добавляются и обновляются по официальному названию, при смене человека на должности прежняя запись
+            освобождается; записи, которых нет в файле, не меняются. Кафедры — только из справочника кафедр учебного плана.
+        </p>
+        <div class="input-group" style="max-width: 640px">
+            <InputFile class="form-control" accept=".xlsx" OnChange="e => positions = e.File" disabled="@busy" />
+            <button class="btn btn-outline-primary" @onclick="UploadAsync" disabled="@(busy || positions is null)">Загрузить</button>
+        </div>
+        @if (lastImport is { } run)
+        {
+            <p class="small mt-2 mb-1">
+                Последняя загрузка: «@run.FileName», @run.StartedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm"), записей в файле: @run.Rows.
+                Статус: <strong>@StatusTitle(run.Status)</strong>
+                @if (run.Status == "running")
+                {
+                    <span class="spinner-border spinner-border-sm ms-1" aria-hidden="true"></span>
+                }
+                else
+                {
+                    <text> · добавлено @run.Added, обновлено @run.Updated, снято с должности @run.Replaced</text>
+                }
+            </p>
+            @if (run.Issues.Count > 0)
+            {
+                <details>
+                    <summary class="small">Замечания: @run.Issues.Count</summary>
+                    <ul class="small mb-0">
+                        @foreach (var i in run.Issues)
+                        {
+                            <li class="@(i.Severity == "error" ? "text-danger" : "")">@i.Message</li>
+                        }
+                    </ul>
+                </details>
+            }
+        }
+    </div>
+</div>
+
+<div class="d-flex flex-wrap gap-2 align-items-end mb-2">
+    <div>
+        <label class="form-label small mb-0">Фамилия</label>
+        <input class="form-control form-control-sm" @bind="surname" @bind:event="oninput" @onkeyup="FilterKeyAsync" />
+    </div>
+    <div>
+        <label class="form-label small mb-0">Категория подписанта</label>
+        <select class="form-select form-select-sm" @bind="roleFilter" @bind:after="LoadAsync">
+            <option value="">все</option>
+            @foreach (var r in units?.Roles ?? [])
+            {
+                <option value="@r.Code">@r.Title</option>
+            }
+        </select>
+    </div>
+    <div class="form-check mb-1">
+        <input class="form-check-input" type="checkbox" id="inactive" @bind="showInactive" @bind:after="LoadAsync" />
+        <label class="form-check-label small" for="inactive">показывать неактивные</label>
+    </div>
+    <button class="btn btn-sm btn-outline-secondary" @onclick="LoadAsync">Найти</button>
+    <button class="btn btn-sm btn-primary ms-auto" @onclick="StartCreate" disabled="@busy">Добавить запись</button>
+</div>
+
+@if (editing is not null)
+{
+    <div class="card mb-3 border-primary">
+        <div class="card-body">
+            <h2 class="h6">@(editing.Id is null ? "Новая запись" : $"Запись «{editing.ShortName}»")</h2>
+            <div class="row g-2">
+                <div class="col-md-4">
+                    <label class="form-label small mb-0">Фамилия И. О. *</label>
+                    <input class="form-control form-control-sm" @bind="editing.ShortName" />
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label small mb-0">Подпись в документах</label>
+                    <input class="form-control form-control-sm" @bind="editing.NameForDocument" placeholder="по умолчанию — «И. О. Фамилия»" />
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label small mb-0">ФИО полностью</label>
+                    <input class="form-control form-control-sm" @bind="editing.FullName" />
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label small mb-0">Должность</label>
+                    <input class="form-control form-control-sm" @bind="editing.Position" />
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label small mb-0">Учёная степень</label>
+                    <input class="form-control form-control-sm" @bind="editing.AcademicDegree" />
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label small mb-0">Email</label>
+                    <input class="form-control form-control-sm" @bind="editing.Email" disabled="@(editing.Account is not null)"
+                           title="@(editing.Account is null ? null : "Связана с учётной записью: email — адрес входа")" />
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label small mb-0">Официальное название (место)</label>
+                    <input class="form-control form-control-sm" @bind="editing.OfficialDesignation" />
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label small mb-0">Категория подписанта</label>
+                    <select class="form-select form-select-sm" @bind="editing.SignatoryRole">
+                        <option value="">— не подписант</option>
+                        @foreach (var r in units?.Roles ?? [])
+                        {
+                            <option value="@r.Code">@r.Title</option>
+                        }
+                    </select>
+                </div>
+                @* Оргструктура по категории (как ck_users_signatory_scope): заведующий — кафедра, директор — институт,
+                   подписанты уровня университета — без подразделения. *@
+                @if (UnitOf(editing.SignatoryRole) is "department" or "")
+                {
+                    <div class="col-md-6">
+                        <label class="form-label small mb-0">Кафедра @(UnitOf(editing.SignatoryRole) == "department" ? "*" : "")</label>
+                        <select class="form-select form-select-sm" @bind="editing.DepartmentId">
+                            <option value="">—</option>
+                            @foreach (var d in units?.Departments ?? [])
+                            {
+                                <option value="@d.Id">@d.Name</option>
+                            }
+                        </select>
+                    </div>
+                }
+                @if (UnitOf(editing.SignatoryRole) == "institute")
+                {
+                    <div class="col-md-6">
+                        <label class="form-label small mb-0">Институт *</label>
+                        <select class="form-select form-select-sm" @bind="editing.InstituteId">
+                            <option value="">—</option>
+                            @foreach (var i in units?.Institutes ?? [])
+                            {
+                                <option value="@i.Id">@i.Name</option>
+                            }
+                        </select>
+                    </div>
+                }
+            </div>
+            <div class="mt-2">
+                <button class="btn btn-sm btn-primary" @onclick="SaveAsync" disabled="@busy">Сохранить</button>
+                <button class="btn btn-sm btn-outline-secondary" @onclick="() => editing = null">Отмена</button>
+            </div>
+        </div>
+    </div>
+}
+
+@if (replacing is not null)
+{
+    <div class="card mb-3 border-warning">
+        <div class="card-body">
+            <h2 class="h6">Сменить сотрудника на должности «@(replacing.OfficialDesignation ?? replacing.SignatoryRoleTitle)»</h2>
+            <p class="small text-muted">
+                Место переходит к другой записи. «@replacing.ShortName» —
+                @(replacing.Account is null ? "без учётной записи — станет неактивной" : "с учётной записью — останется активной, но без места").
+            </p>
+            <div class="form-check form-check-inline">
+                <input class="form-check-input" type="radio" id="existing" checked="@(!newcomer)" @onchange="() => newcomer = false" />
+                <label class="form-check-label small" for="existing">запись справочника</label>
+            </div>
+            <div class="form-check form-check-inline">
+                <input class="form-check-input" type="radio" id="newcomer" checked="@newcomer" @onchange="() => newcomer = true" />
+                <label class="form-check-label small" for="newcomer">новый сотрудник</label>
+            </div>
+            @if (newcomer)
+            {
+                <div class="row g-2 mt-1" style="max-width: 640px">
+                    <div class="col-md-6">
+                        <label class="form-label small mb-0">Фамилия И. О. *</label>
+                        <input class="form-control form-control-sm" @bind="newcomerShort" />
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label small mb-0">ФИО полностью</label>
+                        <input class="form-control form-control-sm" @bind="newcomerFull" />
+                    </div>
+                </div>
+            }
+            else
+            {
+                <select class="form-select form-select-sm mt-1" style="max-width: 640px" @bind="successorId">
+                    <option value="">— выберите сотрудника без должности</option>
+                    @foreach (var e in (records ?? []).Where(r => r.IsActive && r.Id != replacing.Id && r.OfficialDesignation is null && r.SignatoryRole is null))
+                    {
+                        <option value="@e.Id">@e.ShortName@(e.Unit is null ? "" : $", {e.Unit}")</option>
+                    }
+                </select>
+                <div class="form-text">В списке — записи текущей выборки без должности; сузьте выборку фильтром по фамилии.</div>
+            }
+            <div class="mt-2">
+                <button class="btn btn-sm btn-warning" @onclick="ReplaceAsync" disabled="@busy">Сменить</button>
+                <button class="btn btn-sm btn-outline-secondary" @onclick="() => replacing = null">Отмена</button>
+            </div>
+        </div>
+    </div>
+}
+
+@if (records is null)
+{
+    <p>Загрузка…</p>
+}
+else if (records.Count == 0)
+{
+    <p class="text-muted">Записей нет.</p>
+}
+else
+{
+    <div class="table-responsive">
+        <table class="table table-sm align-middle">
+            <thead>
+                <tr>
+                    <th>Фамилия И. О.</th><th>Подпись в документах</th><th>Должность</th><th>Официальное название</th>
+                    <th>Кафедра / институт</th><th>Категория подписанта</th><th>Учётная запись</th><th>Активна</th><th></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var e in records)
+                {
+                    <tr class="@(e.IsActive ? "" : "text-muted")">
+                        <td>@e.ShortName</td>
+                        <td>@e.NameForDocument</td>
+                        <td>@e.Position</td>
+                        <td>@e.OfficialDesignation</td>
+                        <td>@e.Unit</td>
+                        <td>@e.SignatoryRoleTitle</td>
+                        <td>@e.Account</td>
+                        <td>@(e.IsActive ? "да" : "нет")</td>
+                        <td class="text-nowrap">
+                            <button class="btn btn-link btn-sm p-0 me-2" @onclick="() => StartEdit(e)">Изменить</button>
+                            @if (e.IsActive && (e.OfficialDesignation is not null || e.SignatoryRole is not null))
+                            {
+                                <button class="btn btn-link btn-sm p-0 me-2" @onclick="() => StartReplace(e)">Сменить сотрудника</button>
+                            }
+                            <button class="btn btn-link btn-sm p-0" @onclick="() => SetActiveAsync(e, !e.IsActive)">
+                                @(e.IsActive ? "Деактивировать" : "Вернуть")
+                            </button>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    private List<Entry>? records;
+    private Units? units;
+    private ImportRun? lastImport;
+    private IBrowserFile? positions;
+    private Form? editing;
+    private Entry? replacing;
+    private bool newcomer;
+    private string? successorId;
+    private string newcomerShort = "", newcomerFull = "";
+    private string surname = "", roleFilter = "";
+    private bool showInactive, busy, messageIsError;
+    private string? message;
+    private readonly CancellationTokenSource polling = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            units = await Http.GetFromJsonAsync<Units>("api/admin/directory/units");
+            await LoadAsync();
+            var response = await Http.GetAsync("api/admin/directory/imports/last");
+            if (response.StatusCode == System.Net.HttpStatusCode.OK) lastImport = await response.Content.ReadFromJsonAsync<ImportRun>();
+            if (lastImport?.Status == "running") _ = PollAsync(lastImport.Id);
+        }
+        catch (AccessTokenNotAvailableException e)
+        {
+            e.Redirect();
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        var query = $"api/admin/directory/records?surname={Uri.EscapeDataString(surname.Trim())}&role={roleFilter}&inactive={showInactive}";
+        try
+        {
+            records = await Http.GetFromJsonAsync<List<Entry>>(query);
+        }
+        catch (AccessTokenNotAvailableException e)
+        {
+            e.Redirect();
+        }
+    }
+
+    private async Task FilterKeyAsync(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await LoadAsync();
+    }
+
+    private string UnitOf(string? role) => string.IsNullOrEmpty(role) ? "" : units?.Roles.FirstOrDefault(r => r.Code == role)?.Unit ?? "none";
+
+    private void StartCreate() => (editing, replacing, message) = (new Form(), null, null);
+
+    private void StartEdit(Entry e) => (editing, replacing, message) = (new Form
+    {
+        Id = e.Id, ShortName = e.ShortName, NameForDocument = e.NameForDocument, FullName = e.FullName, Email = e.Email,
+        Position = e.Position, AcademicDegree = e.AcademicDegree, OfficialDesignation = e.OfficialDesignation,
+        SignatoryRole = e.SignatoryRole ?? "", DepartmentId = e.DepartmentId?.ToString() ?? "", InstituteId = e.InstituteId?.ToString() ?? "",
+        Account = e.Account
+    }, null, null);
+
+    private void StartReplace(Entry e) => (replacing, editing, newcomer, successorId, newcomerShort, newcomerFull, message) =
+        (e, null, false, null, "", "", null);
+
+    private async Task SaveAsync()
+    {
+        var f = editing!;
+        var unit = UnitOf(f.SignatoryRole);
+        var body = new
+        {
+            f.ShortName, f.NameForDocument, f.FullName, f.Email, f.Position, f.AcademicDegree, f.OfficialDesignation,
+            SignatoryRole = string.IsNullOrEmpty(f.SignatoryRole) ? null : f.SignatoryRole,
+            DepartmentId = unit is "department" or "" && Guid.TryParse(f.DepartmentId, out var d) ? d : (Guid?)null,
+            InstituteId = unit == "institute" && Guid.TryParse(f.InstituteId, out var i) ? i : (Guid?)null
+        };
+        await RunAsync(() => f.Id is Guid id
+                ? Http.PutAsJsonAsync($"api/admin/directory/records/{id}", body)
+                : Http.PostAsJsonAsync("api/admin/directory/records", body),
+            f.Id is null ? $"Запись «{f.ShortName}» добавлена." : $"Запись «{f.ShortName}» сохранена.",
+            () => editing = null);
+    }
+
+    private Task SetActiveAsync(Entry e, bool active) =>
+        RunAsync(() => Http.PostAsync($"api/admin/directory/records/{e.Id}/{(active ? "activate" : "deactivate")}", null),
+            active ? $"Запись «{e.ShortName}» возвращена." : $"Запись «{e.ShortName}» деактивирована.", () => { });
+
+    private Task ReplaceAsync()
+    {
+        var holder = replacing!;
+        object body = newcomer
+            ? new { SuccessorId = (Guid?)null, Newcomer = new { ShortName = newcomerShort, FullName = newcomerFull } }
+            : new { SuccessorId = Guid.TryParse(successorId, out var s) ? s : (Guid?)null, Newcomer = (object?)null };
+        return RunAsync(() => Http.PostAsJsonAsync($"api/admin/directory/records/{holder.Id}/replace", body),
+            $"Должность «{holder.OfficialDesignation ?? holder.SignatoryRoleTitle}» передана.", () => replacing = null);
+    }
+
+    // Действие со справочником: при успехе — сообщение и перечитанный список, при отказе — текст сервера (409, 422).
+    private async Task RunAsync(Func<Task<HttpResponseMessage>> send, string done, Action onSuccess)
+    {
+        busy = true;
+        try
+        {
+            var response = await send();
+            if (response.IsSuccessStatusCode)
+            {
+                (messageIsError, message) = (false, done);
+                onSuccess();
+                await LoadAsync();
+                return;
+            }
+            var problem = await response.Content.ReadFromJsonAsync<Problem>();
+            (messageIsError, message) = (true, problem?.Detail is { } detail ? $"{problem.Title}. {detail}" : problem?.Title ?? $"Ответ сервера: {(int)response.StatusCode}");
+        }
+        catch (AccessTokenNotAvailableException e)
+        {
+            e.Redirect();
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private async Task UploadAsync()
+    {
+        busy = true;
+        message = null;
+        try
+        {
+            using var content = new MultipartFormDataContent();
+            var stream = new StreamContent(positions!.OpenReadStream(10 * 1024 * 1024));
+            stream.Headers.ContentType = new MediaTypeHeaderValue(string.IsNullOrEmpty(positions.ContentType) ? "application/octet-stream" : positions.ContentType);
+            content.Add(stream, "file", positions.Name);
+            var response = await Http.PostAsync("api/admin/directory/imports", content);
+            if (response.IsSuccessStatusCode && await response.Content.ReadFromJsonAsync<ImportRun>() is { } run)
+            {
+                lastImport = run;
+                positions = null;
+                _ = PollAsync(run.Id);
+                return;
+            }
+            var problem = await response.Content.ReadFromJsonAsync<Problem>();
+            (messageIsError, message) = (true, problem?.Detail is { } detail ? $"{problem.Title}. {detail}" : problem?.Title ?? "Файл не принят.");
+        }
+        catch (AccessTokenNotAvailableException e)
+        {
+            e.Redirect();
+        }
+        catch (IOException e)
+        {
+            (messageIsError, message) = (true, $"Файл не прочитан: {e.Message}");
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    // Разбор идёт в фоне: статус опрашивается, пока загрузка выполняется; по завершении — перечитанный список.
+    private async Task PollAsync(Guid id)
+    {
+        try
+        {
+            while (!polling.IsCancellationRequested)
+            {
+                await Task.Delay(1500, polling.Token);
+                lastImport = await Http.GetFromJsonAsync<ImportRun>($"api/admin/directory/imports/{id}", polling.Token);
+                if (lastImport?.Status != "running")
+                {
+                    await LoadAsync();
+                    StateHasChanged();
+                    return;
+                }
+                StateHasChanged();
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    private static string StatusTitle(string status) => status switch
+    {
+        "running" => "выполняется",
+        "succeeded" => "завершена",
+        "partial" => "завершена с ошибками",
+        "failed" => "не выполнена",
+        _ => status
+    };
+
+    public void Dispose() => polling.Cancel();
+
+    private sealed class Form
+    {
+        public Guid? Id { get; set; }
+        public string ShortName { get; set; } = "";
+        public string? NameForDocument { get; set; }
+        public string? FullName { get; set; }
+        public string? Email { get; set; }
+        public string? Position { get; set; }
+        public string? AcademicDegree { get; set; }
+        public string? OfficialDesignation { get; set; }
+        public string SignatoryRole { get; set; } = "";
+        public string DepartmentId { get; set; } = "";
+        public string InstituteId { get; set; } = "";
+        public string? Account { get; set; }
+    }
+
+    private sealed record Entry(
+        Guid Id, string ShortName, string NameForDocument, string? FullName, string? Email, string? Position, string? AcademicDegree,
+        string? OfficialDesignation, string? SignatoryRole, string? SignatoryRoleTitle, Guid? DepartmentId, Guid? InstituteId,
+        string? Unit, string? Account, bool IsActive);
+
+    private sealed record UnitItem(Guid Id, string Name, string ShortName);
+    private sealed record RoleItem(string Code, string Title, string Unit);
+    private sealed record Units(List<UnitItem> Departments, List<UnitItem> Institutes, List<RoleItem> Roles);
+    private sealed record Issue(string Severity, string File, string? Sheet, int? Row, string Message);
+    private sealed record ImportRun(
+        Guid Id, string FileName, string Status, DateTimeOffset StartedAt, DateTimeOffset? CompletedAt, int Rows, int Added,
+        int Updated, int Replaced, List<Issue> Issues);
+    private sealed record Problem(string? Title, string? Detail);
+}

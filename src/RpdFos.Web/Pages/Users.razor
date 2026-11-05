@@ -16,18 +16,37 @@
 }
 else
 {
-    <table class="table table-sm">
+    <table class="table table-sm align-middle">
         <thead>
-            <tr><th>Email</th><th>ФИО</th><th>Роль</th><th>Запись справочника сотрудников</th></tr>
+            <tr><th>Email</th><th>ФИО</th><th>Роль</th><th>Запись справочника сотрудников</th><th>Учётная запись</th></tr>
         </thead>
         <tbody>
             @foreach (var a in accounts)
             {
-                <tr>
+                <tr class="@(a.IsActive ? "" : "text-muted")">
                     <td>@a.Email</td>
                     <td>@a.FullName</td>
                     <td>@RoleTitle(a.Role)</td>
                     <td>@(a.Directory is { } d ? Describe(d) : "— не связана")</td>
+                    <td>
+                        @* Этап 5.2 (FR-ADM-01): временный пароль, отключение и возврат; запись справочника не меняется. *@
+                        <div class="small mb-1">@(a.IsActive ? "активна" : "отключена — вход запрещён")</div>
+                        @if (passwordFor == a.Id)
+                        {
+                            <div class="input-group input-group-sm" style="max-width: 320px">
+                                <input class="form-control" type="password" placeholder="Новый временный пароль" @bind="newPassword" />
+                                <button class="btn btn-primary" type="button" @onclick="() => SetPasswordAsync(a)">Задать</button>
+                                <button class="btn btn-outline-secondary" type="button" @onclick="() => passwordFor = null">Отмена</button>
+                            </div>
+                        }
+                        else
+                        {
+                            <button class="btn btn-link btn-sm p-0 me-2" type="button" @onclick="() => (passwordFor, newPassword) = (a.Id, string.Empty)">Новый пароль</button>
+                            <button class="btn btn-link btn-sm p-0" type="button" @onclick="() => SetEnabledAsync(a, !a.IsActive)">
+                                @(a.IsActive ? "Отключить" : "Вернуть")
+                            </button>
+                        }
+                    </td>
                 </tr>
             }
         </tbody>
@@ -191,6 +210,43 @@ else
         }
     }
 
+    private Guid? passwordFor;
+    private string newPassword = "";
+
+    private async Task SetPasswordAsync(Account account)
+    {
+        await RunAsync(() => Http.PostAsJsonAsync($"api/admin/users/{account.Id}/password", new { password = newPassword }),
+            $"Для {account.Email} задан новый временный пароль — сообщите его сотруднику.");
+        if (!messageIsError) (passwordFor, newPassword) = (null, "");
+    }
+
+    private Task SetEnabledAsync(Account account, bool enabled) =>
+        RunAsync(() => Http.PostAsync($"api/admin/users/{account.Id}/{(enabled ? "activate" : "deactivate")}", null),
+            enabled ? $"Учётная запись {account.Email} возвращена." : $"Учётная запись {account.Email} отключена: вход запрещён.");
+
+    // Действие с учётной записью: сообщение об итоге и обновлённый список.
+    private async Task RunAsync(Func<Task<HttpResponseMessage>> send, string done)
+    {
+        try
+        {
+            var response = await send();
+            if (response.IsSuccessStatusCode)
+            {
+                (messageIsError, message) = (false, done);
+                await LoadAccountsAsync();
+                return;
+            }
+            var problem = await response.Content.ReadFromJsonAsync<Problem>();
+            (messageIsError, message) = (true, problem?.Errors is { Count: > 0 } errors
+                ? string.Join(" ", errors.SelectMany(e => e.Value))
+                : problem?.Detail ?? problem?.Title ?? $"Ответ сервера: {(int)response.StatusCode}");
+        }
+        catch (AccessTokenNotAvailableException e)
+        {
+            e.Redirect();
+        }
+    }
+
     private static string RoleTitle(string? role) =>
         Roles.FirstOrDefault(r => r.Code == role) is { Title: { } title } ? title : role ?? "—";
 
@@ -214,6 +270,6 @@ else
 
     private sealed record DirectoryRecord(
         Guid Id, string ShortName, string? FullName, string? Position, string? OfficialDesignation, string? Department, bool IsActive);
-    private sealed record Account(Guid Id, string Email, string FullName, string? Role, DirectoryRecord? Directory);
+    private sealed record Account(Guid Id, string Email, string FullName, string? Role, DirectoryRecord? Directory, bool IsActive = true);
     private sealed record Problem(string? Title, string? Detail, Dictionary<string, string[]>? Errors);
 }

@@ -11,7 +11,7 @@ namespace RpdFos.Api.Pages.Account;
 /// после входа он возвращается по ReturnUrl к выдаче кода авторизации.
 /// Регистрации нет: учётные записи создаёт Администратор.
 /// </summary>
-public class LoginModel(SignInManager<AppUser> signIn) : PageModel
+public class LoginModel(SignInManager<AppUser> signIn, UserManager<AppUser> users) : PageModel
 {
     [BindProperty, Required(ErrorMessage = "Введите email")]
     public string Email { get; set; } = "";
@@ -34,9 +34,11 @@ public class LoginModel(SignInManager<AppUser> signIn) : PageModel
         if (result.Succeeded)
             return LocalRedirect(Url.IsLocalUrl(ReturnUrl) ? ReturnUrl! : "/");
 
-        Error = result.IsLockedOut
-            ? "Учётная запись временно заблокирована после нескольких неудачных попыток."
-            : "Неверный email или пароль.";
+        // Отключённая администратором учётная запись — бессрочная блокировка (этап 5.2): сообщение своё.
+        Error = !result.IsLockedOut ? "Неверный email или пароль."
+            : await users.FindByEmailAsync(Email) is { } user && Features.Users.UsersModule.IsDisabled(user)
+                ? "Учётная запись отключена администратором."
+                : "Учётная запись временно заблокирована после нескольких неудачных попыток.";
         return Page();
     }
 }

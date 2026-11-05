@@ -53,3 +53,26 @@ public static class ParserRunStatuses
 {
     public const string Running = "running", Succeeded = "succeeded", Partial = "partial", Failed = "failed";
 }
+
+/// <summary>
+/// Загрузка файла должностей на странице «Справочник сотрудников» (таблица directory_imports, этап 5.2 —
+/// дополнение к модели данных): отдельно от parser_runs, где файлы учебного плана и компетенций обязательны.
+/// Счётчики — добавлено, обновлено, снято с должности при смене человека.
+/// </summary>
+public class DirectoryImport
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid StartedBy { get; set; }
+    public Guid FileId { get; set; }
+    public string Status { get; set; } = ParserRunStatuses.Running;
+    public int RowsCount { get; set; }
+    public int AddedCount { get; set; }
+    public int UpdatedCount { get; set; }
+    public int ReplacedCount { get; set; }
+
+    /// <summary>Замечания: JSON-массив, как у parser_runs.errors_log.</summary>
+    public string ErrorsLog { get; set; } = "[]";
+
+    public DateTimeOffset StartedAt { get; set; }
+    public DateTimeOffset? CompletedAt { get; set; }
+}

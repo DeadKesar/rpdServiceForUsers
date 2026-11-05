@@ -819,6 +819,73 @@ namespace RpdFos.Core.Migrations
                     b.ToTable("departments", (string)null);
                 });
 
+            modelBuilder.Entity("RpdFos.Core.Data.Entities.DirectoryImport", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<int>("AddedCount")
+                        .HasColumnType("integer")
+                        .HasColumnName("added_count");
+
+                    b.Property<DateTimeOffset?>("CompletedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("completed_at");
+
+                    b.Property<string>("ErrorsLog")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("errors_log")
+                        .HasDefaultValueSql("'[]'::jsonb");
+
+                    b.Property<Guid>("FileId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("file_id");
+
+                    b.Property<int>("ReplacedCount")
+                        .HasColumnType("integer")
+                        .HasColumnName("replaced_count");
+
+                    b.Property<int>("RowsCount")
+                        .HasColumnType("integer")
+                        .HasColumnName("rows_count");
+
+                    b.Property<DateTimeOffset>("StartedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("started_at");
+
+                    b.Property<Guid>("StartedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("started_by");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("status");
+
+                    b.Property<int>("UpdatedCount")
+                        .HasColumnType("integer")
+                        .HasColumnName("updated_count");
+
+                    b.HasKey("Id")
+                        .HasName("pk_directory_imports");
+
+                    b.HasIndex("FileId")
+                        .HasDatabaseName("ix_directory_imports_file_id");
+
+                    b.HasIndex("StartedAt")
+                        .HasDatabaseName("ix_directory_imports_started_at");
+
+                    b.HasIndex("StartedBy")
+                        .HasDatabaseName("ix_directory_imports_started_by");
+
+                    b.ToTable("directory_imports", (string)null);
+                });
+
             modelBuilder.Entity("RpdFos.Core.Data.Entities.Discipline", b =>
                 {
                     b.Property<Guid>("Id")
@@ -2192,6 +2259,23 @@ namespace RpdFos.Core.Migrations
                         .HasConstraintName("fk_departments_institutes_institute_id");
 
                     b.Navigation("Institute");
+                });
+
+            modelBuilder.Entity("RpdFos.Core.Data.Entities.DirectoryImport", b =>
+                {
+                    b.HasOne("RpdFos.Core.Data.Entities.UploadedFile", null)
+                        .WithMany()
+                        .HasForeignKey("FileId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_directory_imports_uploaded_files_file_id");
+
+                    b.HasOne("RpdFos.Core.Data.Entities.Employee", null)
+                        .WithMany()
+                        .HasForeignKey("StartedBy")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_directory_imports_employees_started_by");
                 });
 
             modelBuilder.Entity("RpdFos.Core.Data.Entities.Discipline", b =>

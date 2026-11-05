@@ -41,3 +41,16 @@ internal sealed class ParserRunConfiguration : IEntityTypeConfiguration<ParserRu
         e.HasOne<CurriculumPlan>().WithMany().HasForeignKey(x => x.CreatedCurriculumPlanId).OnDelete(DeleteBehavior.Restrict);
     }
 }
+
+internal sealed class DirectoryImportConfiguration : IEntityTypeConfiguration<DirectoryImport>
+{
+    public void Configure(EntityTypeBuilder<DirectoryImport> e)
+    {
+        e.ToTable("directory_imports");
+        e.Property(x => x.Status).HasMaxLength(20);
+        e.Property(x => x.ErrorsLog).HasColumnType("jsonb").HasDefaultValueSql("'[]'::jsonb");
+        e.HasOne<Employee>().WithMany().HasForeignKey(x => x.StartedBy).OnDelete(DeleteBehavior.Restrict);
+        e.HasOne<UploadedFile>().WithMany().HasForeignKey(x => x.FileId).OnDelete(DeleteBehavior.Restrict);
+        e.HasIndex(x => x.StartedAt);
+    }
+}

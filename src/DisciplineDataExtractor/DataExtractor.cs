@@ -36,6 +36,17 @@ public sealed class DataExtractor
         return new ExtractionResult(plan, disciplines, competences, matrix, employees, log.Items);
     }
 
+    /// <summary>
+    /// Только файл должностей — для загрузки справочника сотрудников без учебного плана (страница администратора,
+    /// этап 5.2 прототипа). Исключений нет: нечитаемый файл — ошибка в замечаниях.
+    /// </summary>
+    public EmployeesResult ExtractEmployees(SourceFile employees)
+    {
+        var log = new IssueLog();
+        IReadOnlyList<Employee> rows = Safe(employees, log, () => new EmployeesReader(employees, log).Read(), []);
+        return new EmployeesResult(rows, log.Items);
+    }
+
     private static void CheckDirection(SourceFile file, string? found, string expected, IssueLog log)
     {
         if (found is not null && found != expected)

@@ -69,7 +69,8 @@ public class ConnectModule : ICarterModule
         // Данные, сохранённые в коде авторизации или refresh-токене.
         var result = await http.AuthenticateAsync(OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
         var user = await users.FindByIdAsync(result.Principal!.GetClaim(Claims.Subject)!);
-        if (user is null || !await signIn.CanSignInAsync(user))
+        // Отключённая администратором учётная запись (бессрочная блокировка) не получает и не обновляет токены.
+        if (user is null || !await signIn.CanSignInAsync(user) || await users.IsLockedOutAsync(user))
             return Results.Forbid(
                 new AuthenticationProperties(new Dictionary<string, string?>
                 {

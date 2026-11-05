@@ -23,7 +23,7 @@ public class UsersModule : ICarterModule
         g.MapGet("/", async (AppDbContext db, CancellationToken ct) =>
         {
             var accounts = await db.Users.OrderBy(u => u.Email)
-                .Select(u => new { u.Id, u.Email, u.FullName }).ToListAsync(ct);
+                .Select(u => new { u.Id, u.Email, u.FullName, u.LockoutEnd }).ToListAsync(ct);
             var roles = (await db.UserRoles.Join(db.Roles, ur => ur.RoleId, r => r.Id, (ur, r) => new { ur.UserId, r.Name })
                     .ToListAsync(ct))
                 .ToLookup(x => x.UserId, x => x.Name);
@@ -36,8 +36,12 @@ public class UsersModule : ICarterModule
 
             // В прототипе у пользователя одна роль.
             return accounts.Select(a => new AccountItem(a.Id, a.Email ?? "", a.FullName, roles[a.Id].FirstOrDefault(),
-                recordBySubject.GetValueOrDefault(a.Id.ToString()))).ToList();
+                recordBySubject.GetValueOrDefault(a.Id.ToString()), a.LockoutEnd != DateTimeOffset.MaxValue)).ToList();
         });
+
+        g.MapPost("/{id:guid}/password", SetPassword);
+        g.MapPost("/{id:guid}/deactivate", (Guid id, HttpContext http, UserManager<AppUser> users) => SetEnabled(id, false, http, users));
+        g.MapPost("/{id:guid}/activate", (Guid id, HttpContext http, UserManager<AppUser> users) => SetEnabled(id, true, http, users));
 
         g.MapPost("/", async (CreateUserRequest rq, UserManager<AppUser> users, DirectoryAccounts directory,
             AppDbContext db, CancellationToken ct) =>
@@ -81,6 +85,47 @@ public class UsersModule : ICarterModule
         });
     }
 
+    // Учётная запись отключена администратором — бессрочная блокировка Identity (этап 5.2, FR-ADM-01).
+    public static bool IsDisabled(AppUser user) => user.LockoutEnd == DateTimeOffset.MaxValue;
+
+    /// <summary>
+    /// Новый временный пароль (этап 5.2): потерянную учётную запись иначе не вернуть. Требования к паролю — как при
+    /// создании; счётчик неудачных попыток сбрасывается.
+    /// </summary>
+    private static async Task<IResult> SetPassword(Guid id, PasswordRequest rq, UserManager<AppUser> users)
+    {
+        var user = await users.FindByIdAsync(id.ToString());
+        if (user is null) return AccountNotFound();
+        var token = await users.GeneratePasswordResetTokenAsync(user);
+        var reset = await users.ResetPasswordAsync(user, token, rq.Password ?? "");
+        if (!reset.Succeeded) return ValidationProblem(reset);
+        await users.ResetAccessFailedCountAsync(user);
+        // Временная блокировка за неудачные попытки снимается; отключённая администратором — остаётся.
+        if (!IsDisabled(user)) await users.SetLockoutEndDateAsync(user, null);
+        return Results.NoContent();
+    }
+
+    /// <summary>
+    /// Отключить или вернуть учётную запись: отключённая не может войти (бессрочная блокировка), действующие сеансы
+    /// прерываются сменой штампа безопасности. Запись справочника сотрудников не меняется. Себя отключить нельзя.
+    /// </summary>
+    private static async Task<IResult> SetEnabled(Guid id, bool enabled, HttpContext http, UserManager<AppUser> users)
+    {
+        var user = await users.FindByIdAsync(id.ToString());
+        if (user is null) return AccountNotFound();
+        if (!enabled && http.User.FindFirst(DirectoryAccounts.SubjectClaim)?.Value == user.Id.ToString())
+            return Results.Problem(statusCode: StatusCodes.Status409Conflict, title: "Нельзя отключить себя",
+                detail: "Отключить свою учётную запись нельзя: администратор потерял бы доступ.");
+        await users.SetLockoutEnabledAsync(user, true);
+        await users.SetLockoutEndDateAsync(user, enabled ? null : DateTimeOffset.MaxValue);
+        if (enabled) await users.ResetAccessFailedCountAsync(user);
+        else await users.UpdateSecurityStampAsync(user);
+        return Results.NoContent();
+    }
+
+    private static IResult AccountNotFound() =>
+        Results.Problem(statusCode: StatusCodes.Status404NotFound, title: "Учётная запись не найдена");
+
     private static IResult ValidationProblem(IdentityResult result) =>
         Results.ValidationProblem(result.Errors
             .GroupBy(e => e.Code)
@@ -96,4 +141,8 @@ public record CreateUserRequest(string Email, string FullName, string Password, 
 public record UserItem(Guid Id, string Email, string FullName, string Role, Guid DirectoryUserId);
 
 /// <summary>Учётная запись: роль и связанная запись справочника сотрудников (null — не связана).</summary>
-public record AccountItem(Guid Id, string Email, string FullName, string? Role, DirectoryRecordItem? Directory);
+/// <param name="IsActive">Учётная запись не отключена администратором (этап 5.2).</param>
+public record AccountItem(Guid Id, string Email, string FullName, string? Role, DirectoryRecordItem? Directory, bool IsActive = true);
+
+/// <summary>Новый временный пароль учётной записи.</summary>
+public record PasswordRequest(string? Password);

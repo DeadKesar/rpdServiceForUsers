@@ -12,7 +12,8 @@ namespace RpdFos.Api.Tests.Integration;
 [Collection(DatabaseCollection.Name)]
 public class ImportsApiTests(DatabaseFixture app)
 {
-    private static readonly string[] Fields = ["plan", "competences", "matrix", "positions"];
+    // Комплект «Импорта данных» — три файла: должности с этапа 5.2 загружает администратор в «Справочнике сотрудников».
+    private static readonly string[] Fields = ["plan", "competences", "matrix"];
 
     [Fact]
     public async Task Methodist_uploads_real_files_and_import_runs_in_background()
@@ -27,7 +28,8 @@ public class ImportsApiTests(DatabaseFixture app)
 
         var run = await WaitForCompletionAsync(client, accepted.Id);
         Assert.Equal(ParserRunStatuses.Partial, run.Status);
-        Assert.Equal(new ImportCounts(46, 17, 37), run.Counts);
+        Assert.Equal(new ImportCounts(46, 17, 0), run.Counts);
+        Assert.Null(run.Files.Positions);
         Assert.Equal("plan-09.04.04-2023.xlsx", run.Files.Plan);
         Assert.NotNull(run.CurriculumPlanId);
         // Ошибка разбора — с файлом, таблицей и строкой.
@@ -98,7 +100,7 @@ public class ImportsApiTests(DatabaseFixture app)
     private static MultipartFormDataContent Form(IReadOnlyList<(string Name, byte[] Content)> files)
     {
         var form = new MultipartFormDataContent();
-        for (var i = 0; i < files.Count; i++)
+        for (var i = 0; i < files.Count && i < Fields.Length; i++)
         {
             var content = new ByteArrayContent(files[i].Content);
             content.Headers.ContentType = new MediaTypeHeaderValue(ImportFiles.All[i].Mime);

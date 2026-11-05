@@ -14,3 +14,6 @@ public sealed record ExtractionResult(
 {
     public bool HasErrors => Issues.Any(i => i.Severity == IssueSeverity.Error);
 }
+
+/// <summary>Результат разбора одного файла должностей: строки и замечания.</summary>
+public sealed record EmployeesResult(IReadOnlyList<Employee> Employees, IReadOnlyList<ParseIssue> Issues);

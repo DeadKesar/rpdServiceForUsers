@@ -29,6 +29,8 @@ public static class DependencyInjection
         services.AddScoped<ReferenceImporter>();
         services.AddScoped<DirectoryAccounts>();
         services.AddScoped<ImportJob>();
+        services.AddScoped<DirectoryImportJob>();
+        services.AddScoped<EmployeeDirectory>();
         services.AddSingleton<DocumentTypeRegistry>();
         services.AddScoped<TemplateLifecycle>();
         // Скомпилированные схемы и настроенный санитайзер — общие на приложение.
