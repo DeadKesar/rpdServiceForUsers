@@ -24,8 +24,17 @@ internal sealed partial class PlanReader(SourceFile file, IssueLog log)
     [GeneratedRegex(@"[«""“„](?<q>[^«»""“”„]+)[»""”“]")]
     private static partial Regex Quoted();
 
-    [GeneratedRegex(@"семестр\s*(?<n>\d+)", RegexOptions.IgnoreCase)]
+    // «Семестр 1» … «Семестр 9», затем «Семестр A», «B», «C» — 10–12-й (специалитет), как в форме контроля.
+    [GeneratedRegex(@"семестр\s*(?<n>\d+|(?-i:[ABCАВС]))(?![\p{L}\d])", RegexOptions.IgnoreCase)]
     private static partial Regex SemesterHeader();
+
+    private static int SemesterNumber(Match header) =>
+        header.Groups["n"].Value is var n && int.TryParse(n, NumberStyles.None, CultureInfo.InvariantCulture, out var number)
+            ? number
+            : TextRules.SemesterOf(n[0])!.Value;
+
+    [GeneratedRegex(@"^Курс\s*\d+$", RegexOptions.IgnoreCase)]
+    private static partial Regex CourseSheet();
 
     [GeneratedRegex(@"№\s*(?<n>[^\s,]+)")]
     private static partial Regex OrderNumber();
@@ -224,6 +233,11 @@ internal sealed partial class PlanReader(SourceFile file, IssueLog log)
 
         var layout = DetectLayout(ws);
         if (layout is null) return [];
+        // Формат 2023 года: на листе «План» по семестрам только з. е., почасовая разбивка — на листах «Курс N».
+        var courseHours = layout.Semesters.Count > 0 && layout.Semesters.All(s =>
+            s.Lectures is null && s.Labs is null && s.Practice is null && s.SelfStudy is null && s.Control is null && s.Contact is null)
+            ? ReadCourseSheets(workbook)
+            : null;
 
         var knownDepartments = departments.Select(d => d.Code).ToHashSet();
         var rows = new List<Row>();
@@ -256,12 +270,14 @@ internal sealed partial class PlanReader(SourceFile file, IssueLog log)
 
             var credits = layout.Credits is int cc ? ExcelCells.Int(row.Cell(cc), log, F, $"{code}: з.е.") : 0;
             var hours = layout.Hours is int hc ? ExcelCells.Int(row.Cell(hc), log, F, $"{code}: часы по плану") : 0;
-            var semesters = ReadSemesters(row, layout, code);
+            var semesters = ReadSemesters(row, layout, code, courseHours?.GetValueOrDefault(code));
 
             var semesterCredits = semesters.Sum(s => s.Credits);
             if (credits > 0 && semesterCredits > 0 && semesterCredits != credits)
                 log.Warning(F, PlanSheet, number, $"{code}: сумма з.е. по семестрам ({semesterCredits}) не равна итогу ({credits})");
-            if (layout.ContactTotal is int ct &&
+            // Строк групп элективов на листах «Курс N» нет — часы только у вариантов; такой строке сверять нечего.
+            var hoursKnown = courseHours is null || courseHours.ContainsKey(code);
+            if (hoursKnown && layout.ContactTotal is int ct &&
                 ExcelCells.Int(row.Cell(ct), log, F, $"{code}: контактная работа") is var contact && contact > 0 &&
                 semesters.Sum(s => s.ContactHours) is var semesterContact && semesterContact != contact)
                 log.Warning(F, PlanSheet, number,
@@ -368,7 +384,7 @@ internal sealed partial class PlanReader(SourceFile file, IssueLog log)
         var headers = row.CellsUsed()
             .Select(c => (Cell: c, Match: SemesterHeader().Match(c.GetString())))
             .Where(x => x.Match.Success)
-            .Select(x => (x.Cell, Semester: int.Parse(x.Match.Groups["n"].Value, CultureInfo.InvariantCulture)))
+            .Select(x => (x.Cell, Semester: SemesterNumber(x.Match)))
             .OrderBy(x => x.Cell.Address.ColumnNumber)
             .ToList();
 
@@ -387,6 +403,101 @@ internal sealed partial class PlanReader(SourceFile file, IssueLog log)
         return spans;
     }
 
+    private sealed record CourseHours(int Lectures, int Labs, int Practice, int SelfStudy, int Control, int Contact)
+    {
+        public static readonly CourseHours None = new(0, 0, 0, 0, 0, 0);
+    }
+
+    /// <summary>
+    /// Почасовая разбивка по семестрам с листов «Курс N» (формат 2023 года): строка заголовков с «Индекс» и
+    /// «Семестр N», ниже — группы («Контроль», «Академических часов», «з.е.»), ещё ниже — виды работы
+    /// («Всего», «Кон такт.», «Лек», «Лаб», «Пр», «СР», «Контроль»). Колонки — по заголовкам, строки — по индексу.
+    /// </summary>
+    private Dictionary<string, Dictionary<int, CourseHours>>? ReadCourseSheets(IXLWorkbook workbook)
+    {
+        var sheets = workbook.Worksheets.Where(w => CourseSheet().IsMatch(w.Name.Trim())).ToList();
+        if (sheets.Count == 0)
+        {
+            log.Warning(F, PlanSheet, null, "На листе «План» нет часов по семестрам, а листов «Курс N» нет: часы по семестрам не прочитаны");
+            return null;
+        }
+        var result = new Dictionary<string, Dictionary<int, CourseHours>>();
+        foreach (var ws in sheets) ReadCourseSheet(ws, result);
+        return result;
+    }
+
+    private void ReadCourseSheet(IXLWorksheet ws, Dictionary<string, Dictionary<int, CourseHours>> result)
+    {
+        var header = ws.RowsUsed().Take(15).FirstOrDefault(r =>
+            r.CellsUsed().Any(c => TextRules.HeaderKey(c.GetString()) == "индекс"));
+        if (header is null)
+        {
+            log.Error(F, ws.Name, null, "Не найдена строка заголовков с колонкой «Индекс»: часы курса не прочитаны");
+            return;
+        }
+        var h = header.RowNumber();
+        var index = header.CellsUsed().First(c => TextRules.HeaderKey(c.GetString()) == "индекс").Address.ColumnNumber;
+
+        // Граница необъединённой ячейки заголовка — до следующей заполненной ячейки той же строки.
+        static List<(int First, int Last, IXLCell Cell)> Spans(IXLRow row, Func<IXLCell, bool> which)
+        {
+            var starts = row.CellsUsed().Select(c => ExcelCells.Span(c).First).ToList();
+            return row.CellsUsed().Where(which).Select(c =>
+            {
+                var (first, last) = ExcelCells.Span(c);
+                if (first == last) last = starts.Where(s => s > first).DefaultIfEmpty(int.MaxValue).Min() - 1;
+                return (first, last, c);
+            }).ToList();
+        }
+
+        var semesters = Spans(header, c => SemesterHeader().IsMatch(c.GetString()));
+        var hoursGroups = Spans(ws.Row(h + 1), c => TextRules.HeaderKey(c.GetString()).StartsWith("академическихчас"));
+        var kinds = ws.Row(h + 2);
+        var columns = new List<(int Semester, Dictionary<string, int> Map)>();
+        foreach (var (first, last, cell) in semesters)
+        {
+            var group = hoursGroups.FirstOrDefault(g => g.First >= first && g.First <= last);
+            if (group.Cell is null) continue;
+            var map = new Dictionary<string, int>();
+            foreach (var c in kinds.CellsUsed().Where(c => c.Address.ColumnNumber >= group.First && c.Address.ColumnNumber <= Math.Min(group.Last, last)))
+                map.TryAdd(TextRules.HeaderKey(c.GetString()), c.Address.ColumnNumber);
+            columns.Add((SemesterNumber(SemesterHeader().Match(cell.GetString())), map));
+        }
+        if (columns.Count == 0)
+        {
+            log.Error(F, ws.Name, h, "Не найдены колонки часов семестров («Семестр N», «Академических часов»): часы курса не прочитаны");
+            return;
+        }
+
+        // Лист «Курс N» содержит строки всех курсов подряд (в первой колонке — номер курса строки), а «Семестр …»
+        // в шапке — семестры курса N: значения строк других курсов относятся к их семестрам. Берутся только строки
+        // курса N; строки без номера курса — тоже (выгрузка без этой колонки).
+        var course = int.Parse(Regex.Match(ws.Name, @"\d+").Value, CultureInfo.InvariantCulture);
+        foreach (var row in ws.RowsUsed().Where(r => r.RowNumber() > h + 2))
+        {
+            var code = ExcelCells.Text(row.Cell(index));
+            if (!DisciplineCode().IsMatch(code)) continue;
+            if (int.TryParse(ExcelCells.Text(row.Cell(1)), NumberStyles.None, CultureInfo.InvariantCulture, out var rowCourse) &&
+                rowCourse != course) continue;
+            foreach (var (semester, map) in columns)
+            {
+                int V(string key, string what) =>
+                    map.TryGetValue(key, out var col) ? ExcelCells.Int(row.Cell(col), log, F, $"{code}, семестр {semester}: {what}") : 0;
+                var lectures = V("лек", "лекции");
+                var labs = V("лаб", "лабораторные");
+                var practice = V("пр", "практические");
+                var selfStudy = V("ср", "самостоятельная работа");
+                var control = V("контроль", "контроль");
+                var contact = map.ContainsKey("контакт.")
+                    ? V("контакт.", "контактная работа")
+                    : lectures + labs + practice + V("кср", "КСР") + V("икр", "ИКР");
+                if (lectures + labs + practice + selfStudy + control + contact == 0) continue;
+                (result.TryGetValue(code, out var bySemester) ? bySemester : result[code] = [])[semester] =
+                    new CourseHours(lectures, labs, practice, selfStudy, control, contact);
+            }
+        }
+    }
+
     private static ControlType? ControlOf(string headerKey) => headerKey switch
     {
         "экзамен" => ControlType.Exam,
@@ -397,7 +508,8 @@ internal sealed partial class PlanReader(SourceFile file, IssueLog log)
         _ => null
     };
 
-    private IReadOnlyList<SemesterDetails> ReadSemesters(IXLRow row, Layout layout, string code)
+    private IReadOnlyList<SemesterDetails> ReadSemesters(IXLRow row, Layout layout, string code,
+        IReadOnlyDictionary<int, CourseHours>? fromCourses)
     {
         var number = row.RowNumber();
 
@@ -418,25 +530,39 @@ internal sealed partial class PlanReader(SourceFile file, IssueLog log)
         }
 
         var result = new List<SemesterDetails>();
-        foreach (var s in layout.Semesters)
+        // Семестры — колонки листа «План» и семестры с часами на листах «Курс N» (у дисциплины с 0 з. е.
+        // колонки з. е. пусты, а часы есть).
+        var numbers = layout.Semesters.Select(s => s.Semester).Union(fromCourses?.Keys ?? []).Order();
+        foreach (var n in numbers)
         {
+            var s = layout.Semesters.FirstOrDefault(x => x.Semester == n);
             int V(int? col, string what) =>
-                col is int c ? ExcelCells.Int(row.Cell(c), log, F, $"{code}, семестр {s.Semester}: {what}") : 0;
+                col is int c ? ExcelCells.Int(row.Cell(c), log, F, $"{code}, семестр {n}: {what}") : 0;
 
-            var credits = V(s.Credits, "з.е.");
-            var lectures = V(s.Lectures, "лекции");
-            var labs = V(s.Labs, "лабораторные");
-            var practice = V(s.Practice, "практические");
-            var selfStudy = V(s.SelfStudy, "самостоятельная работа");
-            var control = V(s.Control, "контроль");
-            // Своей колонки контактной работы у семестра обычно нет: это аудиторные часы (и КСР, ИКР, если есть).
-            var contact = s.Contact is not null
-                ? V(s.Contact, "контактная работа")
-                : lectures + labs + practice + s.ExtraContact.Sum(c => V(c, "контактная работа"));
-            controls.Remove(s.Semester, out var types);
+            var credits = V(s?.Credits, "з.е.");
+            int lectures, labs, practice, selfStudy, control, contact;
+            if (fromCourses is not null)
+            {
+                var h = fromCourses.GetValueOrDefault(n) ?? CourseHours.None;
+                (lectures, labs, practice, selfStudy, control, contact) =
+                    (h.Lectures, h.Labs, h.Practice, h.SelfStudy, h.Control, h.Contact);
+            }
+            else
+            {
+                lectures = V(s?.Lectures, "лекции");
+                labs = V(s?.Labs, "лабораторные");
+                practice = V(s?.Practice, "практические");
+                selfStudy = V(s?.SelfStudy, "самостоятельная работа");
+                control = V(s?.Control, "контроль");
+                // Своей колонки контактной работы у семестра обычно нет: это аудиторные часы (и КСР, ИКР, если есть).
+                contact = s?.Contact is not null
+                    ? V(s.Contact, "контактная работа")
+                    : lectures + labs + practice + (s?.ExtraContact ?? []).Sum(c => V(c, "контактная работа"));
+            }
+            controls.Remove(n, out var types);
 
             if (credits + lectures + labs + practice + selfStudy + control + contact == 0 && types is null) continue;
-            result.Add(new SemesterDetails(s.Semester, credits, lectures, labs, practice, selfStudy, control, contact,
+            result.Add(new SemesterDetails(n, credits, lectures, labs, practice, selfStudy, control, contact,
                 (types ?? []).Distinct().ToList()));
         }
 
