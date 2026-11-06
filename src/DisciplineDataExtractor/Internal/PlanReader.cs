@@ -65,26 +65,29 @@ internal sealed partial class PlanReader(SourceFile file, IssueLog log)
             return own.Length > 0 ? own : ExcelCells.RightOf(cell) is { } right ? ExcelCells.Text(right) : "";
         }
 
-        // Направление и профиль: «…(направление подготовки): 09.04.04 "Программная инженерия"
-        // Направленность (профиль) программы: "Технологии…"». У специалитета — «Специальность», «Специализация».
+        // Направление и профиль — по подписям, а не по адресу ячейки:
+        // «…(направление подготовки): 09.04.04 "Программная инженерия" Направленность (профиль) программы: "…"»;
+        // в формате 2023 года кода в этой ячейке нет — он отдельной ячейкой выше («09.03.01»).
+        // У специалитета — «Специальность: "…"» и «Специализация: Специализация N 10 - …;».
         string? code = null, name = null, profile = null;
         if ((Find("направление подготовки") ?? Find("специальность:")) is { } direction)
         {
             var text = ExcelCells.Text(direction);
             var m = TextRules.DirectionCode().Match(text);
-            if (m.Success)
-            {
-                code = m.Value;
-                var profileAt = IndexOfAny(text, m.Index + m.Length, "направленность", "профиль", "специализация");
-                name = FirstQuoted(text, m.Index + m.Length, profileAt < 0 ? text.Length : profileAt);
-                if (profileAt >= 0)
-                    profile = FirstQuoted(text, profileAt, text.Length);
-            }
+            if (m.Success) code = m.Value;
+            var label = IndexOfAny(text, 0, "направление подготовки", "специальность");
+            var from = m.Success ? m.Index + m.Length : Math.Max(0, label);
+            var profileAt = IndexOfAny(text, from, "направленность", "профиль", "специализация");
+            var to = profileAt < 0 ? text.Length : profileAt;
+            // Название — в кавычках, а бывает и без них («…): 09.04.04 Программная инженерия»).
+            name = FirstQuoted(text, from, to) ?? NullIfEmpty(TextRules.Clean(AfterLabel(text[from..to], m.Success)));
+            if (profileAt >= 0)
+                profile = FirstQuoted(text, profileAt, text.Length);
         }
         code ??= cells.Select(ExcelCells.Text).FirstOrDefault(t => DirectionCodeOnly().IsMatch(t));
         if (profile is null && Find("специализация") is { } specialization)
             profile = FirstQuoted(ExcelCells.Text(specialization), 0, ExcelCells.Text(specialization).Length)
-                      ?? NullIfEmpty(ValueOf(specialization));
+                      ?? NullIfEmpty(Specialization(ValueOf(specialization)));
 
         var level = Find("квалификация") is { } q ? LevelOf(AfterColon(ExcelCells.Text(q))) : EducationLevel.Unknown;
         if (level == EducationLevel.Unknown && Find("по программе") is { } program)
@@ -514,4 +517,16 @@ internal sealed partial class PlanReader(SourceFile file, IssueLog log)
     }
 
     private static string? NullIfEmpty(string text) => text.Length == 0 ? null : text;
+
+    // Текст названия без кавычек: после кода — как есть, после подписи — за двоеточием.
+    private static string AfterLabel(string text, bool afterCode) =>
+        (afterCode ? text : AfterColon(text)).Trim().Trim('"', '«', '»', '“', '”').Trim();
+
+    // «Специализация N 10 - Проектирование …;» → «Проектирование …»: номер специализации и точка с запятой
+    // в конце — оформление ячейки, а не название.
+    private static string Specialization(string text) =>
+        SpecializationPrefix().Replace(text, "").Trim().TrimEnd(';', '.', ',').Trim();
+
+    [GeneratedRegex(@"^\s*специализация\s*(N|№)?\s*\d*\s*[-–—]?\s*", RegexOptions.IgnoreCase)]
+    private static partial Regex SpecializationPrefix();
 }

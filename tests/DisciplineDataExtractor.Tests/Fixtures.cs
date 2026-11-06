@@ -8,6 +8,7 @@ namespace DisciplineDataExtractor.Tests;
 internal static class Fixtures
 {
     public const string Plan = "plan-09.04.04-2023.xlsx";
+    public const string Plan2023 = "plan-09.03.01-2023.xlsx";
     public const string CompetenceList = "competences-09.04.04.docx";
     public const string CompetenceMatrix = "matrix-09.04.04.docx";
     public const string Positions = "positions-anonymized.xlsx";
