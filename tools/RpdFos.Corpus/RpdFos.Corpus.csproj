@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Прогон системы по корпусу настоящих данных вуза (этап 5.3): одноразовая база (Testcontainers), ядро системы,
+       отчёты — в папку корпуса. Не тест: обычный dotnet test корпус не трогает. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>RpdFos.Corpus</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\RpdFos.Core\RpdFos.Core.csproj" />
+    <ProjectReference Include="..\..\src\DisciplineDataExtractor\DisciplineDataExtractor.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="PdfPig" Version="0.1.16" />
+    <PackageReference Include="Testcontainers.PostgreSql" Version="4.16.0" />
+  </ItemGroup>
+
+  <!-- Оформление РПД v3 — то же, что в тестах печати: прогон печатает новые документы по нему. -->
+  <ItemGroup>
+    <None Include="..\..\tests\fixtures\DWP_TemplateBookmarks_v3.docx" Link="DWP_TemplateBookmarks_v3.docx" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

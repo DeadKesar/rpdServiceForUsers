@@ -9,4 +9,7 @@
     <Project Path="tests/DisciplineDataExtractor.Tests/DisciplineDataExtractor.Tests.csproj" />
     <Project Path="tests/RpdFos.Api.Tests/RpdFos.Api.Tests.csproj" />
   </Folder>
+  <Folder Name="/tools/">
+    <Project Path="tools/RpdFos.Corpus/RpdFos.Corpus.csproj" />
+  </Folder>
 </Solution>
