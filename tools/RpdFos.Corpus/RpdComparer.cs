@@ -57,12 +57,21 @@ public sealed partial class RpdComparer(Workbench bench, string corpus, IReadOnl
             }
             reports.Add(report);
         }
-        // Два документа одной дисциплины (обычная и ОВЗ) — вопрос модели: у нас документ по дисциплине один.
+        // Несколько настоящих РПД одной дисциплины. Обычная и для лиц с ОВЗ — вопрос модели: у нас документ по
+        // дисциплине один. Остальное (копии файла, РПД других профилей того же направления при одном плане в
+        // корпусе) — ожидаемо.
         foreach (var group in reports.Where(r => r.DocumentId is not null).GroupBy(r => r.DocumentId).Where(g => g.Count() > 1))
+        {
+            var ovz = group.Any(r => r.File.Contains("ОВЗ")) && group.Any(r => !r.File.Contains("ОВЗ"));
             foreach (var r in group)
-                r.Findings.Add(new(r.File, "два документа одной дисциплины", r.Discipline ?? "",
-                    $"Для дисциплины есть несколько настоящих РПД: {string.Join(", ", group.Select(x => x.File))}. В модели — один документ на дисциплину по шаблону",
-                    FindingClasses.ModelGap));
+                r.Findings.Add(ovz
+                    ? new(r.File, "РПД для лиц с ОВЗ", r.Discipline ?? "",
+                        $"У дисциплины обычная РПД и РПД для лиц с ОВЗ: {string.Join(", ", group.Select(x => x.File))}. В модели — один документ на дисциплину",
+                        FindingClasses.ModelGap)
+                    : new(r.File, "несколько РПД одной дисциплины", r.Discipline ?? "",
+                        $"С той же дисциплиной плана сопоставлены: {string.Join(", ", group.Select(x => x.File))} (копии или другие профили направления)",
+                        FindingClasses.Expected));
+        }
         return reports;
     }
 
@@ -126,10 +135,17 @@ public sealed partial class RpdComparer(Workbench bench, string corpus, IReadOnl
         // «Направление», «Цикл»: иначе название направления («Информатика и …») совпадает с дисциплиной.
         // Титул — в начале; «рабочая программа» дальше (PDF с нечитаемым титулом) — уже не титул.
         var titleAt = Regex.Match(head.Length > 3000 ? head[..3000] : head, @"рабоч\w*\s+программ\w*(\s+дисциплин\w*)?", RegexOptions.IgnoreCase);
-        var title = titleAt.Success ? head.Substring(titleAt.Index + titleAt.Length, Math.Min(1500, head.Length - titleAt.Index - titleAt.Length))
-            : content.FromPdf ? "" : head[..Math.Min(2000, head.Length)];
-        if (Regex.Match(title, @"уровень|направлени|цикл\s+дисциплин|форма\s+обучени|квалификац", RegexOptions.IgnoreCase) is { Success: true, Index: > 0 } end)
+        var titleEnd = new Regex(@"уровень|направлени|цикл\s+дисциплин|форма\s+обучени|квалификац", RegexOptions.IgnoreCase);
+        var title = titleAt.Success ? head.Substring(titleAt.Index + titleAt.Length, Math.Min(1500, head.Length - titleAt.Index - titleAt.Length)) : "";
+        if (titleEnd.Match(title) is { Success: true, Index: > 0 } end)
             title = title[..end.Index];
+        // Без заголовка «Рабочая программа» (бывает в РПД ПФК) название — абзац перед «Уровень …» / «Направление …».
+        if (!titleAt.Success && !content.FromPdf)
+        {
+            var lines = head[..Math.Min(3000, head.Length)].Split('\n').Select(l => l.Trim()).Where(l => l.Length > 0).ToList();
+            var at = lines.FindIndex(l => titleEnd.IsMatch(l));
+            title = at > 0 ? lines[at - 1] : "";
+        }
 
         await using var scope = bench.Scope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -137,14 +153,16 @@ public sealed partial class RpdComparer(Workbench bench, string corpus, IReadOnl
         {
             var disciplines = (await db.Disciplines.AsNoTracking().Where(d => d.CurriculumPlanId == plan.PlanId).ToListAsync())
                 .Where(DocumentRules.CanHaveDocument).ToList();
-            (Discipline Discipline, double Score) Best(string where, double min = 0.6) => disciplines
+            (Discipline Discipline, double Score) Best(string where, double min = 0.8) => disciplines
                 .Select(d => (Discipline: d, Score: Score(d.Name, where)))
                 .Where(x => x.Score >= min).OrderByDescending(x => x.Score).ThenByDescending(x => x.Discipline.Name.Length)
                 .FirstOrDefault();
+            // Похожесть по словам — в обе стороны: слова дисциплины в титуле и слова титула в дисциплине. Порог 0,8 —
+            // лучше «не найдено», чем ложное совпадение («Администрирование в информационных системах»
+            // против «Информационных систем и технологий»). Имя файла — только точным названием. Весь начальный текст
+            // не просматривается: в нём название направления («Материаловедение и технологии материалов»).
             var best = Best(title);
-            // Затем — имя файла, только точным названием (по словам «Администрирование в информационных системах» давало «Информационные системы…»); весь начальный текст — только у DOCX без титула.
             if (best.Discipline is null) best = Best(Path.GetFileNameWithoutExtension(name), min: 1.0001);
-            if (best.Discipline is null && !titleAt.Success && !content.FromPdf) best = Best(head);
             if (best.Discipline is null) continue;
             report.Plan = plan.Set.Name;
             report.PlanYear = plan.Parsed!.Plan!.Year;
@@ -334,23 +352,31 @@ public sealed partial class RpdComparer(Workbench bench, string corpus, IReadOnl
     }
 
     // Доля слов названия дисциплины (по основам — первые 5 букв), встретившихся в начале документа; точное вхождение — 1.
-    private static double Score(string name, string head)
+    private static double Score(string name, string where)
     {
-        var text = Norm(head);
+        var text = Norm(where);
         if (text.Contains(Norm(name))) return 1.0 + name.Length / 1000.0;
         var words = Words(name);
         // Однословное название — только точным совпадением: основа «инфор» есть и в «информационных».
         if (words.Count < 2) return 0;
-        var stems = Words(head).ToHashSet();
-        var hit = words.Count(stems.Contains);
-        return hit < Math.Min(2, words.Count) ? 0 : (double)hit / words.Count;
+        var found = Words(where);
+        var hit = words.Count(found.ToHashSet().Contains);
+        return (double)hit / Math.Max(words.Count, found.Count);
     }
 
     private static List<string> Words(string s) => Regex.Matches(Norm(s), @"[а-яa-z]{3,}").Select(m => m.Value)
         .Where(w => w is not ("для" or "при" or "или" or "его" or "как"))
         .Select(w => w.Length > 5 ? w[..5] : w).Distinct().ToList();
 
-    private static string Norm(string s) => Regex.Replace(s.ToLowerInvariant().Replace('ё', 'е').Replace('«', ' ').Replace('»', ' '), @"\s+", " ").Trim();
+    // Кавычки всех видов, тире, двоеточие и скобки, неразрывные пробелы — к одному виду: «Проект по “…”» и «Проект по "…"»,
+    // «ПФК: Спортивные игры» и «ПФК (Спортивные игры)» — одно название.
+    private static string Norm(string s)
+    {
+        var t = s.ToLowerInvariant().Replace('ё', 'е').Replace(' ', ' ');
+        t = Regex.Replace(t, "[«»“”„‟\"'‘’‚:()]", " ");
+        t = Regex.Replace(t, "[‐‑‒–—―]", "-");
+        return Regex.Replace(t, @"\s+", " ").Trim();
+    }
 
     [GeneratedRegex(@"\b\d{2}\.0[3-5]\.\d{2}\b")] private static partial Regex DirectionCode();
     [GeneratedRegex(@"\b((?:УК|ОПК|ПК|ОК)-\d+)")] private static partial Regex CompetenceCode();

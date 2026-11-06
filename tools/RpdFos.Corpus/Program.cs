@@ -18,8 +18,10 @@ var started = DateTimeOffset.Now;
 var watch = Stopwatch.StartNew();
 var output = Path.Combine(corpus, "_отчёты");
 // Повторный прогон перезаписывает отчёты целиком: устаревших файлов от прошлого прогона не остаётся.
-if (Directory.Exists(output)) Directory.Delete(output, recursive: true);
+// «Главные находки.md» пишет автор по итогам прогона — инструмент его не трогает.
 Directory.CreateDirectory(output);
+foreach (var dir in Directory.GetDirectories(output)) Directory.Delete(dir, recursive: true);
+foreach (var file in Directory.GetFiles(output).Where(f => Path.GetFileName(f) != Reports.MainFindings)) File.Delete(file);
 
 await using var bench = await Workbench.StartAsync(Environment.GetEnvironmentVariable("RPDFOS_CONVERTER"));
 var sets = CorpusSet.Read(corpus).Where(s => only is null || s.Plan.Contains(only)).ToList();

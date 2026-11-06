@@ -6,6 +6,9 @@ namespace RpdFos.Corpus;
 /// <summary>Отчёты прогона: сводка, по файлу на план и на РПД, машиночитаемый список находок.</summary>
 public static class Reports
 {
+    /// <summary>Разбор главных находок пишет автор; повторный прогон его не трогает.</summary>
+    public const string MainFindings = "Главные находки.md";
+
     public static void Write(string output, IReadOnlyList<PlanReport> plans, IReadOnlyList<RpdReport> rpds,
         IReadOnlyList<(string Title, List<string> Files)> visual, TimeSpan elapsed, DateTimeOffset started)
     {
@@ -29,12 +32,36 @@ public static class Reports
         s.AppendLine();
         s.AppendLine($"Начат {started.ToLocalTime():dd.MM.yyyy HH:mm}, длительность {elapsed:hh\\:mm\\:ss}. Отчёт сформирован инструментом `tools/RpdFos.Corpus`; повторный прогон его перезаписывает.");
         s.AppendLine();
-        s.AppendLine($"- Комплектов прогнано: {plans.Count}, план создан: {plans.Count(p => p.HasPlan)}; из них только с профилем, подставленным инструментом (разбор его не нашёл): {plans.Count(p => p.HasPlan && p.SubstitutedProfile is not null)}.");
+        s.AppendLine($"- Комплектов прогнано: {plans.Count}, план создан: {plans.Count(p => p.HasPlan)}.");
+        s.AppendLine($"- Профиль подставлен (разбор его не нашёл, взят из комплекта — запасной путь): {plans.Count(p => p.SubstitutedProfile is not null)}.");
         s.AppendLine($"- Статусы импорта: {string.Join(", ", plans.GroupBy(p => p.Status).Select(g => $"{g.Key} — {g.Count()}"))}.");
         s.AppendLine($"- РПД создано по дисциплинам планов: {plans.Sum(p => p.Disciplines.Count(d => d.Document == "создан"))}, напечатано без сбоя: {plans.Sum(p => p.Disciplines.Count(d => d.Print.StartsWith("сформирован")))}.");
         s.AppendLine($"- Настоящих РПД: {rpds.Count}, сравнено: {rpds.Count(r => r.Status.StartsWith("сравнено"))}.");
         s.AppendLine();
         s.AppendLine("Классы находок ставятся правилами инструмента — это предложение для обсуждения.");
+        s.AppendLine();
+
+        // Ключевые виды — для таблиц «до / после» этапа исправлений: считаются одинаково от прогона к прогону.
+        s.AppendLine("## Ключевые виды");
+        s.AppendLine();
+        s.AppendLine("| Вид | Сколько |");
+        s.AppendLine("| --- | ---: |");
+        int Count(Func<Finding, bool> f) => findings.Count(f);
+        foreach (var (title, value) in new (string, int)[]
+                 {
+                     ("Профиль не распознан (планов)", Count(f => f.Message == "Не распознано: профиль")),
+                     ("Контактные часы по семестрам не равны итогу", Count(f => f.Message.Contains("контактные часы по семестрам"))),
+                     ("hours_match_curriculum в новых РПД", Count(f => f.Kind == "hours_match_curriculum")),
+                     ("Индикаторы без типа (знать / уметь / владеть)", Count(f => f.Message.Contains("тип (знать / уметь / владеть) не распознан"))),
+                     ("Дисциплины без кафедры", Count(f => f.Message.Contains("не загружена — дисциплина без кафедры"))),
+                     ("Конфликты кафедр между планами", Count(f => f.Message.Contains("уже у кафедры"))),
+                     ("Новые РПД с пустой кафедрой", Count(f => f.Place == "/title_page/department_name")),
+                     ("Строки матрицы не найдены в плане (замечания)", Count(f => f.Message.Contains("не найдена в учебном плане") || f.Message.Contains("неоднозначна"))),
+                     ("Строки матрицы без дисциплины (сохранены для привязки)", plans.Sum(p => p.UnmatchedRows.Count)),
+                     ("Новые РПД без компетенций", plans.Sum(p => p.WithoutCompetences.Count)),
+                     ("Расхождения часов с настоящими РПД (ошибка разбора)", Count(f => f.Kind == "расхождение" && f.Class == FindingClasses.ParseError))
+                 })
+            s.AppendLine($"| {title} | {value} |");
         s.AppendLine();
 
         s.AppendLine("## Находки по классам");
