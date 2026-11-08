@@ -16,6 +16,7 @@
 <PageTitle>@(details?.Document.DisciplineName ?? "Документ")</PageTitle>
 
 <NavigationLock ConfirmExternalNavigation="@dirty" OnBeforeInternalNavigation="OnBeforeNavigationAsync" />
+<ConfirmDialog @ref="confirm" />
 
 <p><a href="documents">← Мои документы</a></p>
 
@@ -292,6 +293,7 @@ else
 }
 
 @code {
+    private ConfirmDialog confirm = default!;
     // Автосохранение — раз в 4 минуты (задание: 3–5) и при уходе из раздела.
     private static readonly TimeSpan AutoSaveInterval = TimeSpan.FromMinutes(4);
 
@@ -423,6 +425,8 @@ else
 
     private async Task AcceptAsync()
     {
+        // Приём запускает согласование (UC-07): отзыва нет, поэтому — подтверждение (этап 6, A3).
+        if (!await confirm.AskAsync("Вы отправляете документ на согласование. Уверены?", "Принять документ")) return;
         if (!await SaveSectionAsync()) return;
         await ChangeStatusAsync("accept", new { version }, "Документ принят.");
     }
@@ -552,8 +556,8 @@ else
             if (problem is { ConfirmReturn: true })
             {
                 var reasons = string.Join("\n", (problem.Errors ?? []).Select(e => $"• {PlaceTitle(e.Path)}: {e.Message}"));
-                if (!await JS.InvokeAsync<bool>("confirm",
-                        $"После исправления документ не проходит проверку:\n{reasons}\n\nВернуть документ автору на доработку?"))
+                if (!await confirm.AskAsync(
+                        $"После исправления документ не проходит проверку:\n{reasons}\n\nВернуть документ автору на доработку?", "Возврат автору"))
                 {
                     // Отказ — значение поля возвращается к прежнему: на сервере исправление не сохранено.
                     await LoadAsync();

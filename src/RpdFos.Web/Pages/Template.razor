@@ -16,6 +16,8 @@
 @inject NavigationManager Navigation
 @inject IJSRuntime JS
 
+<ConfirmDialog @ref="confirm" />
+
 <PageTitle>@(Id is null ? "Новый шаблон" : details?.Template.Name ?? "Шаблон")</PageTitle>
 
 <p><a href="templates">← Шаблоны</a></p>
@@ -260,6 +262,7 @@ else
 }
 
 @code {
+    private ConfirmDialog confirm = default!;
     private const long MaxFileBytes = 10 * 1024 * 1024;
 
     [Parameter] public Guid? Id { get; set; }
@@ -383,7 +386,7 @@ else
 
     private async Task DeleteAsync()
     {
-        if (!await JS.InvokeAsync<bool>("confirm", $"Удалить шаблон «{details!.Template.Name}»?"))
+        if (!await confirm.AskAsync($"Удалить шаблон «{details!.Template.Name}»?", "Удаление шаблона", danger: true))
             return;
         await RunAsync(async () =>
         {
@@ -562,7 +565,7 @@ else
 
     private async Task ConfirmLeaveAsync(LocationChangingContext context)
     {
-        if (defaultsDirty && !await JS.InvokeAsync<bool>("confirm", "Значения по умолчанию не сохранены. Уйти со страницы?"))
+        if (defaultsDirty && !await confirm.AskAsync("Значения по умолчанию не сохранены. Уйти со страницы?", "Несохранённые изменения"))
             context.PreventNavigation();
     }
 

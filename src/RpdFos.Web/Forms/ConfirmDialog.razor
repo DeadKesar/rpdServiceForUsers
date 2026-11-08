@@ -1,0 +1,64 @@
+@* Подтверждение внутри приложения вместо window.confirm (этап 6, A3): кнопки «Да» / «Нет», окно не блокирует
+   страницу и проверку в браузере. Страница держит один экземпляр (@ref) и спрашивает через AskAsync. *@
+
+@if (question is not null)
+{
+    <div class="modal-backdrop fade show"></div>
+    <div class="modal fade show d-block" tabindex="-1" role="dialog" aria-modal="true" aria-labelledby="confirm-title"
+         @onkeydown="OnKeyAsync">
+        <div class="modal-dialog modal-dialog-centered" role="document">
+            <div class="modal-content">
+                <div class="modal-header py-2">
+                    <h2 class="modal-title h5" id="confirm-title">@(title ?? "Подтверждение")</h2>
+                </div>
+                <div class="modal-body" style="white-space: pre-line">@question</div>
+                <div class="modal-footer py-2">
+                    <button type="button" class="btn @yesClass" @ref="yesButton" @onclick="() => Answer(true)">Да</button>
+                    <button type="button" class="btn btn-outline-secondary" @onclick="() => Answer(false)">Нет</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private string? question;
+    private string? title;
+    private string yesClass = "btn-primary";
+    private TaskCompletionSource<bool>? answer;
+    private ElementReference yesButton;
+    private bool focus;
+
+    /// <summary>Показывает вопрос и ждёт ответа: true — «Да».</summary>
+    /// <param name="danger">Необратимое действие (удаление) — кнопка «Да» красная.</param>
+    public Task<bool> AskAsync(string text, string? heading = null, bool danger = false)
+    {
+        answer?.TrySetResult(false);
+        (question, title, yesClass, focus) = (text, heading, danger ? "btn-danger" : "btn-primary", true);
+        answer = new TaskCompletionSource<bool>();
+        StateHasChanged();
+        return answer.Task;
+    }
+
+    private void Answer(bool yes)
+    {
+        question = null;
+        var pending = answer;
+        answer = null;
+        pending?.TrySetResult(yes);
+    }
+
+    // Escape — «Нет», как у системного окна.
+    private Task OnKeyAsync(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape") Answer(false);
+        return Task.CompletedTask;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!focus || question is null) return;
+        focus = false;
+        await yesButton.FocusAsync();
+    }
+}
