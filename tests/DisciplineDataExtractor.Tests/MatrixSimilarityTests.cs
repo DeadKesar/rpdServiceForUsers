@@ -41,6 +41,20 @@ public class MatrixSimilarityTests
         Assert.Single(unmatched);
     }
 
+    [Theory]
+    // Ложные пары первого прогона корпуса с похожестью (этап 5.4, B7).
+    [InlineData("Электротехника и электроника", "Электротехника")]
+    [InlineData("Проект по дисциплине \"Проектирование информационных систем\"", "Проект по дисциплине \"Информационные системы и технологии\"")]
+    [InlineData("Элективные дисциплины. 03 (к модулю \"Технологии самоорганизации\")", "Элективные дисциплины. 01 (к модулю \"Технологии самоорганизации\")")]
+    [InlineData("Информационно-коммуникационные сети", "Защита информации в информационно-коммуникационных сетях")]
+    [InlineData("Аналитика данных. Искусственный интеллект", "Интеллектуальный анализ данных")]
+    public void Pairs_found_wrong_on_the_corpus_do_not_match(string row, string plan)
+    {
+        var (links, _, _) = Resolve(Row(row), D("Б1.В.01", plan));
+
+        Assert.Empty(links);
+    }
+
     [Fact]
     public void Equally_similar_candidates_are_told_apart_by_semesters()
     {

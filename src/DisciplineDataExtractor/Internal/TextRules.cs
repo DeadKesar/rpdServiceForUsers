@@ -42,18 +42,29 @@ internal static partial class TextRules
     private static readonly HashSet<string> StopWords = ["и", "в", "во", "на", "по", "для", "с", "со", "к", "о", "об", "от", "из", "том", "числе"];
 
     /// <summary>
-    /// Основы слов названия (первые 5 букв, у коротких слов — 3), без служебных слов: «Физика твёрдого тела» и «Физика твердых тел» —
-    /// одно и то же. Для сопоставления строк матрицы по похожести (этап 5.4, B7).
+    /// Основы слов названия по порядку (первые 5 букв, у коротких слов — 3), без служебных слов: «Физика твёрдого
+    /// тела» и «Физика твердых тел» — одно и то же. Для сопоставления строк матрицы по похожести (этап 5.4, B7).
     /// </summary>
-    public static IReadOnlySet<string> NameStems(string? text) =>
+    public static IReadOnlyList<string> NameStems(string? text) =>
         NameKey(text).Split(' ', StringSplitOptions.RemoveEmptyEntries)
             .Where(w => !StopWords.Contains(w))
             .Select(w => w.Length > 5 ? w[..5] : w.Length > 3 ? w[..3] : w) // «тела» / «тел», «игры» / «игр»
-            .ToHashSet();
+            .ToList();
 
-    /// <summary>Похожесть названий: доля общих основ среди всех основ обоих названий (0…1).</summary>
-    public static double NameSimilarity(IReadOnlySet<string> a, IReadOnlySet<string> b) =>
-        a.Count == 0 || b.Count == 0 ? 0 : (double)a.Intersect(b).Count() / a.Union(b).Count();
+    /// <summary>
+    /// Похожесть названий (0…1): общие основы — на число слов более длинного названия, чтобы «Электротехника и
+    /// электроника» (основы «электр» у обоих слов) не совпала с «Электротехникой». Числа в названиях должны совпадать
+    /// («Элективные дисциплины. 01» и «… 03» — разные).
+    /// </summary>
+    public static double NameSimilarity(IReadOnlyList<string> a, IReadOnlyList<string> b)
+    {
+        if (a.Count == 0 || b.Count == 0) return 0;
+        static IEnumerable<string> Numbers(IEnumerable<string> s) => s.Where(w => w.All(char.IsDigit));
+        if (!Numbers(a).ToHashSet().SetEquals(Numbers(b))) return 0;
+        // Общие основы — с повторами, как мультимножество: «проектирование … проектная» — две основы «проек».
+        var common = a.GroupBy(s => s).Sum(g => Math.Min(g.Count(), b.Count(s => s == g.Key)));
+        return (double)common / Math.Max(a.Count, b.Count);
+    }
 
     /// <summary>Слова названия без учёта порядка и повторов — для сопоставления по словам.</summary>
     public static string NameTokensKey(string? text) =>

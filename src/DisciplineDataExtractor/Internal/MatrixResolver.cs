@@ -10,8 +10,9 @@ namespace DisciplineDataExtractor.Internal;
 /// </summary>
 internal static class MatrixResolver
 {
-    // Доля общих основ слов, начиная с которой названия считаются похожими: 3 из 4 основ, но не 2 из 3.
-    private const double SimilarityThreshold = 0.75;
+    // Доля общих основ слов, начиная с которой названия считаются похожими: 6 из 7, но не 4 из 5 («Проект по
+    // дисциплине "Проектирование ИС"» и «… "ИС и технологии"» на прогоне корпуса — разные дисциплины).
+    private const double SimilarityThreshold = 0.85;
 
     public static (IReadOnlyList<MatrixLink> Links, IReadOnlyList<UnmatchedMatrixRow> Unmatched) Resolve(
         string file, IReadOnlyList<MatrixRow> rows, IReadOnlyList<Discipline> disciplines,
@@ -72,7 +73,7 @@ internal static class MatrixResolver
     // Найденная дисциплина или null и кандидаты неоднозначной строки (пусто — не найдена).
     private static (Discipline? Discipline, IReadOnlyList<Discipline> Candidates) Match(
         string file, MatrixRow row, ILookup<string, Discipline> byName, ILookup<string, Discipline> byWords,
-        IReadOnlyList<(Discipline Discipline, IReadOnlySet<string> Stems)> stems, IssueLog log)
+        IReadOnlyList<(Discipline Discipline, IReadOnlyList<string> Stems)> stems, IssueLog log)
     {
         var candidates = byName[TextRules.NameKey(row.Name)].ToList();
         var byWordsOnly = false;
