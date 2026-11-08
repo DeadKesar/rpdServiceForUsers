@@ -158,8 +158,22 @@ public sealed class DocumentEditing(
     }
 
     /// <summary>Мягкое удаление с записью в истории статусов.</summary>
-    public void Delete(Document document, Guid editorId) =>
-        history.StatusChanged(document, document.Delete(clock.GetUtcNow()), editorId);
+    /// <summary>
+    /// Мягкое удаление черновика автором (этап 6, A5): история статусов и журнал аудита (NFR-SEC-07). Удалённый
+    /// документ скрыт фильтром запросов — по дисциплине можно создать новый.
+    /// </summary>
+    public void Delete(Document document, Guid editorId)
+    {
+        var now = clock.GetUtcNow();
+        var from = document.Delete(now);
+        history.StatusChanged(document, from, editorId);
+        db.AuditLog.Add(new AuditLogEntry
+        {
+            UserId = editorId, EventType = AuditEvents.DocumentDeleted, EntityType = AuditEntities.Document,
+            EntityId = document.Id, OccurredAt = now,
+            Payload = new JsonObject { ["title"] = document.Title, ["status"] = from }.ToJsonString(Json)
+        });
+    }
 
     private Task<string> SchemaAsync(Document document, CancellationToken ct) =>
         db.DocumentTemplates.IgnoreQueryFilters().Where(t => t.Id == document.TemplateId).Select(t => t.Schema).SingleAsync(ct);

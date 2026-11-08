@@ -55,11 +55,8 @@ public class DocumentsModule : ICarterModule
         string? status, Guid? planId, HttpContext http, AppDbContext db, DirectoryAccounts directory, CancellationToken ct)
     {
         var query = db.Documents.AsNoTracking();
-        if (!SeesAll(http.User))
-        {
-            var me = await directory.FindIdAsync(http.User, ct);
-            query = query.Where(d => d.AuthorId == me);
-        }
+        var me = await directory.FindIdAsync(http.User, ct);
+        if (!SeesAll(http.User)) query = query.Where(d => d.AuthorId == me);
         if (!string.IsNullOrEmpty(status)) query = query.Where(d => d.Status == status);
 
         var rows = await (
@@ -75,7 +72,9 @@ public class DocumentsModule : ICarterModule
 
         return rows.Select(r => new DocumentListItem(r.Document.Id, r.Document.Title, r.Document.Type, r.Document.Status,
             DocumentStatuses.Title(r.Document.Status), r.Document.IsOutdated, r.Code, r.Name, plans.GetValueOrDefault(r.CurriculumPlanId),
-            r.Document.TemplateRevision, r.Author, r.Document.UpdatedAt, r.Document.SubmittedAt)).ToList();
+            r.Document.TemplateRevision, r.Author, r.Document.UpdatedAt, r.Document.SubmittedAt, r.Document.Version,
+            // Удаляет автор свой черновик (S-10: «открыть, удалить»; этап 6, A5).
+            r.Document.AuthorId == me && DocumentTransitions.CanDelete(r.Document.Status))).ToList();
     }
 
     /// <summary>
@@ -577,7 +576,7 @@ public record DocumentReviewed(int Version, string Status, string StatusTitle, I
 public record DocumentListItem(
     Guid Id, string Title, string Type, string Status, string StatusTitle, bool IsOutdated, string DisciplineCode,
     string DisciplineName, PlanItem? Plan, int TemplateRevision, string AuthorName, DateTimeOffset UpdatedAt,
-    DateTimeOffset? SubmittedAt);
+    DateTimeOffset? SubmittedAt, int Version = 0, bool CanDelete = false);
 
 /// <summary>Дисциплина плана для создания документа; есть документ — ссылка на него, если он доступен пользователю.</summary>
 public record DisciplineOption(Guid Id, string Code, string Name, Guid? DocumentId, string? DocumentAuthor, bool CanOpen);

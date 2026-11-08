@@ -29,6 +29,9 @@ public static class AuditEvents
     /// <summary>Исправлено поле из учебного плана: <c>{ "path", "before", "after" }</c>.</summary>
     public const string PlanFieldCorrected = "document.plan_field_corrected";
 
+    /// <summary>Автор удалил свой черновик (этап 6, A5): <c>{ "title", "status" }</c>.</summary>
+    public const string DocumentDeleted = "document.deleted";
+
     /// <summary>Справочник сотрудников со страницы администратора (этап 5.2): <c>{ "before", "after" }</c>.</summary>
     public const string EmployeeCreated = "employee.created", EmployeeUpdated = "employee.updated",
         EmployeeDeactivated = "employee.deactivated", EmployeeReactivated = "employee.reactivated",

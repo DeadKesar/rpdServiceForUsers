@@ -6,7 +6,7 @@ namespace RpdFos.Web.Models;
 
 public sealed record DocumentListItem(Guid Id, string Title, string Type, string Status, string StatusTitle, bool IsOutdated,
     string DisciplineCode, string DisciplineName, PlanItem? Plan, int TemplateRevision, string AuthorName, DateTimeOffset UpdatedAt,
-    DateTimeOffset? SubmittedAt);
+    DateTimeOffset? SubmittedAt, int Version = 0, bool CanDelete = false);
 
 public sealed record DisciplineOption(Guid Id, string Code, string Name, Guid? DocumentId, string? DocumentAuthor, bool CanOpen);
 

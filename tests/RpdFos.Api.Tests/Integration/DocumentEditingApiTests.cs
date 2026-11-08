@@ -223,6 +223,52 @@ public class DocumentEditingApiTests(DatabaseFixture app)
     }
 
     [Fact]
+    public async Task Deleted_draft_frees_the_discipline_and_is_audited()
+    {
+        var (author, employee) = await DocumentData.UserAsync(app);
+        var (other, _) = await DocumentData.UserAsync(app);
+        var template = await DocumentData.PublishedTemplateAsync(app);
+        var created = await DocumentData.CreateAsync(app, author, template.Id, "Б1.О.09");
+        var url = $"/api/documents/{created.Document.Id}";
+
+        // Удалить можно только свой черновик: признак — в списке и в документе.
+        Assert.True(Assert.Single((await author.GetFromJsonAsync<List<DocumentListItem>>("/api/documents"))!).CanDelete);
+        Assert.True((await author.GetFromJsonAsync<DocumentDetails>(url))!.Actions.Delete);
+        Assert.Equal(HttpStatusCode.Forbidden, (await other.DeleteAsync($"{url}?version=1")).StatusCode);
+
+        Assert.Equal(HttpStatusCode.NoContent, (await author.DeleteAsync($"{url}?version=1")).StatusCode);
+        Assert.Empty((await author.GetFromJsonAsync<List<DocumentListItem>>("/api/documents"))!);
+
+        // По той же дисциплине создаётся новый документ.
+        var again = await DocumentData.CreateAsync(app, author, template.Id, "Б1.О.09");
+        Assert.NotEqual(created.Document.Id, again.Document.Id);
+
+        await app.WithDbAsync(async db =>
+        {
+            var history = await db.DocumentStatusHistory.Where(h => h.DocumentId == created.Document.Id).OrderBy(h => h.ChangedAt).ToListAsync();
+            Assert.Equal((DocumentStatuses.Draft, DocumentStatuses.Deleted, employee.Id),
+                (history[^1].FromStatus, history[^1].ToStatus, history[^1].ChangedBy));
+            var audit = await db.AuditLog.SingleAsync(a => a.EntityId == created.Document.Id && a.EventType == AuditEvents.DocumentDeleted);
+            Assert.Equal(employee.Id, audit.UserId);
+        });
+    }
+
+    [Fact]
+    public async Task Document_under_review_is_not_deleted()
+    {
+        var (author, _) = await DocumentData.UserAsync(app);
+        var created = await DocumentData.CreateAsync(app, author, (await DocumentData.PublishedTemplateAsync(app)).Id, "Б1.О.10");
+        var version = await DocumentData.FillForSubmissionAsync(author, created);
+        var submitted = await author.PostAsJsonAsync($"/api/documents/{created.Document.Id}/submit", new DocumentVersionRequest(version));
+        var reviewed = (await submitted.Content.ReadFromJsonAsync<DocumentReviewed>())!;
+
+        var response = await author.DeleteAsync($"/api/documents/{created.Document.Id}?version={reviewed.Version}");
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        Assert.False((await author.GetFromJsonAsync<DocumentDetails>($"/api/documents/{created.Document.Id}"))!.Actions.Delete);
+    }
+
+    [Fact]
     public async Task Disciplines_for_creation_show_only_real_disciplines_and_existing_documents()
     {
         var (owner, _) = await DocumentData.UserAsync(app);

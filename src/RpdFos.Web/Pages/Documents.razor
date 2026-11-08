@@ -9,7 +9,14 @@
 
 <PageTitle>Мои документы</PageTitle>
 
+<ConfirmDialog @ref="confirm" />
+
 <h1>Мои документы</h1>
+
+@if (message is not null)
+{
+    <div class="alert @(messageIsError ? "alert-danger" : "alert-info") py-2" role="status">@message</div>
+}
 
 <AuthorizeView Roles="teacher,methodist,admin">
     <a class="btn btn-primary mb-3" href="documents/new">Создать документ</a>
@@ -50,7 +57,7 @@ else
 {
     <table class="table table-hover">
         <thead>
-            <tr><th>Дисциплина</th><th>Тип</th><th>Статус</th><th>Изменён</th><th>Автор</th></tr>
+            <tr><th>Дисциплина</th><th>Тип</th><th>Статус</th><th>Изменён</th><th>Автор</th><th></th></tr>
         </thead>
         <tbody>
             @foreach (var d in items)
@@ -73,6 +80,13 @@ else
                     </td>
                     <td>@d.UpdatedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</td>
                     <td>@d.AuthorName</td>
+                    <td class="text-end">
+                        @if (d.CanDelete)
+                        {
+                            <button class="btn btn-sm btn-outline-danger" disabled="@deleting" @onclick="() => DeleteAsync(d)"
+                                    @onclick:stopPropagation>Удалить</button>
+                        }
+                    </td>
                 </tr>
             }
         </tbody>
@@ -80,7 +94,40 @@ else
 }
 
 @code {
+    private ConfirmDialog confirm = default!;
+    private bool deleting;
+    private string? message;
+    private bool messageIsError;
     private List<DocumentListItem>? items;
+
+    // Удаление своего черновика (этап 6, A5): мягкое, по дисциплине затем можно создать новый документ.
+    private async Task DeleteAsync(DocumentListItem d)
+    {
+        if (!await confirm.AskAsync($"Удалить черновик «{d.DisciplineName}»?", "Удаление черновика", danger: true)) return;
+        deleting = true;
+        try
+        {
+            var response = await Http.DeleteAsync($"api/documents/{d.Id}?version={d.Version}");
+            if (response.IsSuccessStatusCode)
+                (messageIsError, message) = (false, $"Черновик «{d.DisciplineName}» удалён.");
+            else
+            {
+                var problem = await response.Content.ReadFromJsonAsync<DocumentProblem>();
+                (messageIsError, message) = (true, problem?.Title == "Конфликт версий"
+                    ? "Документ изменён в другой сессии — список обновлён, удалите его снова."
+                    : $"Черновик не удалён: {problem?.Detail ?? problem?.Title ?? ((int)response.StatusCode).ToString()}");
+            }
+            await LoadAsync();
+        }
+        catch (AccessTokenNotAvailableException e)
+        {
+            e.Redirect();
+        }
+        finally
+        {
+            deleting = false;
+        }
+    }
     private List<PlanItem> plans = [];
     private string status = "";
     private string planId = "";

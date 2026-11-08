@@ -60,6 +60,10 @@ else
             <button class="btn btn-success" disabled="@(busy || conflict)" @onclick="AcceptAsync">Принять</button>
             <button class="btn btn-warning" disabled="@(busy || conflict)" @onclick="() => returning = !returning">Вернуть на доработку</button>
         }
+        @if (details.Actions.Delete)
+        {
+            <button class="btn btn-outline-danger" disabled="@busy" @onclick="DeleteAsync">Удалить</button>
+        }
         @if (details.Actions.TakeForReview)
         {
             <button class="btn btn-outline-success" disabled="@busy" @onclick="() => taking = !taking">Взять на проверку</button>
@@ -429,6 +433,39 @@ else
         if (!await confirm.AskAsync("Вы отправляете документ на согласование. Уверены?", "Принять документ")) return;
         if (!await SaveSectionAsync()) return;
         await ChangeStatusAsync("accept", new { version }, "Документ принят.");
+    }
+
+    // Удаление своего черновика (этап 6, A5): несохранённое не сохраняем — документ удаляется целиком.
+    private async Task DeleteAsync()
+    {
+        if (!await confirm.AskAsync($"Удалить черновик «{details!.Document.DisciplineName}»?", "Удаление черновика", danger: true)) return;
+        busy = true;
+        try
+        {
+            var response = await Http.DeleteAsync($"api/documents/{Id}?version={version}");
+            if (response.IsSuccessStatusCode)
+            {
+                dirty = false;
+                Navigation.NavigateTo("documents");
+                return;
+            }
+            var problem = await ReadProblemAsync(response);
+            if (IsConflict(response, problem))
+            {
+                conflict = true;
+                return;
+            }
+            (messageIsError, message, fieldErrors) = (true,
+                problem?.Detail is { } detail ? $"{problem.Title}. {detail}" : problem?.Title ?? $"Черновик не удалён (код ответа {(int)response.StatusCode}).", []);
+        }
+        catch (AccessTokenNotAvailableException e)
+        {
+            e.Redirect();
+        }
+        finally
+        {
+            busy = false;
+        }
     }
 
     private async Task TakeAsync() =>
