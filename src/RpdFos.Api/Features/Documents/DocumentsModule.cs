@@ -34,6 +34,7 @@ public class DocumentsModule : ICarterModule
         g.MapDelete("/{id:guid}", Delete).RequireAuthorization(Policies.DocumentAuthors);
 
         g.MapPost("/{id:guid}/submit", Submit).RequireAuthorization(Policies.DocumentAuthors);
+        g.MapPost("/{id:guid}/take", Take).RequireAuthorization(Policies.Reviewers);
         g.MapPost("/{id:guid}/return", Return).RequireAuthorization(Policies.Reviewers);
         g.MapPost("/{id:guid}/accept", Accept).RequireAuthorization(Policies.Reviewers);
         g.MapGet("/{id:guid}/comments", Comments);
@@ -113,7 +114,7 @@ public class DocumentsModule : ICarterModule
     {
         var (document, me, refusal) = await VisibleDocumentAsync(id, http, db, directory, ct);
         if (refusal is not null) return refusal;
-        return Results.Ok(await DetailsAsync(document!, db, validator, rules, registry, ct, document!.AuthorId == me, IsReviewer(http.User), IsCorrector(http.User)));
+        return Results.Ok(await DetailsAsync(document!, db, validator, rules, registry, ct, document!.AuthorId == me, IsReviewer(http.User), IsCorrector(http.User), me));
     }
 
     private static async Task<IResult> Create(
@@ -128,7 +129,7 @@ public class DocumentsModule : ICarterModule
         return result switch
         {
             { Document: { } document } => Results.Created($"/api/documents/{document.Id}",
-                await DetailsAsync(document, db, validator, rules, registry, ct, isAuthor: true, IsReviewer(http.User), IsCorrector(http.User))),
+                await DetailsAsync(document, db, validator, rules, registry, ct, isAuthor: true, IsReviewer(http.User), IsCorrector(http.User), authorId)),
             { Problem: DocumentCreationProblem.Duplicate } => Results.Problem(statusCode: StatusCodes.Status409Conflict,
                 title: "Документ уже есть", detail: result.Detail,
                 extensions: new Dictionary<string, object?>
@@ -157,7 +158,7 @@ public class DocumentsModule : ICarterModule
     // Кто и в каком объёме правит раздел: автор — своё содержимое, методист на проверке — всё, после приёма методист
     // и администратор — поля из плана. Те же права — у проверки раздела без сохранения.
     private static async Task<(Document? Document, Guid EditorId, DocumentEditScope Scope, IResult? Refusal)> SectionEditorAsync(
-        Guid id, HttpContext http, AppDbContext db, DirectoryAccounts directory, CancellationToken ct)
+        Guid id, HttpContext http, AppDbContext db, DirectoryAccounts directory, DocumentReview review, CancellationToken ct)
     {
         var document = await db.Documents.SingleOrDefaultAsync(d => d.Id == id, ct);
         if (document is null) return (null, default, default, NotFound());
@@ -167,7 +168,7 @@ public class DocumentsModule : ICarterModule
         var scope = DocumentTransitions.EditScope(document.Status, isAuthor, IsReviewer(http.User), IsCorrector(http.User));
         if (scope is null)
             return (null, default, default, isAuthor || IsCorrector(http.User)
-                ? Refused(document, DocumentTransitions.EditAction)
+                ? await AuthorRefusedAsync(document, isAuthor, review, DocumentTransitions.EditAction, ct)
                 : Results.Problem(statusCode: StatusCodes.Status403Forbidden, title: "Изменяет только автор",
                     detail: "Документ изменяет его автор, а на проверке — методист."));
         return (document, editorId.Value, scope.Value, null);
@@ -180,9 +181,9 @@ public class DocumentsModule : ICarterModule
     /// </summary>
     private static async Task<IResult> CheckSection(
         Guid id, string section, SectionUpdateRequest rq, HttpContext http, AppDbContext db, DirectoryAccounts directory,
-        DocumentEditing editing, CancellationToken ct)
+        DocumentEditing editing, DocumentReview review, CancellationToken ct)
     {
-        var (document, editorId, scope, refusal) = await SectionEditorAsync(id, http, db, directory, ct);
+        var (document, editorId, scope, refusal) = await SectionEditorAsync(id, http, db, directory, review, ct);
         if (refusal is not null) return refusal;
 
         var result = await editing.UpdateSectionAsync(document!, section, rq.Value, editorId, ct, scope, checkOnly: true);
@@ -193,9 +194,9 @@ public class DocumentsModule : ICarterModule
 
     private static async Task<IResult> UpdateSection(
         Guid id, string section, SectionUpdateRequest rq, HttpContext http, AppDbContext db, DirectoryAccounts directory,
-        DocumentEditing editing, TimeProvider clock, CancellationToken ct)
+        DocumentEditing editing, DocumentReview review, TimeProvider clock, CancellationToken ct)
     {
-        var (document, editorId, scope, refusal) = await SectionEditorAsync(id, http, db, directory, ct);
+        var (document, editorId, scope, refusal) = await SectionEditorAsync(id, http, db, directory, review, ct);
         if (refusal is not null) return refusal;
 
         // Сравнивать будем с версией, которую видел клиент; новую проставит перехватчик сохранения.
@@ -234,9 +235,9 @@ public class DocumentsModule : ICarterModule
 
     private static async Task<IResult> Save(
         Guid id, DocumentVersionRequest rq, HttpContext http, AppDbContext db, DirectoryAccounts directory,
-        DocumentEditing editing, TimeProvider clock, CancellationToken ct)
+        DocumentEditing editing, DocumentReview review, TimeProvider clock, CancellationToken ct)
     {
-        var (document, editorId, refusal) = await EditorDocumentAsync(id, http, db, directory, DocumentTransitions.SaveAction, ct);
+        var (document, editorId, refusal) = await EditorDocumentAsync(id, http, db, directory, review, DocumentTransitions.SaveAction, ct);
         if (refusal is not null) return refusal;
 
         db.Entry(document!).Property(d => d.Version).OriginalValue = rq.Version;
@@ -269,7 +270,8 @@ public class DocumentsModule : ICarterModule
     {
         var (document, authorId, refusal) = await AuthorDocumentAsync(id, http, db, directory, ct);
         if (refusal is not null) return refusal;
-        if (!DocumentTransitions.CanSubmit(document!.Status)) return Refused(document, DocumentTransitions.SubmitAction);
+        if (!DocumentTransitions.CanSubmit(document!.Status))
+            return await AuthorRefusedAsync(document, isAuthor: true, review, DocumentTransitions.SubmitAction, ct);
 
         db.Entry(document).Property(d => d.Version).OriginalValue = rq.Version;
         var result = await review.SubmitAsync(document, authorId, ct);
@@ -280,6 +282,29 @@ public class DocumentsModule : ICarterModule
 
         await db.SaveChangesAsync(ct);
         return Results.Ok(new DocumentReviewed(document.Version, document.Status, DocumentStatuses.Title(document.Status), result.Issues));
+    }
+
+    /// <summary>
+    /// «Взять на проверку» (этап 6, A1): методист переводит документ из статусов автора в «На проверке» с
+    /// обязательной причиной. Полной проверки нет — её требует приём.
+    /// </summary>
+    private static async Task<IResult> Take(
+        Guid id, TakeRequest rq, HttpContext http, AppDbContext db, DirectoryAccounts directory, DocumentReview review,
+        CancellationToken ct)
+    {
+        var document = await db.Documents.SingleOrDefaultAsync(d => d.Id == id, ct);
+        if (document is null) return NotFound();
+        var reviewerId = await directory.FindIdAsync(http.User, ct);
+        if (reviewerId is null) return NoDirectoryRecord();
+        if (!DocumentTransitions.CanTakeForReview(document.Status)) return Refused(document, DocumentTransitions.TakeAction);
+
+        db.Entry(document).Property(d => d.Version).OriginalValue = rq.Version;
+        if (await review.TakeAsync(document, reviewerId.Value, rq.Reason, ct) is not null)
+            return Results.Problem(statusCode: StatusCodes.Status422UnprocessableEntity, title: "Не указана причина",
+                detail: "Напишите, почему документ берётся на проверку: причина попадёт в историю статусов.");
+
+        await db.SaveChangesAsync(ct);
+        return Results.Ok(new DocumentReviewed(document.Version, document.Status, DocumentStatuses.Title(document.Status), []));
     }
 
     private static async Task<IResult> Return(
@@ -348,20 +373,35 @@ public class DocumentsModule : ICarterModule
         return Results.Created($"/api/documents/{id}/comments/{comment!.Id}", item);
     }
 
-    /// <summary>Автор отмечает замечание разрешённым, пока документ на доработке.</summary>
+    /// <summary>
+    /// Замечание отмечает разрешённым автор, пока документ на доработке, или методист — своё, пока документ на
+    /// проверке (этап 6, A2).
+    /// </summary>
     private static async Task<IResult> ResolveComment(
         Guid id, Guid commentId, HttpContext http, AppDbContext db, DirectoryAccounts directory, TimeProvider clock,
         CancellationToken ct)
     {
-        var (document, authorId, refusal) = await AuthorDocumentAsync(id, http, db, directory, ct);
-        if (refusal is not null) return refusal;
-        if (!DocumentTransitions.CanResolveComments(document!.Status)) return Refused(document, DocumentTransitions.ResolveAction);
-
+        var document = await db.Documents.AsNoTracking().SingleOrDefaultAsync(d => d.Id == id, ct);
+        if (document is null) return NotFound();
+        var me = await directory.FindIdAsync(http.User, ct);
+        if (me is null) return NoDirectoryRecord();
         var comment = await db.DocumentComments.SingleOrDefaultAsync(c => c.Id == commentId && c.DocumentId == id, ct);
         if (comment is null)
             return Results.Problem(statusCode: StatusCodes.Status404NotFound, title: "Замечание не найдено",
                 detail: "Обновите страницу документа.");
-        if (!comment.Resolve(authorId, clock.GetUtcNow()))
+
+        var (isAuthor, isReviewer) = (document.AuthorId == me, IsReviewer(http.User));
+        if (!DocumentTransitions.CanResolveComment(document.Status, isAuthor, isReviewer, comment.AuthorId == me))
+        {
+            if (isReviewer && DocumentTransitions.CanReview(document.Status))
+                return Results.Problem(statusCode: StatusCodes.Status403Forbidden, title: "Чужое замечание",
+                    detail: "Методист снимает только своё замечание; чужое разрешает автор на доработке.");
+            return isAuthor || isReviewer
+                ? Refused(document, DocumentTransitions.ResolveAction)
+                : Results.Problem(statusCode: StatusCodes.Status403Forbidden, title: "Чужой документ",
+                    detail: "Замечания разрешает автор документа, а свои — методист на проверке.");
+        }
+        if (!comment.Resolve(me.Value, clock.GetUtcNow()))
             return Results.Problem(statusCode: StatusCodes.Status409Conflict, title: "Замечание уже разрешено",
                 detail: "Его отметили раньше — возможно, в другой вкладке.");
 
@@ -413,7 +453,8 @@ public class DocumentsModule : ICarterModule
     /// (FR-REV-11). Документ в другом статусе — 409, чужой — 403.
     /// </summary>
     private static async Task<(Document? Document, Guid EditorId, IResult? Refusal)> EditorDocumentAsync(
-        Guid id, HttpContext http, AppDbContext db, DirectoryAccounts directory, string action, CancellationToken ct)
+        Guid id, HttpContext http, AppDbContext db, DirectoryAccounts directory, DocumentReview review, string action,
+        CancellationToken ct)
     {
         var document = await db.Documents.SingleOrDefaultAsync(d => d.Id == id, ct);
         if (document is null) return (null, default, NotFound());
@@ -425,7 +466,7 @@ public class DocumentsModule : ICarterModule
         if (isAuthor && DocumentTransitions.CanEdit(document.Status, DocumentRole.Author) ||
             isReviewer && DocumentTransitions.CanEdit(document.Status, DocumentRole.Reviewer))
             return (document, me.Value, null);
-        if (isAuthor || isReviewer) return (null, default, Refused(document, action));
+        if (isAuthor || isReviewer) return (null, default, await AuthorRefusedAsync(document, isAuthor, review, action, ct));
         return (null, default, Results.Problem(statusCode: StatusCodes.Status403Forbidden, title: "Изменяет только автор",
             detail: "Документ изменяет его автор, а на проверке — методист."));
     }
@@ -433,7 +474,7 @@ public class DocumentsModule : ICarterModule
     private static async Task<DocumentDetails> DetailsAsync(
         Document document, AppDbContext db, IDocumentValidator validator, ValidationRuleSet rules, DocumentTypeRegistry registry,
         CancellationToken ct,
-        bool isAuthor, bool isReviewer, bool isCorrector = false)
+        bool isAuthor, bool isReviewer, bool isCorrector = false, Guid? viewerId = null)
     {
         var template = await db.DocumentTemplates.IgnoreQueryFilters().Where(t => t.Id == document.TemplateId)
             .Select(t => new { t.Schema, t.DefaultPayload, t.PrintMapping }).SingleAsync(ct);
@@ -459,9 +500,12 @@ public class DocumentsModule : ICarterModule
                 ResolveComments: isAuthor && DocumentTransitions.CanResolveComments(status),
                 // Печать: автор — в любом статусе, методист — на проверке и после приёма (как в срезе «Печать»).
                 Print: isAuthor || isReviewer && status is DocumentStatuses.UnderReview or DocumentStatuses.Accepted,
-                CorrectPlan: scope is DocumentEditScope.ContentAndPlan or DocumentEditScope.PlanOnly),
+                CorrectPlan: scope is DocumentEditScope.ContentAndPlan or DocumentEditScope.PlanOnly,
+                TakeForReview: isReviewer && DocumentTransitions.CanTakeForReview(status),
+                ResolveOwnComments: isReviewer && DocumentTransitions.CanReview(status),
+                Delete: isAuthor && DocumentTransitions.CanDelete(status)),
             template.DefaultPayload is { } defaults ? JsonDocument.Parse(defaults).RootElement : null,
-            corrections);
+            corrections, viewerId);
     }
 
     // Исправления полей из плана — из журнала аудита: кто, когда, было, стало.
@@ -480,6 +524,16 @@ public class DocumentsModule : ICarterModule
         Results.Problem(statusCode: StatusCodes.Status404NotFound, title: "Документ не найден",
             detail: "Возможно, он удалён в другой вкладке. Вернитесь к списку документов.");
 
+    public const string TakenByReviewer = "Документ взят на проверку методистом";
+
+    // Отказ автору: документ, который у него открыт, взял на проверку методист, — понятным текстом (этап 6, A1).
+    private static async Task<IResult> AuthorRefusedAsync(
+        Document document, bool isAuthor, DocumentReview review, string action, CancellationToken ct) =>
+        isAuthor && await review.TakenByReviewerAsync(document, ct)
+            ? Results.Problem(statusCode: StatusCodes.Status409Conflict, title: TakenByReviewer,
+                detail: "Изменения не сохранены: документ проверяет методист. Скопируйте введённое и перезагрузите документ.")
+            : Refused(document, action);
+
     private static IResult Refused(Document document, string action) =>
         Results.Problem(statusCode: StatusCodes.Status409Conflict, title: "Действие недоступно в этом статусе",
             detail: DocumentTransitions.Refusal(document.Status, action));
@@ -496,6 +550,9 @@ public record CreateDocumentRequest(Guid TemplateId, Guid DisciplineId);
 public record SectionUpdateRequest(int Version, JsonElement Value, bool ConfirmReturn = false);
 
 public record DocumentVersionRequest(int Version);
+
+/// <summary>«Взять на проверку»: версия и обязательная причина — в историю статусов.</summary>
+public record TakeRequest(int Version, string? Reason);
 
 /// <summary>Возврат на доработку: версия и необязательный общий комментарий — замечания к полям уже есть.</summary>
 public record ReturnRequest(int Version, string? Comment);
@@ -539,7 +596,11 @@ public record DocumentItem(
 /// Что пользователь может сделать с документом сейчас: отправить, проверить (вернуть, принять, замечания), разрешать
 /// замечания, формировать печатную форму, исправлять поля из учебного плана (методист и администратор, этап 5.1).
 /// </summary>
-public record DocumentActions(bool Submit, bool Review, bool ResolveComments, bool Print, bool CorrectPlan = false);
+/// <param name="TakeForReview">Методист берёт документ на проверку из статусов автора (этап 6, A1).</param>
+/// <param name="ResolveOwnComments">Методист на проверке снимает свои замечания (этап 6, A2).</param>
+/// <param name="Delete">Автор удаляет свой черновик (этап 6, A5).</param>
+public record DocumentActions(bool Submit, bool Review, bool ResolveComments, bool Print, bool CorrectPlan = false,
+    bool TakeForReview = false, bool ResolveOwnComments = false, bool Delete = false);
 
 /// <summary>Исправление поля из плана из журнала аудита: место, было, стало, кто и когда.</summary>
 public record PlanCorrection(string Path, JsonElement? Before, JsonElement? After, string? ChangedBy, DateTimeOffset ChangedAt)
@@ -558,7 +619,7 @@ public record PlanCorrection(string Path, JsonElement? Before, JsonElement? Afte
 /// </summary>
 public record DocumentDetails(
     DocumentItem Document, JsonElement Payload, JsonElement Schema, DocumentMetadata Metadata, bool Editable, DocumentActions Actions,
-    JsonElement? TemplateDefaults = null, IReadOnlyList<PlanCorrection>? PlanCorrections = null);
+    JsonElement? TemplateDefaults = null, IReadOnlyList<PlanCorrection>? PlanCorrections = null, Guid? ViewerId = null);
 
 /// <summary>Замечание к полю: кто и когда оставил, разрешено ли и кем.</summary>
 public record CommentItem(

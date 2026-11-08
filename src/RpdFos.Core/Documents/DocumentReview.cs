@@ -42,6 +42,27 @@ public sealed class DocumentReview(
         return new(true, issues);
     }
 
+    /// <summary>
+    /// «Взять на проверку» методистом из статусов автора (этап 6, A1): причина обязательна и пишется в историю.
+    /// Полной проверки нет — принять можно только документ без ошибок.
+    /// </summary>
+    public async Task<ReviewProblem?> TakeAsync(Document document, Guid reviewerId, string? reason, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(reason)) return ReviewProblem.EmptyText;
+        history.StatusChanged(document, document.TakeForReview(clock.GetUtcNow()), reviewerId, reason.Trim());
+        await history.SnapshotAsync(document, reviewerId, VersionTriggers.StatusChange, ct);
+        return null;
+    }
+
+    /// <summary>
+    /// Документ на проверку взял не автор: последний переход в «На проверке» сделал другой человек. По нему автору,
+    /// у которого документ был открыт, — понятный отказ, а не «нельзя изменить» (этап 6, A1).
+    /// </summary>
+    public async Task<bool> TakenByReviewerAsync(Document document, CancellationToken ct = default) =>
+        document.Status == DocumentStatuses.UnderReview &&
+        await db.DocumentStatusHistory.Where(h => h.DocumentId == document.Id && h.ToStatus == DocumentStatuses.UnderReview)
+            .OrderByDescending(h => h.ChangedAt).Select(h => h.ChangedBy != document.AuthorId).FirstOrDefaultAsync(ct);
+
     /// <summary>Возврат на доработку — только при неразрешённых замечаниях (FR-REV-03).</summary>
     public async Task<ReviewProblem?> ReturnAsync(Document document, Guid reviewerId, string? comment, CancellationToken ct = default)
     {

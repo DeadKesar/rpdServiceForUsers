@@ -77,6 +77,17 @@ public class Document : IVersioned
         return Move(DocumentStatuses.UnderReview);
     }
 
+    /// <summary>
+    /// Методист берёт документ на проверку из статусов автора (этап 6, A1): автор без доступа к системе или ошибка при
+    /// отправке. Время отправки — время взятия. Возвращает прежний статус.
+    /// </summary>
+    public string TakeForReview(DateTimeOffset now)
+    {
+        Require(DocumentTransitions.CanTakeForReview(Status), DocumentTransitions.TakeAction);
+        SubmittedAt = now;
+        return Move(DocumentStatuses.UnderReview);
+    }
+
     /// <summary>Возврат на доработку методистом. Возвращает прежний статус.</summary>
     public string ReturnForRework()
     {
@@ -138,7 +149,8 @@ public static class DocumentTransitions
 {
     public const string EditAction = "изменить", SaveAction = "сохранить", DeleteAction = "удалить",
         SubmitAction = "отправить на проверку", ReturnAction = "вернуть на доработку", AcceptAction = "принять",
-        CommentAction = "оставить замечание", ResolveAction = "отметить замечание разрешённым";
+        CommentAction = "оставить замечание", ResolveAction = "отметить замечание разрешённым",
+        TakeAction = "взять на проверку";
 
     /// <summary>
     /// Автор правит черновик, сохранённый черновик и документ на доработке; на проверке и после приёма документ
@@ -182,11 +194,25 @@ public static class DocumentTransitions
     /// </summary>
     public static bool CanReturnAfterPlanCorrection(string status) => status is DocumentStatuses.Accepted;
 
+    /// <summary>
+    /// Методист берёт на проверку документ из статусов автора — черновик, сохранённый черновик, доработка (этап 6, A1).
+    /// Отступление от FR-ADM-04 (принудительная смена статуса — только администратору): узкое право методиста.
+    /// </summary>
+    public static bool CanTakeForReview(string status) =>
+        status is DocumentStatuses.Draft or DocumentStatuses.SavedDraft or DocumentStatuses.Returned;
+
     /// <summary>Возврат, приём и замечания методиста — пока документ на проверке.</summary>
     public static bool CanReview(string status) => status is DocumentStatuses.UnderReview;
 
     /// <summary>Автор отмечает замечания разрешёнными, пока документ на доработке.</summary>
     public static bool CanResolveComments(string status) => status is DocumentStatuses.Returned;
+
+    /// <summary>
+    /// Замечание разрешает автор на доработке или методист на проверке — своё (этап 6, A2): документ, взятый с
+    /// доработки, иначе не принять.
+    /// </summary>
+    public static bool CanResolveComment(string status, bool isAuthor, bool isReviewer, bool ownComment) =>
+        isAuthor && CanResolveComments(status) || isReviewer && ownComment && CanReview(status);
 
     public static string Refusal(string status, string action) =>
         $"Документ в статусе «{DocumentStatuses.Title(status)}» нельзя {action}.";

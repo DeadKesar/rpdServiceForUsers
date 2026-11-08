@@ -43,6 +43,14 @@ public sealed class SchemaContext(JsonElement root, JsonObject payload, Document
     /// <summary>Добавить замечание к полю (место, текст); false — не добавлено, причину покажет страница.</summary>
     public Func<string, string, Task<bool>>? AddComment { get; set; }
 
+    /// <summary>Методист на проверке снимает свои замечания (этап 6, A2): свои — по записи справочника <see cref="ViewerId"/>.</summary>
+    public bool CanResolveOwn { get; set; }
+
+    public Guid? ViewerId { get; set; }
+
+    /// <summary>Можно ли отметить замечание разрешённым: автор — любое, методист — своё.</summary>
+    public bool CanResolveComment(CommentItem c) => !c.IsResolved && (CanResolve || CanResolveOwn && c.AuthorId == ViewerId);
+
     public Func<CommentItem, Task>? ResolveComment { get; set; }
 
     /// <summary>Замечания к самому месту, а для <paramref name="subtree"/> — и к вложенным в него полям.</summary>

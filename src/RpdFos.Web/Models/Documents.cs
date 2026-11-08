@@ -15,13 +15,15 @@ public sealed record DocumentItem(Guid Id, string Type, string Title, string Sta
     DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, DateTimeOffset? SubmittedAt);
 
 /// <summary>Что пользователь может сделать с документом: отправить, проверить (вернуть, принять, замечания), разрешать замечания.</summary>
-public sealed record DocumentActions(bool Submit, bool Review, bool ResolveComments, bool Print, bool CorrectPlan = false);
+public sealed record DocumentActions(bool Submit, bool Review, bool ResolveComments, bool Print, bool CorrectPlan = false,
+    bool TakeForReview = false, bool ResolveOwnComments = false, bool Delete = false);
 
 /// <summary>Исправление поля из учебного плана: место, было, стало, кто и когда.</summary>
 public sealed record PlanCorrection(string Path, JsonElement? Before, JsonElement? After, string? ChangedBy, DateTimeOffset ChangedAt);
 
 public sealed record DocumentDetails(DocumentItem Document, JsonElement Payload, JsonElement Schema, DocumentMetadata Metadata,
-    bool Editable, DocumentActions Actions, JsonElement? TemplateDefaults = null, List<PlanCorrection>? PlanCorrections = null);
+    bool Editable, DocumentActions Actions, JsonElement? TemplateDefaults = null, List<PlanCorrection>? PlanCorrections = null,
+    Guid? ViewerId = null);
 
 public sealed record DocumentMetadata(List<SectionState> Sections, List<string> ReadOnlyPaths, List<string> HiddenPaths,
     List<CompetenceCandidate> CompetenceCandidates, PlanDisciplineChoices? PlanDisciplines,

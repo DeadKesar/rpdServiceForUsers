@@ -59,6 +59,10 @@ else
             <button class="btn btn-success" disabled="@(busy || conflict)" @onclick="AcceptAsync">Принять</button>
             <button class="btn btn-warning" disabled="@(busy || conflict)" @onclick="() => returning = !returning">Вернуть на доработку</button>
         }
+        @if (details.Actions.TakeForReview)
+        {
+            <button class="btn btn-outline-success" disabled="@busy" @onclick="() => taking = !taking">Взять на проверку</button>
+        }
         @if (details.Editable || details.Actions.CorrectPlan)
         {
             <span class="small @(dirty ? "text-warning" : "text-muted")">
@@ -98,6 +102,22 @@ else
                 <div class="mt-2 d-flex gap-2">
                     <button class="btn btn-sm btn-warning" disabled="@(busy || OpenComments == 0)" @onclick="ReturnAsync">Вернуть автору</button>
                     <button class="btn btn-sm btn-link" @onclick="() => returning = false">Отмена</button>
+                </div>
+            </div>
+        </div>
+    }
+
+    @if (taking && details.Actions.TakeForReview)
+    {
+        <div class="card mb-3">
+            <div class="card-body py-2">
+                <div class="small mb-1">
+                    Документ перейдёт в «На проверке» без отправки автором. Автор больше не сможет его изменять, пока вы не вернёте документ на доработку.
+                </div>
+                <textarea class="form-control form-control-sm" rows="2" placeholder="Причина (обязательно): попадёт в историю статусов" @bind="takeReason" @bind:event="oninput"></textarea>
+                <div class="mt-2 d-flex gap-2">
+                    <button class="btn btn-sm btn-success" disabled="@(busy || string.IsNullOrWhiteSpace(takeReason))" @onclick="TakeAsync">Взять</button>
+                    <button class="btn btn-sm btn-link" @onclick="() => taking = false">Отмена</button>
                 </div>
             </div>
         </div>
@@ -144,7 +164,7 @@ else
                             @c.Text
                             @if (c.IsResolved)
                             {
-                                <span class="badge text-bg-success ms-1">разрешено</span>
+                                <span class="badge text-bg-success ms-1">разрешено@(c.ResolvedByName is { } by ? $" — {by}" : "")</span>
                             }
                         </li>
                     }
@@ -156,7 +176,7 @@ else
     @if (conflict)
     {
         <div class="alert alert-warning">
-            <div class="fw-semibold">Документ изменён в другой сессии.</div>
+            <div class="fw-semibold">@(conflictTitle ?? "Документ изменён в другой сессии.")</div>
             <div>Введённое осталось на экране, автосохранение остановлено. Перезагрузите документ или скопируйте свой текст,
                 чтобы вставить его после перезагрузки.</div>
             <div class="mt-2 d-flex gap-2">
@@ -298,6 +318,11 @@ else
     private List<CommentItem> comments = [];
     private bool returning;
     private string? returnComment;
+    private bool taking;
+    private string? takeReason;
+    // Заголовок плашки конфликта: документ взял на проверку методист (этап 6, A1) — иначе «изменён в другой сессии».
+    private string? conflictTitle;
+    private const string TakenByReviewer = "Документ взят на проверку методистом";
     private string? scrollTo;
 
     private int OpenComments => comments.Count(c => !c.IsResolved);
@@ -336,7 +361,8 @@ else
         context = new SchemaContext(details.Schema, payload, details.Metadata, OnChanged, OnEdited)
         {
             Locked = !details.Editable, Comments = comments, CanComment = details.Actions.Review,
-            CanResolve = details.Actions.ResolveComments, AddComment = AddCommentAsync, ResolveComment = ResolveCommentAsync,
+            CanResolve = details.Actions.ResolveComments, CanResolveOwn = details.Actions.ResolveOwnComments,
+            ViewerId = details.ViewerId, AddComment = AddCommentAsync, ResolveComment = ResolveCommentAsync,
             Defaults = details.TemplateDefaults is { } defaults ? JsonNode.Parse(defaults.GetRawText()) as JsonObject : null,
             CorrectPlan = details.Actions.CorrectPlan, Corrections = details.PlanCorrections ?? [],
             PlanFieldChanged = () => _ = InvokeAsync(SavePlanCorrectionAsync),
@@ -347,6 +373,7 @@ else
         statusTitle = details.Document.StatusTitle;
         current = sections.Any(s => s.Key == current) ? current : sections.FirstOrDefault(s => s.Visible)?.Key;
         (dirty, conflict, copied, fieldErrors, returning, returnComment) = (false, false, null, [], false, null);
+        (taking, takeReason, conflictTitle) = (false, null, null);
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -400,6 +427,9 @@ else
         await ChangeStatusAsync("accept", new { version }, "Документ принят.");
     }
 
+    private async Task TakeAsync() =>
+        await ChangeStatusAsync("take", new { version, reason = takeReason }, "Документ взят на проверку.");
+
     private async Task ReturnAsync()
     {
         if (!await SaveSectionAsync()) return;
@@ -421,7 +451,7 @@ else
             }
 
             var problem = await ReadProblemAsync(response);
-            if (response.StatusCode == HttpStatusCode.Conflict && problem?.Title == "Конфликт версий")
+            if (IsConflict(response, problem))
             {
                 conflict = true;
                 return null;
@@ -566,7 +596,7 @@ else
                 return true;
             }
 
-            if (response.StatusCode == HttpStatusCode.Conflict && problem?.Title == "Конфликт версий")
+            if (IsConflict(response, problem))
             {
                 conflict = true;
                 message = null;
@@ -663,7 +693,7 @@ else
                 return;
             }
             var problem = await ReadProblemAsync(response);
-            if (response.StatusCode == HttpStatusCode.Conflict && problem?.Title == "Конфликт версий")
+            if (IsConflict(response, problem))
             {
                 conflict = true;
                 return;
@@ -767,6 +797,15 @@ else
     private static async Task<string> ProblemTextAsync(HttpResponseMessage response, string fallback) =>
         await ReadProblemAsync(response) is { } p ? p.Detail is null ? p.Title ?? fallback : $"{p.Title}. {p.Detail}"
             : $"{fallback} (код ответа {(int)response.StatusCode}).";
+
+    // Сохранять дальше нельзя: документ изменили в другой сессии или его взял на проверку методист (этап 6, A1).
+    // Введённое остаётся на экране, автосохранение останавливается.
+    private bool IsConflict(HttpResponseMessage response, DocumentProblem? problem)
+    {
+        if (response.StatusCode != HttpStatusCode.Conflict || problem?.Title is not ("Конфликт версий" or TakenByReviewer)) return false;
+        conflictTitle = problem.Title == TakenByReviewer ? $"{TakenByReviewer}." : null;
+        return true;
+    }
 
     public void Dispose() => timer?.Dispose();
 }

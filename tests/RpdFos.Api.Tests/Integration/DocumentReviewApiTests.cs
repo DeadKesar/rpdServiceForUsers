@@ -150,7 +150,8 @@ public class DocumentReviewApiTests(DatabaseFixture app)
 
         var details = (await methodist.GetFromJsonAsync<DocumentDetails>(Url(created, "")))!;
         Assert.True(details.Editable);
-        Assert.Equal(new DocumentActions(Submit: false, Review: true, ResolveComments: false, Print: true, CorrectPlan: true), details.Actions);
+        Assert.Equal(new DocumentActions(Submit: false, Review: true, ResolveComments: false, Print: true, CorrectPlan: true,
+            ResolveOwnComments: true), details.Actions);
 
         var edited = await DocumentData.PatchAsync(methodist, created.Document.Id, "goals_and_objectives", version, Goals("Задача, уточнённая методистом"));
 
@@ -257,6 +258,73 @@ public class DocumentReviewApiTests(DatabaseFixture app)
             Assert.Equal(HttpStatusCode.Forbidden,
                 (await client.PostAsJsonAsync(Url(created, "comments"), new CommentRequest("/thematic_plan", "Текст"))).StatusCode);
         }
+    }
+
+    [Fact]
+    public async Task Methodist_takes_authors_draft_for_review_with_a_reason()
+    {
+        var (author, _) = await DocumentData.UserAsync(app);
+        var (methodist, reviewer) = await DocumentData.UserAsync(app, AppRoles.Methodist);
+        var (admin, _) = await DocumentData.UserAsync(app, AppRoles.Admin);
+        var created = await DocumentData.CreateAsync(app, author, (await DocumentData.PublishedTemplateAsync(app)).Id, "Б1.О.10");
+        var version = created.Document.Version;
+
+        Assert.True((await methodist.GetFromJsonAsync<DocumentDetails>(Url(created, "")))!.Actions.TakeForReview);
+        Assert.Equal(HttpStatusCode.UnprocessableEntity,
+            (await methodist.PostAsJsonAsync(Url(created, "take"), new TakeRequest(version, " "))).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden,
+            (await admin.PostAsJsonAsync(Url(created, "take"), new TakeRequest(version, "Автор в отпуске"))).StatusCode);
+
+        // Полной проверки при взятии нет: незаполненный черновик тоже берётся.
+        var taken = await ExpectAsync(methodist.PostAsJsonAsync(Url(created, "take"), new TakeRequest(version, "Автор в отпуске")),
+            DocumentStatuses.UnderReview);
+        Assert.Equal(HttpStatusCode.Conflict,
+            (await methodist.PostAsJsonAsync(Url(created, "take"), new TakeRequest(taken, "Ещё раз"))).StatusCode);
+
+        // У автора документ был открыт: следующее сохранение — 409 с понятным текстом.
+        var save = await author.PatchAsJsonAsync(Url(created, "sections/goals_and_objectives"), Section(version, Goals("Правка автора")));
+        Assert.Equal(HttpStatusCode.Conflict, save.StatusCode);
+        Assert.Equal(DocumentsModule.TakenByReviewer, (await save.Content.ReadFromJsonAsync<ProblemDetails>())!.Title);
+        var manual = await author.PostAsJsonAsync(Url(created, "save"), new DocumentVersionRequest(version));
+        Assert.Equal(DocumentsModule.TakenByReviewer, (await manual.Content.ReadFromJsonAsync<ProblemDetails>())!.Title);
+
+        await app.WithDbAsync(async db =>
+        {
+            var document = await db.Documents.SingleAsync(d => d.Id == created.Document.Id);
+            var change = await db.DocumentStatusHistory.Where(h => h.DocumentId == document.Id)
+                .OrderByDescending(h => h.ChangedAt).FirstAsync();
+            Assert.Equal((DocumentStatuses.Draft, DocumentStatuses.UnderReview, reviewer.Id, "Автор в отпуске"),
+                (change.FromStatus, change.ToStatus, change.ChangedBy, change.Comment));
+            // Время отправки — время взятия.
+            Assert.True((change.ChangedAt - document.SubmittedAt!.Value).Duration() < TimeSpan.FromSeconds(1));
+        });
+    }
+
+    [Fact]
+    public async Task Methodist_resolves_own_comment_on_a_document_taken_from_rework()
+    {
+        var (author, _) = await DocumentData.UserAsync(app);
+        var (methodist, reviewer) = await DocumentData.UserAsync(app, AppRoles.Methodist);
+        var (otherMethodist, _) = await DocumentData.UserAsync(app, AppRoles.Methodist);
+        var created = await DocumentData.CreateAsync(app, author, (await DocumentData.PublishedTemplateAsync(app)).Id, "Б1.О.11");
+        var version = await DocumentData.FillForSubmissionAsync(author, created);
+        version = await ExpectAsync(author.PostAsJsonAsync(Url(created, "submit"), new DocumentVersionRequest(version)), DocumentStatuses.UnderReview);
+        var comment = (await (await methodist.PostAsJsonAsync(Url(created, "comments"),
+            new CommentRequest("/thematic_plan", "Уточните темы"))).Content.ReadFromJsonAsync<CommentItem>())!;
+        version = await ExpectAsync(methodist.PostAsJsonAsync(Url(created, "return"), new ReturnRequest(version, null)), DocumentStatuses.Returned);
+
+        // На доработке своё замечание методист не снимает — это делает автор.
+        Assert.Equal(HttpStatusCode.Conflict, (await methodist.PostAsync(Url(created, $"comments/{comment.Id}/resolve"), null)).StatusCode);
+
+        version = await ExpectAsync(methodist.PostAsJsonAsync(Url(created, "take"), new TakeRequest(version, "Исправлю сам")),
+            DocumentStatuses.UnderReview);
+        Assert.Equal(HttpStatusCode.Forbidden, (await otherMethodist.PostAsync(Url(created, $"comments/{comment.Id}/resolve"), null)).StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, (await author.PostAsync(Url(created, $"comments/{comment.Id}/resolve"), null)).StatusCode);
+
+        var resolved = (await (await methodist.PostAsync(Url(created, $"comments/{comment.Id}/resolve"), null))
+            .Content.ReadFromJsonAsync<CommentItem>())!;
+        Assert.Equal((true, reviewer.ShortName), (resolved.IsResolved, resolved.ResolvedByName));
+        await ExpectAsync(methodist.PostAsJsonAsync(Url(created, "accept"), new DocumentVersionRequest(version)), DocumentStatuses.Accepted);
     }
 
     private static string Url(DocumentDetails document, string action) =>
