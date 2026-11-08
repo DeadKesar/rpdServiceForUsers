@@ -60,6 +60,7 @@ public static class Reports
                      ("Новые РПД с пустой кафедрой", Count(f => f.Place == "/title_page/department_name")),
                      ("Строки матрицы не найдены в плане (замечания)", Count(f => f.Message.Contains("не найдена в учебном плане") || f.Message.Contains("неоднозначна"))),
                      ("Строки матрицы без дисциплины (сохранены для привязки)", plans.Sum(p => p.UnmatchedRows.Count)),
+                     ("Строки матрицы сопоставлены по похожести названия", Count(f => f.Message.Contains("по похожести названия"))),
                      ("Новые РПД без компетенций", plans.Sum(p => p.WithoutCompetences.Count)),
                      ("Расхождения часов с настоящими РПД (ошибка разбора)", Count(f => f.Kind == "расхождение" && f.Class == FindingClasses.ParseError))
                  })

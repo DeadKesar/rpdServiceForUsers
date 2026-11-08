@@ -169,7 +169,7 @@ public sealed class PlanRunner(Workbench bench, string corpus)
             _ when m.StartsWith("Файл не прочитан") => FindingClasses.ParseError,
             _ when IsUnmatchedRow(m) || m.Contains("нет в матрице компетенций") || m.Contains("нет в списке компетенций")
                    || m.Contains("не совпадает с направлением") => FindingClasses.SourceData,
-            _ when m.Contains("по совпадению слов") => FindingClasses.Expected,
+            _ when m.Contains("по совпадению слов") || m.Contains("по похожести названия") => FindingClasses.Expected,
             // Нули по семестрам — разбивка не прочитана (ошибка разбора); прочитанная, но не равная итогу, —
             // данные источника (итог модуля Б1.О.06 не учитывает часов одной из его дисциплин).
             _ when m.Contains("контактные часы по семестрам (0)") => FindingClasses.ParseError,
@@ -212,7 +212,7 @@ public sealed class PlanRunner(Workbench bench, string corpus)
         {
             var subject = $"{report.Set.Name} / {d.Code}";
             if (d.TotalCredits == 0 && d.TotalHours > 0)
-                report.Findings.Add(new(subject, "0 з. е.", d.Code, $"«{d.Name}»: {d.TotalHours} ч при 0 з. е.", FindingClasses.ModelGap));
+                report.Findings.Add(new(subject, "0 з. е.", d.Code, $"«{d.Name}»: {d.TotalHours} ч при 0 з. е.", FindingClasses.Expected)); // с этапа 5.4 (B4) — сверка и печать по часам
             if (!DocumentRules.CanHaveDocument(d)) continue;
 
             var row = await DisciplineAsync(report, d, templateId, subject);

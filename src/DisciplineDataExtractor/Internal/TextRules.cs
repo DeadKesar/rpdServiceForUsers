@@ -33,7 +33,27 @@ internal static partial class TextRules
 
     /// <summary>Ключ сравнения названий дисциплин между планом и матрицей.</summary>
     public static string NameKey(string? text) =>
-        Clean(NamePunctuation().Replace((text ?? "").ToLowerInvariant().Replace('ё', 'е'), " "));
+        Clean(NamePunctuation().Replace(Abbreviation().Replace((text ?? "").ToLowerInvariant().Replace('ё', 'е'), "том числе"), " "));
+
+    // «в т.ч.», «в т. ч.» — сокращение в названиях матриц, в плане пишут полностью (этап 5.4, B7).
+    [GeneratedRegex(@"\bт\.\s*ч\.")]
+    private static partial Regex Abbreviation();
+
+    private static readonly HashSet<string> StopWords = ["и", "в", "во", "на", "по", "для", "с", "со", "к", "о", "об", "от", "из", "том", "числе"];
+
+    /// <summary>
+    /// Основы слов названия (первые 5 букв, у коротких слов — 3), без служебных слов: «Физика твёрдого тела» и «Физика твердых тел» —
+    /// одно и то же. Для сопоставления строк матрицы по похожести (этап 5.4, B7).
+    /// </summary>
+    public static IReadOnlySet<string> NameStems(string? text) =>
+        NameKey(text).Split(' ', StringSplitOptions.RemoveEmptyEntries)
+            .Where(w => !StopWords.Contains(w))
+            .Select(w => w.Length > 5 ? w[..5] : w.Length > 3 ? w[..3] : w) // «тела» / «тел», «игры» / «игр»
+            .ToHashSet();
+
+    /// <summary>Похожесть названий: доля общих основ среди всех основ обоих названий (0…1).</summary>
+    public static double NameSimilarity(IReadOnlySet<string> a, IReadOnlySet<string> b) =>
+        a.Count == 0 || b.Count == 0 ? 0 : (double)a.Intersect(b).Count() / a.Union(b).Count();
 
     /// <summary>Слова названия без учёта порядка и повторов — для сопоставления по словам.</summary>
     public static string NameTokensKey(string? text) =>

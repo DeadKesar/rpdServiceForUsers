@@ -3,12 +3,16 @@ namespace DisciplineDataExtractor.Internal;
 /// <summary>
 /// Сопоставляет строки матрицы с дисциплинами плана. В матрице нет индексов, только названия,
 /// и они расходятся с планом в мелочах («ИТ-продуктов» / «ИТ продуктов») и в формулировках.
-/// Порядок: точное совпадение ключа названия → совпадение набора слов (с предупреждением) →
+/// Порядок: точное совпадение ключа названия → совпадение набора слов (с предупреждением) → похожесть по основам
+/// слов от порога (с предупреждением, этап 5.4) →
 /// при нескольких кандидатах — уточнение по семестрам. Иначе — замечание, а строка с отметками возвращается
 /// данными (<see cref="UnmatchedMatrixRow"/>) для ручной привязки.
 /// </summary>
 internal static class MatrixResolver
 {
+    // Доля общих основ слов, начиная с которой названия считаются похожими: 3 из 4 основ, но не 2 из 3.
+    private const double SimilarityThreshold = 0.75;
+
     public static (IReadOnlyList<MatrixLink> Links, IReadOnlyList<UnmatchedMatrixRow> Unmatched) Resolve(
         string file, IReadOnlyList<MatrixRow> rows, IReadOnlyList<Discipline> disciplines,
         IReadOnlyList<Competence> competences, IssueLog log)
@@ -22,6 +26,7 @@ internal static class MatrixResolver
 
         var byName = disciplines.ToLookup(d => TextRules.NameKey(d.Name));
         var byWords = disciplines.ToLookup(d => TextRules.NameTokensKey(d.Name));
+        var stems = disciplines.Select(d => (Discipline: d, Stems: TextRules.NameStems(d.Name))).ToList();
         var knownCompetences = competences.Select(c => c.Code).ToHashSet();
         var knownIndicators = competences.SelectMany(c => c.Indicators).Select(i => i.Code).ToHashSet();
         var reported = new HashSet<string>();
@@ -32,7 +37,7 @@ internal static class MatrixResolver
         var covered = new HashSet<string>();
         foreach (var row in rows)
         {
-            var (discipline, candidates) = Match(file, row, byName, byWords, log);
+            var (discipline, candidates) = Match(file, row, byName, byWords, stems, log);
             if (discipline is null)
             {
                 // Строка без отметок ничего не теряет — данными не возвращается.
@@ -66,14 +71,28 @@ internal static class MatrixResolver
 
     // Найденная дисциплина или null и кандидаты неоднозначной строки (пусто — не найдена).
     private static (Discipline? Discipline, IReadOnlyList<Discipline> Candidates) Match(
-        string file, MatrixRow row, ILookup<string, Discipline> byName, ILookup<string, Discipline> byWords, IssueLog log)
+        string file, MatrixRow row, ILookup<string, Discipline> byName, ILookup<string, Discipline> byWords,
+        IReadOnlyList<(Discipline Discipline, IReadOnlySet<string> Stems)> stems, IssueLog log)
     {
         var candidates = byName[TextRules.NameKey(row.Name)].ToList();
         var byWordsOnly = false;
+        double? similarity = null;
         if (candidates.Count == 0)
         {
             candidates = byWords[TextRules.NameTokensKey(row.Name)].ToList();
             byWordsOnly = candidates.Count > 0;
+        }
+        if (candidates.Count == 0)
+        {
+            // Похожесть по основам слов (окончания, «твёрдого тела» / «твердых тел»): лучшие от порога — кандидаты.
+            var own = TextRules.NameStems(row.Name);
+            var scored = stems.Select(s => (s.Discipline, Score: TextRules.NameSimilarity(own, s.Stems)))
+                .Where(s => s.Score >= SimilarityThreshold).ToList();
+            if (scored.Count > 0)
+            {
+                similarity = scored.Max(s => s.Score);
+                candidates = scored.Where(s => s.Score == similarity).Select(s => s.Discipline).ToList();
+            }
         }
 
         if (candidates.Count > 1)
@@ -91,6 +110,9 @@ internal static class MatrixResolver
             if (byWordsOnly)
                 log.Warning(file, row.Sheet, row.Row,
                     $"«{row.Name}» сопоставлена с {candidates[0].Code} «{candidates[0].Name}» по совпадению слов");
+            else if (similarity is { } score)
+                log.Warning(file, row.Sheet, row.Row,
+                    $"«{row.Name}» сопоставлена с {candidates[0].Code} «{candidates[0].Name}» по похожести названия ({score:P0})");
             return (candidates[0], []);
         }
 
