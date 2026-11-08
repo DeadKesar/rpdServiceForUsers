@@ -42,13 +42,16 @@ internal static partial class TextRules
     private static readonly HashSet<string> StopWords = ["и", "в", "во", "на", "по", "для", "с", "со", "к", "о", "об", "от", "из", "том", "числе"];
 
     /// <summary>
-    /// Основы слов названия по порядку (первые 5 букв, у коротких слов — 3), без служебных слов: «Физика твёрдого
+    /// Основы слов названия по порядку (первые 5 букв, у коротких слов — 3, латинские — целиком), без служебных слов: «Физика твёрдого
     /// тела» и «Физика твердых тел» — одно и то же. Для сопоставления строк матрицы по похожести (этап 5.4, B7).
     /// </summary>
     public static IReadOnlyList<string> NameStems(string? text) =>
         NameKey(text).Split(' ', StringSplitOptions.RemoveEmptyEntries)
             .Where(w => !StopWords.Contains(w))
-            .Select(w => w.Length > 5 ? w[..5] : w.Length > 3 ? w[..3] : w) // «тела» / «тел», «игры» / «игр»
+            // Латинские слова — целиком: окончания английских слов меняют смысл («Data Scientist» и «Data Science»
+            // могут быть вписаны в документы как разные названия — решение автора, этап 5.4).
+            .Select(w => w.Any(char.IsAsciiLetter) ? w
+                : w.Length > 5 ? w[..5] : w.Length > 3 ? w[..3] : w) // «тела» / «тел», «игры» / «игр»
             .ToList();
 
     /// <summary>

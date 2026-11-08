@@ -48,6 +48,8 @@ public class MatrixSimilarityTests
     [InlineData("Элективные дисциплины. 03 (к модулю \"Технологии самоорганизации\")", "Элективные дисциплины. 01 (к модулю \"Технологии самоорганизации\")")]
     [InlineData("Информационно-коммуникационные сети", "Защита информации в информационно-коммуникационных сетях")]
     [InlineData("Аналитика данных. Искусственный интеллект", "Интеллектуальный анализ данных")]
+    // Латинские слова сравниваются целиком — решение автора по вехе 5.4.
+    [InlineData("Data Scientist", "Data Science")]
     public void Pairs_found_wrong_on_the_corpus_do_not_match(string row, string plan)
     {
         var (links, _, _) = Resolve(Row(row), D("Б1.В.01", plan));
