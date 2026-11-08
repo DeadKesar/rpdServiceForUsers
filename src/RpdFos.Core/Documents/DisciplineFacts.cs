@@ -6,7 +6,7 @@ using RpdFos.Core.Data.Entities;
 namespace RpdFos.Core.Documents;
 
 /// <summary>Индикатор — кандидат для выбора в документе.</summary>
-public sealed record IndicatorCandidate(Guid Id, string Code, string Text, string Type);
+public sealed record IndicatorCandidate(Guid Id, string Code, string Text, string? Type);
 
 /// <summary>Компетенция дисциплины из матрицы с индикаторами — кандидаты для выбора в разделе «Компетенции».</summary>
 public sealed record CompetenceCandidate(Guid Id, string Code, string Formulation, string Category, IReadOnlyList<IndicatorCandidate> Indicators);

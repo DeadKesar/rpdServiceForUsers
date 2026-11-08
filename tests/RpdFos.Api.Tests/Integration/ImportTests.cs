@@ -123,6 +123,22 @@ public class ImportTests(ImportDatabaseFixture app, ITestOutputHelper output)
             var user = new ClaimsPrincipal(new ClaimsIdentity([new Claim(DirectoryAccounts.SubjectClaim, subject)], "test"));
             Assert.Equal(primBefore, await scope.ServiceProvider.GetRequiredService<DirectoryAccounts>().FindIdAsync(user));
         }
+
+        // Индикатор без «Знать / Уметь / Владеть» (этап 5.4, B5) загружается одной формулировкой, тип не задан.
+        const string untyped = "Анализирует задачу, выделяя её базовые составляющие";
+        var fourth = await ImportAsync(methodist, ReadFixtures(), r => r with
+        {
+            Competences = r.Competences.Select(c => c.Code != "УК-1" ? c : c with
+            {
+                Indicators = c.Indicators.Select(i => i.Code == "УК-1.1" ? i with { Text = untyped, Type = null } : i).ToList()
+            }).ToList()
+        });
+        Assert.DoesNotContain(ImportIssue.Deserialize(fourth.ErrorsLog), i => i.Message.Contains("УК-1.1"));
+        await WithDbAsync(async db =>
+        {
+            var indicator = await db.CompetenceIndicators.SingleAsync(i => i.Code == "УК-1.1");
+            Assert.Equal((untyped, (string?)null), (indicator.Text, indicator.IndicatorType));
+        });
     }
 
     // Проверки строк после первого импорта: кафедры, направление, ФГОС, дисциплины, матрица, подписанты.

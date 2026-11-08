@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.RegularExpressions;
 using DisciplineDataExtractor;
 
 namespace RpdFos.Corpus;
@@ -52,7 +53,8 @@ public static class Reports
                      ("Профиль не распознан (планов)", Count(f => f.Message == "Не распознано: профиль")),
                      ("Контактные часы по семестрам не равны итогу", Count(f => f.Message.Contains("контактные часы по семестрам"))),
                      ("hours_match_curriculum в новых РПД", Count(f => f.Kind == "hours_match_curriculum")),
-                     ("Индикаторы без типа (знать / уметь / владеть)", Count(f => f.Message.Contains("тип (знать / уметь / владеть) не распознан"))),
+                     ("Индикаторы без типа (знать / уметь / владеть)", Count(f => f.Message.Contains("тип (знать / уметь / владеть) не распознан"))
+                         + findings.Where(f => f.Message.StartsWith("Индикаторов без типа")).Sum(f => int.Parse(Regex.Match(f.Message, @"\d+").Value))),
                      ("Дисциплины без кафедры", Count(f => f.Message.Contains("не загружена — дисциплина без кафедры"))),
                      ("Конфликты кафедр между планами", Count(f => f.Message.Contains("уже у кафедры"))),
                      ("Новые РПД с пустой кафедрой", Count(f => f.Place == "/title_page/department_name")),

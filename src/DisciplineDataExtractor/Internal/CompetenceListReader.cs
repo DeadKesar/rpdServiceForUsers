@@ -130,17 +130,20 @@ internal sealed class CompetenceListReader(SourceFile file, IssueLog log)
             if (c.Indicators.Count == 0)
                 log.Warning(F, null, null, $"Компетенция {c.Code.Competence}: нет индикаторов");
 
+            // Индикатор без «Знать / Уметь / Владеть» («УК-1.1. Анализирует задачу…») — одной формулировкой, тип не задан
+            // (этап 5.4, B5, решение автора). Не ошибка: одно сводное замечание на файл, без замечания на каждый индикатор.
             var list = c.Indicators.Select(i =>
             {
                 var text = Tidy(i.Text);
-                var type = TextRules.IndicatorTypeOf(text);
-                if (type is null)
-                    log.Warning(F, i.Sheet, i.Row, $"Индикатор {i.Code.Indicator}: тип (знать / уметь / владеть) не распознан");
-                return new CompetenceIndicator(i.Code.Indicator!, text, type);
+                return new CompetenceIndicator(i.Code.Indicator!, text, TextRules.IndicatorTypeOf(text));
             }).ToList();
 
             return new Competence(c.Code.Competence, c.Code.Category, c.CategoryName, formulation, list);
         }).ToList();
+
+        var untyped = result.Sum(c => c.Indicators.Count(i => i.Type is null));
+        if (untyped > 0)
+            log.Warning(F, null, null, $"Индикаторов без типа (знать / уметь / владеть): {untyped} — загружены одной формулировкой");
 
         return (direction.Success ? direction.Value : null, result);
     }

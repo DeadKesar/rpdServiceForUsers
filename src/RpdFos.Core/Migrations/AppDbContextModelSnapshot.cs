@@ -667,7 +667,6 @@ namespace RpdFos.Core.Migrations
                         .HasColumnName("competence_id");
 
                     b.Property<string>("IndicatorType")
-                        .IsRequired()
                         .HasMaxLength(20)
                         .HasColumnType("character varying(20)")
                         .HasColumnName("indicator_type");

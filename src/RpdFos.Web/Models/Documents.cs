@@ -43,7 +43,7 @@ public sealed record FieldError(string Path, string Message, string Level = "err
 
 public sealed record CompetenceCandidate(Guid Id, string Code, string Formulation, string Category, List<IndicatorCandidate> Indicators);
 
-public sealed record IndicatorCandidate(Guid Id, string Code, string Text, string Type);
+public sealed record IndicatorCandidate(Guid Id, string Code, string Text, string? Type);
 
 /// <summary>Раздел сохранён; с ним — состояние всех разделов и история исправлений полей из плана (если исправлял).</summary>
 /// <summary>Раздел проверен без сохранения (этап 5.2): состояние всех разделов и ошибки черновика.</summary>

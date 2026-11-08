@@ -32,7 +32,8 @@ public class CompetenceIndicator
     public string Code { get; set; } = "";
 
     public string Text { get; set; } = "";
-    public string IndicatorType { get; set; } = IndicatorTypes.Knows;
+    /// <summary>Знать / уметь / владеть; null — тип не задан, индикатор одной формулировкой (этап 5.4).</summary>
+    public string? IndicatorType { get; set; }
 }
 
 public static class CompetenceCategories

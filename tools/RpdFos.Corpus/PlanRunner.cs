@@ -180,6 +180,8 @@ public sealed class PlanRunner(Workbench bench, string corpus)
             _ when m.StartsWith("Не найдено наименование направления") || m.StartsWith("Не найдена направленность") => FindingClasses.ParseError,
             // Индикаторы без «Знать/Уметь/Владеть» модель не принимает — пробел модели, а не данных.
             _ when m.Contains("не распознан") && m.Contains("знать") => FindingClasses.ModelGap,
+            // С этапа 5.4 (B5) такие индикаторы загружаются одной формулировкой — решение автора.
+            _ when m.StartsWith("Индикаторов без типа") => FindingClasses.Expected,
             _ => issue.Severity == IssueSeverity.Error ? FindingClasses.ParseError : FindingClasses.SourceData
         };
         if (cls == FindingClasses.SourceData && report.Set.OlderMatrix && issue.File == System.IO.Path.GetFileName(report.Matrix))

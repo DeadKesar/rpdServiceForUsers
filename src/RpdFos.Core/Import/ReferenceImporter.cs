@@ -252,11 +252,6 @@ public sealed class ReferenceImporter(AppDbContext db, TimeProvider clock)
 
                 foreach (var i in c.Indicators)
                 {
-                    if (i.Type is not Parsed.IndicatorType type)
-                    {
-                        Error(files.CompetenceList, $"Индикатор {i.Code}: тип не распознан — не загружен");
-                        continue;
-                    }
                     var indicator = competence.Indicators.FirstOrDefault(x => x.Code == i.Code);
                     if (indicator is null)
                     {
@@ -264,11 +259,13 @@ public sealed class ReferenceImporter(AppDbContext db, TimeProvider clock)
                         competence.Indicators.Add(indicator);
                     }
                     indicator.Text = i.Text;
-                    indicator.IndicatorType = type switch
+                    // Тип не распознан — индикатор одной формулировкой, тип не задан (этап 5.4, B5).
+                    indicator.IndicatorType = i.Type switch
                     {
                         Parsed.IndicatorType.Knows => IndicatorTypes.Knows,
                         Parsed.IndicatorType.Can => IndicatorTypes.Can,
-                        _ => IndicatorTypes.Owns
+                        Parsed.IndicatorType.Owns => IndicatorTypes.Owns,
+                        _ => null
                     };
                 }
                 _competences[competence.Code] = competence;
