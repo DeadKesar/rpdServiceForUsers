@@ -33,6 +33,16 @@ public class ConnectModule : ICarterModule
             ?? throw new InvalidOperationException("Запрос OpenID Connect не найден.");
 
         var auth = await http.AuthenticateAsync(IdentityConstants.ApplicationScheme);
+        // Тихий вход клиента (prompt=none) не вошедшему — сразу login_required, как в образцах OpenIddict. Иначе
+        // скрытое окно клиента открывает страницу входа и клиент ждёт ответа до тайм-аута, ~10 с (этап 6, A4).
+        if (!auth.Succeeded && request.HasPromptValue(PromptValues.None))
+            return Results.Forbid(
+                new AuthenticationProperties(new Dictionary<string, string?>
+                {
+                    [OpenIddictServerAspNetCoreConstants.Properties.Error] = Errors.LoginRequired,
+                    [OpenIddictServerAspNetCoreConstants.Properties.ErrorDescription] = "Пользователь не вошёл в систему."
+                }),
+                [OpenIddictServerAspNetCoreDefaults.AuthenticationScheme]);
         if (!auth.Succeeded)
             return Results.Challenge(
                 new AuthenticationProperties
