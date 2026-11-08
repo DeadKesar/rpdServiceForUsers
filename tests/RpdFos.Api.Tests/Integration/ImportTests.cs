@@ -141,9 +141,12 @@ public class ImportTests(ImportDatabaseFixture app, ITestOutputHelper output)
         });
 
         // Кафедра в другом плане (этап 5.4, B6): другое окончание названия и другой номер — та же запись справочника,
-        // дисциплины плана ссылаются на неё по своему номеру; название — из более нового плана, с предупреждением.
+        // дисциплины плана ссылаются на неё по своему номеру, в отчёте — предупреждение. План того же года набора
+        // название не меняет (этап 6, A7) — меняет только план более нового года.
         const string variant = "Информационные технологии и вычислительная система";
         var beforeFifth = await CountsAsync();
+        string? original = null;
+        await WithDbAsync(async db => original = (await db.Departments.SingleAsync(d => d.ShortName == "ИТиВС")).Name);
         var fifth = await ImportAsync(methodist, ReadFixtures(), r => r with
         {
             Plan = r.Plan! with { Departments = r.Plan.Departments.Select(d => d.Code == "9" ? d with { Code = "99", Name = variant } : d).ToList() },
@@ -155,11 +158,23 @@ public class ImportTests(ImportDatabaseFixture app, ITestOutputHelper output)
         await WithDbAsync(async db =>
         {
             var itvs = await db.Departments.SingleAsync(d => d.ShortName == "ИТиВС");
-            Assert.Equal((variant, "99"), (itvs.Name, itvs.Code));
-            Assert.All(await db.Disciplines.Where(d => d.CurriculumPlanId == fifth.CreatedCurriculumPlanId && d.DepartmentId == itvs.Id).ToListAsync(),
-                d => Assert.Equal(itvs.Id, d.DepartmentId));
+            Assert.Equal((original, "99"), (itvs.Name, itvs.Code));
             Assert.True(await db.Disciplines.AnyAsync(d => d.CurriculumPlanId == fifth.CreatedCurriculumPlanId && d.DepartmentId == itvs.Id));
         });
+
+        // План следующего года набора с тем же написанием — его название.
+        var sixth = await ImportAsync(methodist, ReadFixtures(), r => r with
+        {
+            Plan = r.Plan! with
+            {
+                Year = r.Plan.Year + 1,
+                Departments = r.Plan.Departments.Select(d => d.Code == "9" ? d with { Code = "99", Name = variant } : d).ToList()
+            },
+            Disciplines = r.Disciplines.Select(d => d.DepartmentCode == "9" ? d with { DepartmentCode = "99" } : d).ToList()
+        });
+        Assert.Contains(ImportIssue.Deserialize(sixth.ErrorsLog), i => i.Message.EndsWith($"оставлено «{variant}»"));
+        await WithDbAsync(async db =>
+            Assert.Equal(variant, (await db.Departments.SingleAsync(d => d.ShortName == "ИТиВС")).Name));
     }
 
     // Проверки строк после первого импорта: кафедры, направление, ФГОС, дисциплины, матрица, подписанты.

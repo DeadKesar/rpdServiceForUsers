@@ -145,7 +145,9 @@ public sealed class ReferenceImporter(AppDbContext db, TimeProvider clock)
             // в планах разных лет номера и написание названий расходятся. Конфликт номера или сокращения с другой
             // кафедрой справочника загрузку не блокирует: справочник оставляет прежнее, план ссылается на свою кафедру.
             var all = await db.Departments.ToListAsync(ct);
-            var newest = p.Year >= (await db.CurriculumPlans.MaxAsync(x => (int?)x.Year, ct) ?? int.MinValue);
+            // Название кафедры меняет только план более нового года набора: план того же года — тоже «последний», и
+            // планы одного года переписывали бы название друг за другом (этап 6, A7: «правовове» / «правовое»).
+            var newest = p.Year > (await db.CurriculumPlans.MaxAsync(x => (int?)x.Year, ct) ?? int.MinValue);
             foreach (var d in p.Departments)
             {
                 var department = all.FirstOrDefault(x => string.Equals(x.Name, d.Name, StringComparison.OrdinalIgnoreCase))
@@ -159,7 +161,7 @@ public sealed class ReferenceImporter(AppDbContext db, TimeProvider clock)
                 }
                 else if (!string.Equals(department.Name, d.Name, StringComparison.OrdinalIgnoreCase))
                 {
-                    // Одна кафедра, разное написание: название — из более нового плана.
+                    // Одна кафедра, разное написание: название — из плана более нового года набора.
                     var kept = newest && all.All(x => x == department || !string.Equals(x.Name, d.Name, StringComparison.OrdinalIgnoreCase))
                         ? d.Name : department.Name;
                     Warning(files.Plan, $"Кафедра «{d.Name}» — та же, что «{department.Name}» в справочнике (название различается); оставлено «{kept}»");
