@@ -141,32 +141,71 @@ public sealed class ReferenceImporter(AppDbContext db, TimeProvider clock)
         {
             // Кафедры — из справочника плана (там номер, на который ссылаются дисциплины); институт кафедры —
             // из файла должностей. Кафедры, которых нет в плане, не создаются: их номер неизвестен.
+            // Этап 5.4 (B6): кафедра ищется по названию нестрого (DepartmentNames), номер действует внутри плана —
+            // в планах разных лет номера и написание названий расходятся. Конфликт номера или сокращения с другой
+            // кафедрой справочника загрузку не блокирует: справочник оставляет прежнее, план ссылается на свою кафедру.
             var all = await db.Departments.ToListAsync(ct);
+            var newest = p.Year >= (await db.CurriculumPlans.MaxAsync(x => (int?)x.Year, ct) ?? int.MinValue);
             foreach (var d in p.Departments)
             {
-                var department = all.FirstOrDefault(x => string.Equals(x.Name, d.Name, StringComparison.OrdinalIgnoreCase));
+                var department = all.FirstOrDefault(x => string.Equals(x.Name, d.Name, StringComparison.OrdinalIgnoreCase))
+                                 ?? all.FirstOrDefault(x => DepartmentNames.Same(x.Name, d.Name));
                 var shortName = d.ShortName.Length > 0 ? d.ShortName : d.Name;
-                var conflict = all.FirstOrDefault(x => x != department && (x.Code == d.Code || x.ShortName == shortName));
-                if (conflict is not null)
-                {
-                    Error(files.Plan, $"Кафедра «{d.Name}»: номер {d.Code} или сокращение «{shortName}» уже у кафедры «{conflict.Name}» — не загружена");
-                    continue;
-                }
-
                 if (department is null)
                 {
-                    department = new Department { Name = d.Name };
+                    department = new Department { Name = d.Name, Code = d.Code, ShortName = shortName };
                     db.Departments.Add(department);
                     all.Add(department);
                 }
-                department.Code = d.Code;
-                department.ShortName = shortName;
+                else if (!string.Equals(department.Name, d.Name, StringComparison.OrdinalIgnoreCase))
+                {
+                    // Одна кафедра, разное написание: название — из более нового плана.
+                    var kept = newest && all.All(x => x == department || !string.Equals(x.Name, d.Name, StringComparison.OrdinalIgnoreCase))
+                        ? d.Name : department.Name;
+                    Warning(files.Plan, $"Кафедра «{d.Name}» — та же, что «{department.Name}» в справочнике (название различается); оставлено «{kept}»");
+                    _employees.DepartmentsByName[d.Name] = department;
+                    _employees.DepartmentsByName[department.Name] = department;
+                    department.Name = kept;
+                }
+
+                if (department.Code != d.Code)
+                {
+                    if (all.Any(x => x != department && x.Code == d.Code))
+                        Warning(files.Plan, $"Кафедра «{d.Name}»: номер {d.Code} в справочнике у другой кафедры — оставлен номер «{department.Code}»");
+                    else department.Code = d.Code;
+                }
+                if (department.ShortName != shortName)
+                {
+                    if (all.Any(x => x != department && x.ShortName == shortName))
+                        Warning(files.Plan, $"Кафедра «{d.Name}»: сокращение «{shortName}» в справочнике у другой кафедры — оставлено «{department.ShortName}»");
+                    else department.ShortName = shortName;
+                }
+                // Новой кафедре номер или сокращение другой кафедры не достаются: уникальные — с номером плана.
+                if (department.Code == d.Code && all.Any(x => x != department && x.Code == department.Code))
+                    department.Code = Fit($"{d.Code}/{shortName}");
+                if (all.Any(x => x != department && x.ShortName == department.ShortName))
+                    department.ShortName = Fit($"{shortName}-{d.Code}");
                 _employees.LinkInstitute(department, employees);
 
                 _employees.DepartmentsByName[department.Name] = department;
-                _departmentsByCode[department.Code] = department;
+                _departmentsByCode[d.Code] = department;
             }
         }
+        /// <summary>
+        /// Кафедра дисциплины: по номеру из листа «Кафедры» этого плана; иначе — кафедра справочника с тем же названием
+        /// (нестрого, из колонки «Закрепленная кафедра» плана), а если у плана нет листа «Кафедры» — с тем же номером.
+        /// </summary>
+        private Department? DepartmentOf(Parsed.Discipline d, IReadOnlyList<Department> known)
+        {
+            if (d.DepartmentCode is not null && _departmentsByCode.TryGetValue(d.DepartmentCode, out var byPlan)) return byPlan;
+            if (d.DepartmentName is { } name && known.FirstOrDefault(x => DepartmentNames.Same(x.Name, name)) is { } byName) return byName;
+            return d.DepartmentCode is not null && _departmentsByCode.Count == 0
+                ? known.FirstOrDefault(x => x.Code == d.DepartmentCode)
+                : null;
+        }
+
+        private static string Fit(string value) => value.Length <= 50 ? value : value[..50];
+
         // ---------- Направление, профиль, ФГОС, компетенции ----------
 
         private async Task<StudyDirection> UpsertDirectionAsync(Parsed.CurriculumPlanInfo p, CancellationToken ct)
@@ -304,11 +343,13 @@ public sealed class ReferenceImporter(AppDbContext db, TimeProvider clock)
                 Version = (last ?? 0) + 1, SourceFileId = run.PlanFileId, CreatedAt = now
             };
 
+            // Кафедры справочника — для дисциплин плана без листа «Кафедры» (и с номером, которого на листе нет).
+            var known = db.Departments.Local.ToList(); // загружены и добавлены в UpsertDepartmentsAsync
             var byCode = new Dictionary<string, Discipline>();
             foreach (var d in parsed)
             {
-                Department? department = null;
-                if (d.DepartmentCode is not null && !_departmentsByCode.TryGetValue(d.DepartmentCode, out department))
+                var department = DepartmentOf(d, known);
+                if (d.DepartmentCode is not null && department is null)
                     Warning(files.Plan, $"{d.Code}: кафедра с номером {d.DepartmentCode} не загружена — дисциплина без кафедры");
 
                 var discipline = new Discipline

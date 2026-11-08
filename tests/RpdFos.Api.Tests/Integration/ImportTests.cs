@@ -139,6 +139,27 @@ public class ImportTests(ImportDatabaseFixture app, ITestOutputHelper output)
             var indicator = await db.CompetenceIndicators.SingleAsync(i => i.Code == "УК-1.1");
             Assert.Equal((untyped, (string?)null), (indicator.Text, indicator.IndicatorType));
         });
+
+        // Кафедра в другом плане (этап 5.4, B6): другое окончание названия и другой номер — та же запись справочника,
+        // дисциплины плана ссылаются на неё по своему номеру; название — из более нового плана, с предупреждением.
+        const string variant = "Информационные технологии и вычислительная система";
+        var beforeFifth = await CountsAsync();
+        var fifth = await ImportAsync(methodist, ReadFixtures(), r => r with
+        {
+            Plan = r.Plan! with { Departments = r.Plan.Departments.Select(d => d.Code == "9" ? d with { Code = "99", Name = variant } : d).ToList() },
+            Disciplines = r.Disciplines.Select(d => d.DepartmentCode == "9" ? d with { DepartmentCode = "99" } : d).ToList()
+        });
+        Assert.Equal(0, (await CountsAsync())["departments"] - beforeFifth["departments"]);
+        Assert.Contains(ImportIssue.Deserialize(fifth.ErrorsLog), i => i.Message.StartsWith($"Кафедра «{variant}» — та же"));
+        Assert.DoesNotContain(ImportIssue.Deserialize(fifth.ErrorsLog), i => i.Message.Contains("не загружена"));
+        await WithDbAsync(async db =>
+        {
+            var itvs = await db.Departments.SingleAsync(d => d.ShortName == "ИТиВС");
+            Assert.Equal((variant, "99"), (itvs.Name, itvs.Code));
+            Assert.All(await db.Disciplines.Where(d => d.CurriculumPlanId == fifth.CreatedCurriculumPlanId && d.DepartmentId == itvs.Id).ToListAsync(),
+                d => Assert.Equal(itvs.Id, d.DepartmentId));
+            Assert.True(await db.Disciplines.AnyAsync(d => d.CurriculumPlanId == fifth.CreatedCurriculumPlanId && d.DepartmentId == itvs.Id));
+        });
     }
 
     // Проверки строк после первого импорта: кафедры, направление, ФГОС, дисциплины, матрица, подписанты.
