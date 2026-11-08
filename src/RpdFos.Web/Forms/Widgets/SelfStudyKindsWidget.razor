@@ -4,7 +4,7 @@
 @inherits FieldBase
 
 @* Виды самостоятельной работы: вид — из стандартного списка (подсказки из значений по умолчанию шаблона) или свой; обозначение формы
-   для графы «Формы текущего контроля» разделов; разделы тематического плана — для самостоятельного изучения разделов;
+   для графы «Формы текущего контроля» разделов; флажок «Разделы» и номера разделов тематического плана;
    часы по семестрам дисциплины. Сумма по семестру сверяется с планом при вводе. *@
 <div class="mb-3">
     <label class="form-label">@Title</label>
@@ -37,11 +37,17 @@
                         {
                             <div class="field-missing-text">@kindMissing</div>
                         }
-                        @* Разделы тематического плана выбираются в документе: у шаблона тематического плана нет. *@
+                        @* Флажок «Разделы» — признак перечня разделов у вида, в шаблоне и в документе (этап 6, A6). Сами
+                           номера выбираются в документе: у шаблона тематического плана нет. *@
+                        <label class="form-check form-check-inline small mt-1 mb-0">
+                            <input type="checkbox" class="form-check-input" disabled="@ReadOnly"
+                                   checked="@(row["sections"] is JsonArray)" @onchange="e => ToggleSectionsList(row, e.Value is true)" />
+                            <span class="form-check-label">Разделы</span>
+                        </label>
                         @if (row["sections"] is JsonArray && !Context.IsTemplate)
                         {
                             <div class="small mt-1">
-                                <span class="text-muted me-1">Разделы:</span>
+                                <span class="text-muted me-1">Номера разделов:</span>
                                 @foreach (var section in SectionNumbers)
                                 {
                                     <label class="form-check form-check-inline mb-0">
@@ -108,12 +114,20 @@
     {
         <div class="form-text">
             Стандартный список видов: новый документ получает его, часы по семестрам и разделы тематического плана
-            задаёт автор. Пустой список разделов у вида — признак, что автор выбирает разделы.
+            задаёт автор. Флажок «Разделы» — у вида в документе выбираются номера разделов тематического плана;
+            отмеченные номера печатаются после названия вида.
         </div>
     }
-    else if (Hint is not null)
+    else
     {
-        <div class="form-text">@Hint. Вид выбирается из списка или вводится свой.</div>
+        <div class="form-text">
+            @if (Hint is not null)
+            {
+                <span>@Hint. Вид выбирается из списка или вводится свой. </span>
+            }
+            Флажок «Разделы» — выбрать номера разделов тематического плана: отмеченные номера печатаются после названия
+            вида («самостоятельное изучение разделов 1, 3»).
+        </div>
     }
 </div>
 
@@ -206,6 +220,14 @@
         if (string.IsNullOrWhiteSpace(text)) row.Remove("kind");
         else row["kind"] = text.Trim();
         ApplyExample(row, text?.Trim());
+        Context.Changed();
+    }
+
+    // Флажок «Разделы»: включён — пустой перечень для выбора номеров; снят — перечня нет, выбранные номера сброшены.
+    private void ToggleSectionsList(JsonObject row, bool on)
+    {
+        if (on && row["sections"] is not JsonArray) row["sections"] = new JsonArray();
+        if (!on) row.Remove("sections");
         Context.Changed();
     }
 

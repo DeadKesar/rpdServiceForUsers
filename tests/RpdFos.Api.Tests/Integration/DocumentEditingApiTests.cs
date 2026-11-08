@@ -254,6 +254,31 @@ public class DocumentEditingApiTests(DatabaseFixture app)
     }
 
     [Fact]
+    public async Task Sections_flag_set_in_template_comes_to_a_new_document()
+    {
+        // Методист отметил флажок «Разделы» у «подготовки к текущему контролю», снял — у «изучения разделов».
+        var template = await DocumentData.PublishedTemplateAsync(app);
+        await app.WithDbAsync(async db =>
+        {
+            var row = await db.DocumentTemplates.SingleAsync(t => t.Id == template.Id);
+            row.DefaultPayload = """
+                { "hours_distribution": { "self_study_kinds": [
+                    { "kind": "самостоятельное изучение разделов" },
+                    { "kind": "подготовка к текущему контролю", "sections": [] } ] } }
+                """;
+            await db.SaveChangesAsync();
+        });
+        var (author, _) = await DocumentData.UserAsync(app);
+
+        var created = await DocumentData.CreateAsync(app, author, template.Id, "Б1.О.08");
+
+        var kinds = created.Payload.GetProperty("hours_distribution").GetProperty("self_study_kinds").EnumerateArray()
+            .ToDictionary(k => k.GetProperty("kind").GetString()!, k => k.TryGetProperty("sections", out var s) ? s.GetArrayLength() : -1);
+        Assert.Equal(-1, kinds["самостоятельное изучение разделов"]);
+        Assert.Equal(0, kinds["подготовка к текущему контролю"]);
+    }
+
+    [Fact]
     public async Task Document_under_review_is_not_deleted()
     {
         var (author, _) = await DocumentData.UserAsync(app);

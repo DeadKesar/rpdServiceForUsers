@@ -121,13 +121,30 @@ public class PartitionPrintingTests
         return body.Descendants<Table>().Single(t => t.InnerText.Contains("Раздел дисциплины"));
     }
 
-    private static Body Print(DisciplineSemesterDetails first, DisciplineSemesterDetails? second, string topics, Discipline? discipline = null)
+    [Fact]
+    public void Kind_without_sections_flag_prints_only_its_name()
+    {
+        // Флажок «Разделы» снят — у вида нет перечня (номера сброшены), в печати только название (этап 6, A6).
+        var body = Print(Semester(1, 24, 8, 16, 24, 36, "exam"), null,
+            """[ { "section_number": 1, "topic_title": "Тема", "hours": { "lectures": 24, "practice": 8, "lab_hours": 16, "self_study": 24 } } ]""",
+            kinds: """
+                [ { "kind": "самостоятельное изучение разделов", "hours": [ { "semester": 1, "hours": 10 } ] },
+                  { "kind": "подготовка к текущему контролю", "sections": [1], "hours": [ { "semester": 1, "hours": 14 } ] } ]
+                """);
+
+        var rows = body.Descendants<Table>().First(t => t.InnerText.Contains("Общая трудоёмкость"))
+            .Elements<TableRow>().Select(r => r.Elements<TableCell>().First().InnerText).Where(t => t.StartsWith("- ")).ToList();
+        Assert.Equal(["- самостоятельное изучение разделов", "- подготовка к текущему контролю 1"], rows);
+    }
+
+    private static Body Print(DisciplineSemesterDetails first, DisciplineSemesterDetails? second, string topics, Discipline? discipline = null,
+        string kinds = "[]")
     {
         var semesters = second is null ? new[] { first } : [first, second];
         var hours = string.Join(", ", semesters.Select(s =>
             $$"""{ "semester": {{s.Semester}}, "lectures": {{s.Lectures}}, "practice": {{s.Practice}}, "lab_hours": {{s.LabHours}}, "self_study": {{s.SelfStudy}}, "control": {{s.Control}}, "control_types": ["{{s.ControlTypes[0]}}"] }"""));
         discipline ??= new Discipline { Name = "Дисциплина" };
-        var payload = JsonDocument.Parse($$"""{ "hours_distribution": { "total_credits": {{discipline.TotalCredits}}, "total_hours": {{discipline.TotalHours}}, "semesters": [ {{hours}} ] }, "thematic_plan": {{topics}} }""").RootElement;
+        var payload = JsonDocument.Parse($$"""{ "hours_distribution": { "total_credits": {{discipline.TotalCredits}}, "total_hours": {{discipline.TotalHours}}, "semesters": [ {{hours}} ], "self_study_kinds": {{kinds}} }, "thematic_plan": {{topics}} }""").RootElement;
         var schema = JsonDocument.Parse(Registry.Get(DocumentTypeRegistry.Rpd).SchemaJson).RootElement;
         discipline.Semesters = semesters.ToList();
         var facts = new DisciplineFacts(discipline,
