@@ -152,11 +152,25 @@ public sealed class HoursMatchCurriculum : IValidationRule
             list.ValueKind != JsonValueKind.Array) yield break;
         // Место — строка содержимого, поэтому семестры по одному, в порядке массива.
         var rows = list.EnumerateArray().ToList();
+        // Дисциплина без з. е. (элективы по физической культуре: 328 ч при 0 з. е.) сверяется не с з. е. × 36,
+        // а с часами семестра по плану (этап 5.4, B4).
+        var zeroCredits = context.Facts.Discipline.TotalCredits == 0 && context.Facts.Discipline.TotalHours > 0;
         for (var i = 0; i < rows.Count; i++)
         {
             if (rows[i].ValueKind != JsonValueKind.Object) continue;
             var s = DocumentSemesters.Row(rows[i]);
             var sum = s.ContactHours + s.Control + s.SelfStudy;
+            if (zeroCredits)
+            {
+                var plan = context.Facts.Semesters.FirstOrDefault(p => p.Semester == s.Semester);
+                var planned = plan is null ? 0 : plan.ContactHours + plan.Control + plan.SelfStudy;
+                if (sum != planned)
+                    yield return new($"{context.Path}/semesters/{i}",
+                        $"{s.Semester} семестр: контактная работа {s.ContactHours} + контроль {s.Control} + самостоятельная работа " +
+                        $"{s.SelfStudy} = {sum} ч, а по плану {planned} ч (дисциплина без з. е.)",
+                        IssueLevels.Warning);
+                continue;
+            }
             if (sum != s.Credits * HoursPerCredit)
                 yield return new($"{context.Path}/semesters/{i}",
                     $"{s.Semester} семестр: контактная работа {s.ContactHours} + контроль {s.Control} + самостоятельная работа " +

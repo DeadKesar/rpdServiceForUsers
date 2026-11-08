@@ -2,6 +2,7 @@ using System.Text.RegularExpressions;
 using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Wordprocessing;
+using RpdFos.Core.Data.Entities;
 using RpdFos.Core.DocumentTypes;
 
 namespace RpdFos.Core.Printing;
@@ -32,6 +33,10 @@ public static partial class DocxGenerator
     [GeneratedRegex(@"\{(?<source>[^{}]+)\}")]
     private static partial Regex Placeholder();
 
+    // «0 зачетных единиц (328 академических часов)» — фраза трудоёмкости шаблона после заполнения закладок.
+    [GeneratedRegex(@"\b0\s+зач[её]тн\w*\s+единиц\w*\s*\(\s*(?<hours>\d+)\s+академическ\w*\s+час\w*\s*\)")]
+    private static partial Regex ZeroCredits();
+
     private static readonly System.Globalization.CultureInfo Ru = System.Globalization.CultureInfo.GetCultureInfo("ru-RU");
 
     private sealed class Filler(
@@ -51,6 +56,30 @@ public static partial class DocxGenerator
                 foreach (var bookmark in root.Descendants<BookmarkStart>()
                              .Where(b => b.Name?.Value?.StartsWith(DocxBookmarks.Prefix, StringComparison.Ordinal) == true).ToList())
                     Fill(root, bookmark);
+            if (_main.Document?.Body is { } body) ZeroCreditLaboriousness(body);
+        }
+
+        /// <summary>
+        /// Дисциплина без з. е. (элективы по физической культуре: 328 ч при 0 з. е.): «составляет 0 зачетных единиц
+        /// (328 академических часов)» печатается, как в РПД вуза, — «составляет 328 академических часов в рамках
+        /// элективных дисциплин (модулей)» (этап 5.4, B4). Фраза шаблона собрана из текста и двух закладок, поэтому
+        /// правится абзац целиком; оформление — первого фрагмента абзаца.
+        /// </summary>
+        private void ZeroCreditLaboriousness(Body body)
+        {
+            var d = context.Facts.Discipline;
+            if (d.TotalCredits != 0 || d.TotalHours <= 0) return;
+            var tail = d.PartType == PartTypes.ElectiveItem ? " в рамках элективных дисциплин (модулей)" : "";
+            foreach (var paragraph in body.Descendants<Paragraph>().ToList())
+            {
+                var texts = paragraph.Descendants<Text>().ToList();
+                var whole = string.Concat(texts.Select(t => t.Text));
+                var replaced = ZeroCredits().Replace(whole, m => $"{m.Groups["hours"].Value} академических часов{tail}");
+                if (replaced == whole || texts.Count == 0) continue;
+                texts[0].Text = replaced;
+                texts[0].Space = SpaceProcessingModeValues.Preserve;
+                foreach (var text in texts.Skip(1)) text.Text = "";
+            }
         }
 
         private void Fill(OpenXmlElement root, BookmarkStart bookmark)

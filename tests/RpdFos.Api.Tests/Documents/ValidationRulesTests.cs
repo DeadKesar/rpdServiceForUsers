@@ -123,6 +123,35 @@ public class ValidationRulesTests
     }
 
     [Fact]
+    public void Zero_credit_discipline_hours_match_plan_semester_hours()
+    {
+        // Электив по физической культуре: 0 з. е., часы по плану — 24 контактных + 30 СР в семестре.
+        var facts = Facts with
+        {
+            Discipline = new Discipline
+            {
+                Name = "Прикладная физическая культура", Code = "Б1.В.ДВ.01.01", TotalCredits = 0, TotalHours = 108,
+                Semesters =
+                [
+                    new DisciplineSemesterDetails { Semester = 1, Practice = 24, ContactHours = 24, SelfStudy = 30 },
+                    new DisciplineSemesterDetails { Semester = 2, Practice = 24, ContactHours = 24, SelfStudy = 30 }
+                ]
+            }
+        };
+        var hours = """
+            { "semesters": [
+                { "semester": 1, "contact_hours": 24, "control": 0, "self_study": 30, "credits": 0 },
+                { "semester": 2, "contact_hours": 24, "control": 0, "self_study": 34, "credits": 0 } ] }
+            """;
+
+        var warning = Assert.Single(new HoursMatchCurriculum()
+            .Check(new RuleContext("/hours_distribution", JsonDocument.Parse(hours).RootElement, default, facts, Now)));
+        Assert.Equal(new DocumentValidationError("/hours_distribution/semesters/1",
+            "2 семестр: контактная работа 24 + контроль 0 + самостоятельная работа 34 = 58 ч, а по плану 54 ч (дисциплина без з. е.)",
+            IssueLevels.Warning), warning);
+    }
+
+    [Fact]
     public void Self_study_kinds_mismatch_names_semester_and_both_sums()
     {
         // Во втором семестре видов нет вовсе, а в третьем у дисциплины нет занятий.

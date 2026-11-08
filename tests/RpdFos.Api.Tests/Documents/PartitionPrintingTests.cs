@@ -121,14 +121,16 @@ public class PartitionPrintingTests
         return body.Descendants<Table>().Single(t => t.InnerText.Contains("Раздел дисциплины"));
     }
 
-    private static Body Print(DisciplineSemesterDetails first, DisciplineSemesterDetails? second, string topics)
+    private static Body Print(DisciplineSemesterDetails first, DisciplineSemesterDetails? second, string topics, Discipline? discipline = null)
     {
         var semesters = second is null ? new[] { first } : [first, second];
         var hours = string.Join(", ", semesters.Select(s =>
             $$"""{ "semester": {{s.Semester}}, "lectures": {{s.Lectures}}, "practice": {{s.Practice}}, "lab_hours": {{s.LabHours}}, "self_study": {{s.SelfStudy}}, "control": {{s.Control}}, "control_types": ["{{s.ControlTypes[0]}}"] }"""));
-        var payload = JsonDocument.Parse($$"""{ "hours_distribution": { "semesters": [ {{hours}} ] }, "thematic_plan": {{topics}} }""").RootElement;
+        discipline ??= new Discipline { Name = "Дисциплина" };
+        var payload = JsonDocument.Parse($$"""{ "hours_distribution": { "total_credits": {{discipline.TotalCredits}}, "total_hours": {{discipline.TotalHours}}, "semesters": [ {{hours}} ] }, "thematic_plan": {{topics}} }""").RootElement;
         var schema = JsonDocument.Parse(Registry.Get(DocumentTypeRegistry.Rpd).SchemaJson).RootElement;
-        var facts = new DisciplineFacts(new Discipline { Name = "Дисциплина", Semesters = semesters.ToList() },
+        discipline.Semesters = semesters.ToList();
+        var facts = new DisciplineFacts(discipline,
             new CurriculumPlan(), new StudyDirection(), new StudyProfile(), null, []);
         var context = new PrintContext(payload, schema, Registry.FindSchema, facts, new SignatoryReport([], []), 2026,
             DocumentMetadata.Hidden(schema, DocumentSemesters.Of(payload, facts), Registry.FindSchema));
@@ -138,6 +140,27 @@ public class PartitionPrintingTests
         var docx = WordprocessingDocument.Open(new MemoryStream(result.Content), false);
         Assert.Empty(new OpenXmlValidator(FileFormatVersions.Office2019).Validate(docx));
         return docx.MainDocumentPart!.Document!.Body!;
+    }
+
+    [Fact]
+    public void Zero_credit_elective_prints_laboriousness_in_hours_like_university_rpd()
+    {
+        // ПФК: 0 з. е., 328 ч — как в РПД вуза: «составляет 328 академических часов в рамках элективных дисциплин (модулей)».
+        var body = Print(Semester(1, 0, 24, 0, 30, 0, "credit"), null, "[]",
+            new Discipline { Name = "Прикладная физическая культура", TotalCredits = 0, TotalHours = 328, PartType = PartTypes.ElectiveItem });
+
+        var text = body.Descendants<Paragraph>().Select(p => p.InnerText).Single(t => t.Contains("Общая трудоемкость дисциплины"));
+        Assert.Equal("Общая трудоемкость дисциплины составляет 328 академических часов в рамках элективных дисциплин (модулей).", text.Trim());
+    }
+
+    [Fact]
+    public void Credits_are_printed_as_before()
+    {
+        var body = Print(Semester(1, 24, 8, 16, 24, 36, "exam"), null, "[]",
+            new Discipline { Name = "Дисциплина", TotalCredits = 3, TotalHours = 108 });
+
+        var text = body.Descendants<Paragraph>().Select(p => p.InnerText).Single(t => t.Contains("Общая трудоемкость дисциплины"));
+        Assert.Equal("Общая трудоемкость дисциплины составляет 3 зачетных единиц (108 академических часов).", text.Trim());
     }
 
     // Строки данных — после трёх строк шапки (заголовки и нумерация столбцов).
