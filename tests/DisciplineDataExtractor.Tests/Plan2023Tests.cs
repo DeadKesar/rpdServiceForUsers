@@ -77,6 +77,20 @@ public class Plan2023Tests(Plan2023Files files) : IClassFixture<Plan2023Files>
         Assert.Equal([1, 2, 3, 4, 5, 6], d.Semesters.Select(s => s.Semester));
         Assert.Equal(144, d.Semesters.Sum(s => s.ContactHours));
         Assert.Equal(184, d.Semesters.Sum(s => s.SelfStudy));
+        // В 1–2-м семестре часы без аттестации — это не ошибка плана, семестр остаётся семестром дисциплины.
+        Assert.All(d.Semesters.Take(2), s => Assert.Empty(s.ControlTypes));
+        Assert.All(d.Semesters.Skip(2), s => Assert.Equal([ControlType.Credit], s.ControlTypes));
+    }
+
+    [Fact]
+    public void Semester_with_attestation_and_no_hours_is_kept()
+    {
+        // У группы элективов часов на листах курсов нет, а зачёты по семестрам — есть.
+        var s = files.Discipline("Б1.В.ДВ.01").Semesters;
+
+        Assert.Equal([3, 4, 5, 6], s.Select(x => x.Semester));
+        Assert.All(s, x => Assert.Equal(0, x.ContactHours + x.SelfStudy));
+        Assert.All(s, x => Assert.Equal([ControlType.Credit], x.ControlTypes));
     }
 
     [Fact]

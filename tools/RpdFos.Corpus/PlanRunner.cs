@@ -170,8 +170,12 @@ public sealed class PlanRunner(Workbench bench, string corpus)
             _ when IsUnmatchedRow(m) || m.Contains("нет в матрице компетенций") || m.Contains("нет в списке компетенций")
                    || m.Contains("не совпадает с направлением") => FindingClasses.SourceData,
             _ when m.Contains("по совпадению слов") => FindingClasses.Expected,
-            // Почасовая разбивка бакалаврских планов — на листах «Курс N», разбор её не читает: нули — ошибка разбора.
-            _ when m.Contains("контактные часы по семестрам") => FindingClasses.ParseError,
+            // Нули по семестрам — разбивка не прочитана (ошибка разбора); прочитанная, но не равная итогу, —
+            // данные источника (итог модуля Б1.О.06 не учитывает часов одной из его дисциплин).
+            _ when m.Contains("контактные часы по семестрам (0)") => FindingClasses.ParseError,
+            _ when m.Contains("контактные часы по семестрам") => FindingClasses.SourceData,
+            // Индикатор без своей компетенции — опечатка в списке («ПК-54.1» вместо «ПК-5.1»).
+            _ when m.Contains("нет компетенции") && m.Contains("индикатор пропущен") => FindingClasses.SourceData,
             // Название направления и профиль в титуле есть, но без кода в ячейке — разбор их не находит.
             _ when m.StartsWith("Не найдено наименование направления") || m.StartsWith("Не найдена направленность") => FindingClasses.ParseError,
             // Индикаторы без «Знать/Уметь/Владеть» модель не принимает — пробел модели, а не данных.
@@ -226,7 +230,7 @@ public sealed class PlanRunner(Workbench bench, string corpus)
         if (semesters.Count == 0)
             report.Findings.Add(new(subject, "семестры", d.Code, $"«{d.Name}»: нет семестров с часами", FindingClasses.ParseError));
         if (semesters.Count > 0 && semesters.All(s => s.ControlTypes.Count == 0))
-            report.Findings.Add(new(subject, "аттестация", d.Code, $"«{d.Name}»: ни в одном семестре нет вида аттестации", FindingClasses.ParseError));
+            report.Findings.Add(new(subject, "аттестация", d.Code, $"«{d.Name}»: ни в одном семестре нет вида аттестации", FindingClasses.SourceData));
         if (semesters.Count > 1)
             report.Findings.Add(new(subject, "несколько семестров", d.Code,
                 $"«{d.Name}»: семестры {PlanTitles.Semesters(semesters.Select(s => s.Semester))}, аттестация {attestation}", FindingClasses.Expected));
@@ -257,7 +261,7 @@ public sealed class PlanRunner(Workbench bench, string corpus)
             sp.GetRequiredService<ValidationRuleSet>(), registry.FindSchema);
         // Часы по семестрам не прочитаны (всё по нулям при ненулевом итоге) — расхождение с з. е. от разбора, не от плана.
         var hoursUnread = d.TotalHours > 0 && semesters.All(s => s.Lectures + s.Practice + s.LabHours + s.SelfStudy == 0);
-        var planIssues = PlanIssues(issues, JsonDocument.Parse(schemaJson).RootElement, registry, hoursUnread).ToList();
+        var planIssues = PlanIssues(issues, JsonDocument.Parse(schemaJson).RootElement, registry, hoursUnread, d.TotalCredits == 0).ToList();
         foreach (var i in planIssues)
             report.Findings.Add(new(subject, i.Kind, i.Path, $"«{d.Name}»: {i.Message}", i.Class));
 
@@ -296,7 +300,7 @@ public sealed class PlanRunner(Workbench bench, string corpus)
     /// из плана (титул, трудоёмкость, вид курсового проектирования). Ошибки незаполненных полей автора — не находки.
     /// </summary>
     private static IEnumerable<PlanIssue> PlanIssues(IReadOnlyList<DocumentValidationError> issues, JsonElement schema, DocumentTypeRegistry registry,
-        bool hoursUnread)
+        bool hoursUnread, bool zeroCredits)
     {
         var planPaths = PlanFields.Paths(schema, registry.FindSchema).Concat(PlanFields.DerivedPaths(schema, registry.FindSchema)).ToList();
         bool FromPlan(string path) => planPaths.Any(p => path == p || path.StartsWith(p + "/", StringComparison.Ordinal));
@@ -304,7 +308,8 @@ public sealed class PlanRunner(Workbench bench, string corpus)
         {
             if (i.Path.StartsWith("/hours_distribution/semesters/", StringComparison.Ordinal) && i.Message.Contains("з. е. ×"))
                 yield return new("hours_match_curriculum", i.Path, i.Message,
-                    i.Message.Contains(" 0 з. е.") ? FindingClasses.ModelGap
+                    // 0 з. е. у всей дисциплины — пробел модели (B4); 0 з. е. в одном семестре при часах — данные источника.
+                    zeroCredits ? FindingClasses.ModelGap
                     : hoursUnread ? FindingClasses.ParseError : FindingClasses.SourceData);
             // Пустая кафедра — следствие незагруженной кафедры (её номера нет в файле должностей или он занят).
             else if (i.Path == "/title_page/department_name")
