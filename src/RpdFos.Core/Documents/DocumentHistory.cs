@@ -14,12 +14,23 @@ public sealed class DocumentHistory(AppDbContext db, DocumentProjections project
 {
     private static readonly JsonSerializerOptions Json = new() { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
 
+    private DateTimeOffset lastChange;
+
     public void StatusChanged(Document document, string from, Guid by, string? comment = null) =>
         db.DocumentStatusHistory.Add(new DocumentStatusChange
         {
             DocumentId = document.Id, FromStatus = from, ToStatus = document.Status, ChangedBy = by, Comment = comment,
-            ChangedAt = clock.GetUtcNow()
+            ChangedAt = NextMoment()
         });
+
+    // Два перехода одного сохранения (приём и старт согласования) стоят в истории в порядке событий: время второго —
+    // позже первого не меньше чем на 2 мкс, чтобы различаться и после округления до точности timestamptz.
+    private DateTimeOffset NextMoment()
+    {
+        var now = clock.GetUtcNow();
+        var earliest = lastChange.AddTicks(2 * TimeSpan.TicksPerMicrosecond);
+        return lastChange = now < earliest ? earliest : now;
+    }
 
     /// <summary>
     /// Снимок версии: пересобирает нормализованные таблицы и сохраняет их состояние вместе с содержимым.

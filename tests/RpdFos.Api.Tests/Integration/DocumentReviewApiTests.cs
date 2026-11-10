@@ -117,7 +117,8 @@ public class DocumentReviewApiTests(DatabaseFixture app)
         Assert.Equal(HttpStatusCode.Conflict, (await author.PostAsync(Url(created, $"comments/{comment.Id}/resolve"), null)).StatusCode);
 
         version = await ExpectAsync(author.PostAsJsonAsync(Url(created, "submit"), new DocumentVersionRequest(saved.Version)), DocumentStatuses.UnderReview);
-        await ExpectAsync(methodist.PostAsJsonAsync(Url(created, "accept"), new DocumentVersionRequest(version)), DocumentStatuses.Accepted);
+        // Приём запускает согласование: подписанты электронных мест найдены (этап 6, B2).
+        await ExpectAsync(methodist.PostAsJsonAsync(Url(created, "accept"), new DocumentVersionRequest(version)), DocumentStatuses.Approval);
 
         await app.WithDbAsync(async db =>
         {
@@ -126,12 +127,12 @@ public class DocumentReviewApiTests(DatabaseFixture app)
                 [
                     (null, DocumentStatuses.Draft), (DocumentStatuses.Draft, DocumentStatuses.UnderReview),
                     (DocumentStatuses.UnderReview, DocumentStatuses.Returned), (DocumentStatuses.Returned, DocumentStatuses.UnderReview),
-                    (DocumentStatuses.UnderReview, DocumentStatuses.Accepted)
+                    (DocumentStatuses.UnderReview, DocumentStatuses.Accepted), (DocumentStatuses.Accepted, DocumentStatuses.Approval)
                 ],
                 history.Select(h => (h.FromStatus, h.ToStatus)));
             Assert.Equal(string.Format(DocumentReview.ReturnedWithComments, 1), history[2].Comment);
 
-            // Каждая смена статуса проверки — снимок версии status_change.
+            // Каждая смена статуса проверки — снимок версии status_change; приём со стартом согласования — один.
             var triggers = await db.DocumentVersions.Where(v => v.DocumentId == created.Document.Id)
                 .OrderBy(v => v.VersionNumber).Select(v => v.TriggerEvent).ToListAsync();
             Assert.Equal(4, triggers.Count(t => t == VersionTriggers.StatusChange));
@@ -214,7 +215,9 @@ public class DocumentReviewApiTests(DatabaseFixture app)
         var (other, _) = await DocumentData.UserAsync(app);
         var (methodist, _) = await DocumentData.UserAsync(app, AppRoles.Methodist);
         var (admin, _) = await DocumentData.UserAsync(app, AppRoles.Admin);
-        var created = await DocumentData.CreateAsync(app, author, (await DocumentData.PublishedTemplateAsync(app)).Id, "Б1.О.08");
+        // Документ остаётся «Принят», пока не назначен ненайденный согласующий (этап 6, B2), — в нём и исправляют.
+        var template = await DocumentData.PublishedTemplateAsync(app, DocumentData.SeatsWithMissingSignatory);
+        var created = await DocumentData.CreateAsync(app, author, template.Id, "Б1.О.08");
         var version = await DocumentData.FillForSubmissionAsync(author, created);
         version = await ExpectAsync(author.PostAsJsonAsync(Url(created, "submit"), new DocumentVersionRequest(version)), DocumentStatuses.UnderReview);
         version = await ExpectAsync(methodist.PostAsJsonAsync(Url(created, "accept"), new DocumentVersionRequest(version)), DocumentStatuses.Accepted);
@@ -324,6 +327,7 @@ public class DocumentReviewApiTests(DatabaseFixture app)
         var resolved = (await (await methodist.PostAsync(Url(created, $"comments/{comment.Id}/resolve"), null))
             .Content.ReadFromJsonAsync<CommentItem>())!;
         Assert.Equal((true, reviewer.ShortName), (resolved.IsResolved, resolved.ResolvedByName));
+        // Заведующего кафедрой этой дисциплины в файле должностей нет: согласование не стартует, документ «Принят».
         await ExpectAsync(methodist.PostAsJsonAsync(Url(created, "accept"), new DocumentVersionRequest(version)), DocumentStatuses.Accepted);
     }
 

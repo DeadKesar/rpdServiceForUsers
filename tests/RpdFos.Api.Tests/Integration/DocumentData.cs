@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.EntityFrameworkCore;
 using RpdFos.Api.Features.Documents;
+using RpdFos.Api.Features.Users;
 using RpdFos.Core.Data.Entities;
 using Xunit;
 
@@ -20,12 +21,45 @@ public static class DocumentData
         return (app.CreateClientFor(role, employee!.IdentitySubject), employee);
     }
 
-    public static async Task<DocumentTemplate> PublishedTemplateAsync(DatabaseFixture app)
+    /// <summary>Электронные места, при которых подписант не находится: председателя УМК в файле должностей нет.</summary>
+    public static readonly string[] SeatsWithMissingSignatory =
+        [SignatoryRoles.DepartmentHead, SignatoryRoles.UmuHead, SignatoryRoles.UmkChair];
+
+    /// <param name="electronicSeats">Электронные места листа согласования вместо стандартных (заведующий кафедрой и начальник УМУ).</param>
+    public static async Task<DocumentTemplate> PublishedTemplateAsync(DatabaseFixture app, IReadOnlyCollection<string>? electronicSeats = null)
     {
         var planId = await app.RealPlanIdAsync();
         DocumentTemplate? template = null;
-        await app.WithDbAsync(async db => template = await TemplateData.AddPublishedAsync(db, planId));
+        await app.WithDbAsync(async db => template = await TemplateData.AddPublishedAsync(db, planId, electronicSeats: electronicSeats));
         return template!;
+    }
+
+    /// <summary>
+    /// Учётная запись согласующего, связанная с записью справочника, которую правило листа согласования находит
+    /// для дисциплины (<paramref name="role"/> — категория подписанта места).
+    /// </summary>
+    /// <param name="accountRoles">Роли учётной записи: заведующий кафедрой обычно и преподаватель, и согласующий.</param>
+    public static async Task<(HttpClient Client, Employee Employee)> SignatoryAsync(
+        DatabaseFixture app, Guid disciplineId, string role, string accountRoles = AppRoles.Approver)
+    {
+        Employee? employee = null;
+        await app.WithDbAsync(async db =>
+        {
+            var departmentId = await db.Disciplines.Where(d => d.Id == disciplineId).Select(d => d.DepartmentId).SingleAsync();
+            employee = await db.Employees.Where(e => e.IsActive && e.SignatoryRole == role &&
+                    (role != SignatoryRoles.DepartmentHead || e.DepartmentId == departmentId))
+                .OrderBy(e => e.ShortName).FirstAsync();
+        });
+        // Запись из файла должностей — без входа: учётную запись с ролью «Утверждающий» создаёт и связывает с ней
+        // администратор, как на странице «Пользователи».
+        if (employee!.IdentitySubject is null)
+        {
+            var created = await app.CreateClientFor(AppRoles.Admin).PostAsJsonAsync("/api/admin/users", new CreateUserRequest(
+                $"approver-{Guid.NewGuid():N}@test.local", "Согласующий Сотрудник Обезличенный", "Test-Passw0rd", [AppRoles.Approver], employee.Id));
+            Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+            await app.WithDbAsync(async db => employee = await db.Employees.SingleAsync(e => e.Id == employee.Id));
+        }
+        return (app.CreateClientFor(accountRoles, employee!.IdentitySubject), employee);
     }
 
     public static async Task<Guid> DisciplineAsync(DatabaseFixture app, string code)

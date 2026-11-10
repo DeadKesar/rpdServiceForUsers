@@ -156,21 +156,26 @@ public class PlanCorrectionApiTests(DatabaseFixture app)
         Assert.Equal(HttpStatusCode.UnprocessableEntity, response.StatusCode);
     }
 
-    private async Task<(HttpClient Methodist, DocumentDetails Created, int Version)> UnderReviewAsync()
+    private async Task<(HttpClient Methodist, DocumentDetails Created, int Version)> UnderReviewAsync(
+        IReadOnlyCollection<string>? electronicSeats = null)
     {
         var (author, _) = await DocumentData.UserAsync(app);
         var (methodist, _) = await DocumentData.UserAsync(app, AppRoles.Methodist);
-        var created = await DocumentData.CreateAsync(app, author, (await DocumentData.PublishedTemplateAsync(app)).Id, "Б1.О.10");
+        var created = await DocumentData.CreateAsync(app, author, (await DocumentData.PublishedTemplateAsync(app, electronicSeats)).Id, "Б1.О.10");
         var version = await DocumentData.FillForSubmissionAsync(author, created);
         version = await StatusAsync(author.PostAsJsonAsync(Url(created, "submit"), new DocumentVersionRequest(version)));
         return (methodist, (await DetailsAsync(methodist, created)), version);
     }
 
+    // Документ остаётся «Принят», только пока не назначен ненайденный согласующий (этап 6, B2): шаблон с местом,
+    // подписанта которого в справочнике нет. Правила исправления принятого документа — прежние.
     private async Task<(HttpClient Methodist, DocumentDetails Created, int Version)> AcceptedAsync()
     {
-        var (methodist, created, version) = await UnderReviewAsync();
-        version = await StatusAsync(methodist.PostAsJsonAsync(Url(created, "accept"), new DocumentVersionRequest(version)));
-        return (methodist, created, version);
+        var (methodist, created, version) = await UnderReviewAsync(DocumentData.SeatsWithMissingSignatory);
+        var response = await methodist.PostAsJsonAsync(Url(created, "accept"), new DocumentVersionRequest(version));
+        var accepted = (await response.Content.ReadFromJsonAsync<DocumentReviewed>())!;
+        Assert.Equal(DocumentStatuses.Accepted, accepted.Status);
+        return (methodist, created, accepted.Version);
     }
 
     private static async Task<SectionSaved> PatchHoursAsync(HttpClient client, DocumentDetails document, int version, Action<JsonObject> change) =>

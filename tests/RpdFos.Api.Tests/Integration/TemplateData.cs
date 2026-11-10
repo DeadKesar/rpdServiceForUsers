@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Text.Json.Nodes;
 using RpdFos.Api.Tests.DocumentTypes;
 using RpdFos.Core.Data;
 using RpdFos.Core.Data.Entities;
@@ -50,7 +51,13 @@ public static class TemplateData
     }
 
     /// <summary>Опубликованный шаблон для плана — своя линия редакций на каждый вызов.</summary>
-    public static async Task<DocumentTemplate> AddPublishedAsync(AppDbContext db, Guid planId, string type = DocumentTypeRegistry.Rpd)
+    /// <param name="electronicSeats">
+    /// Места листа согласования, участвующие в электронном согласовании, — вместо стандартных. С местом
+    /// <c>umk_chair</c> подписант не находится (такой категории в файле должностей нет), и принятый документ
+    /// остаётся «Принят».
+    /// </param>
+    public static async Task<DocumentTemplate> AddPublishedAsync(
+        AppDbContext db, Guid planId, string type = DocumentTypeRegistry.Rpd, IReadOnlyCollection<string>? electronicSeats = null)
     {
         var methodist = await ImportFiles.AddMethodistAsync(db);
         var file = await AddPrintTemplateAsync(db, methodist.Id,
@@ -58,6 +65,12 @@ public static class TemplateData
         var definition = Registry.Get(type);
         var template = DocumentTemplate.Create(definition, $"Шаблон {Guid.NewGuid()}", planId, methodist.Id);
         template.AttachPrintTemplate(file.Id, TemplateCheck.DefaultMapping(definition, DocxBookmarks.Read(file.Content!)));
+        if (electronicSeats is not null)
+        {
+            var seats = JsonNode.Parse(template.SignaturesConfig)!.AsArray();
+            foreach (var seat in seats) seat!["electronic"] = electronicSeats.Contains((string)seat["id"]!);
+            template.SignaturesConfig = seats.ToJsonString();
+        }
         template.Publish(DateTimeOffset.UtcNow);
         db.DocumentTemplates.Add(template);
         await db.SaveChangesAsync();

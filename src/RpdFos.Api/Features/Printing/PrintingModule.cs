@@ -1,7 +1,7 @@
-using System.Security.Claims;
 using Carter;
 using Hangfire;
 using Microsoft.EntityFrameworkCore;
+using RpdFos.Api.Features.Documents;
 using RpdFos.Api.Infrastructure;
 using RpdFos.Core.Data;
 using RpdFos.Core.Data.Entities;
@@ -14,7 +14,8 @@ namespace RpdFos.Api.Features.Printing;
 /// <summary>
 /// Срез «Печать»: формирование DOCX и PDF по шаблону оформления — фоновой задачей в очереди generation (FR-GEN-04),
 /// статус задачи для опроса из клиента, скачивание сформированных файлов. Печатает автор — в любом статусе,
-/// методист — документы на проверке и принятые.
+/// методист — с проверки и до согласованного документа, согласующий — на согласовании и после него
+/// (<see cref="DocumentTransitions.CanPrint"/>).
 /// </summary>
 public class PrintingModule : ICarterModule
 {
@@ -31,9 +32,9 @@ public class PrintingModule : ICarterModule
 
     private static async Task<IResult> Print(
         Guid id, string format, HttpContext http, AppDbContext db, DirectoryAccounts directory, DocumentPrinting printing,
-        IBackgroundJobClient jobs, CancellationToken ct)
+        DocumentApproval approval, IBackgroundJobClient jobs, CancellationToken ct)
     {
-        var (document, me, refusal) = await PrintableAsync(id, http, db, directory, ct);
+        var (document, me, refusal) = await PrintableAsync(id, http, db, directory, approval, ct);
         if (refusal is not null) return refusal;
         if (!GenerationFormats.All.Contains(format))
             return Results.Problem(statusCode: StatusCodes.Status422UnprocessableEntity, title: "Формат не поддерживается",
@@ -47,9 +48,10 @@ public class PrintingModule : ICarterModule
     }
 
     /// <summary>Последние задачи формирования документа — с файлами и отчётами.</summary>
-    private static async Task<IResult> Generations(Guid id, HttpContext http, AppDbContext db, DirectoryAccounts directory, CancellationToken ct)
+    private static async Task<IResult> Generations(
+        Guid id, HttpContext http, AppDbContext db, DirectoryAccounts directory, DocumentApproval approval, CancellationToken ct)
     {
-        var (_, _, refusal) = await PrintableAsync(id, http, db, directory, ct);
+        var (_, _, refusal) = await PrintableAsync(id, http, db, directory, approval, ct);
         if (refusal is not null) return refusal;
         var tasks = await db.GenerationTasks.AsNoTracking().Where(t => t.DocumentId == id)
             .OrderByDescending(t => t.CreatedAt).Take(HistorySize).ToListAsync(ct);
@@ -57,9 +59,10 @@ public class PrintingModule : ICarterModule
     }
 
     private static async Task<IResult> Generation(
-        Guid id, Guid taskId, HttpContext http, AppDbContext db, DirectoryAccounts directory, CancellationToken ct)
+        Guid id, Guid taskId, HttpContext http, AppDbContext db, DirectoryAccounts directory, DocumentApproval approval,
+        CancellationToken ct)
     {
-        var (_, _, refusal) = await PrintableAsync(id, http, db, directory, ct);
+        var (_, _, refusal) = await PrintableAsync(id, http, db, directory, approval, ct);
         if (refusal is not null) return refusal;
         var task = await db.GenerationTasks.AsNoTracking().SingleOrDefaultAsync(t => t.Id == taskId && t.DocumentId == id, ct);
         if (task is null)
@@ -69,10 +72,10 @@ public class PrintingModule : ICarterModule
     }
 
     private static async Task<IResult> Download(
-        Guid id, Guid fileId, HttpContext http, AppDbContext db, DirectoryAccounts directory, GeneratedFileStore store,
-        TimeProvider clock, CancellationToken ct)
+        Guid id, Guid fileId, HttpContext http, AppDbContext db, DirectoryAccounts directory, DocumentApproval approval,
+        GeneratedFileStore store, TimeProvider clock, CancellationToken ct)
     {
-        var (_, _, refusal) = await PrintableAsync(id, http, db, directory, ct);
+        var (_, _, refusal) = await PrintableAsync(id, http, db, directory, approval, ct);
         if (refusal is not null) return refusal;
 
         var file = await (
@@ -99,9 +102,9 @@ public class PrintingModule : ICarterModule
         return tasks.Select(t => GenerationItem.From(t, files.GetValueOrDefault(t.Id))).ToList();
     }
 
-    // Автор — в любом статусе; методист — на проверке и после приёма; администратор и остальные — нет.
+    // Автор — в любом статусе; методист — с проверки; согласующий — на согласовании и после; администратор и остальные — нет.
     private static async Task<(Document? Document, Guid? Me, IResult? Refusal)> PrintableAsync(
-        Guid id, HttpContext http, AppDbContext db, DirectoryAccounts directory, CancellationToken ct)
+        Guid id, HttpContext http, AppDbContext db, DirectoryAccounts directory, DocumentApproval approval, CancellationToken ct)
     {
         var document = await db.Documents.AsNoTracking().SingleOrDefaultAsync(d => d.Id == id, ct);
         if (document is null)
@@ -111,13 +114,12 @@ public class PrintingModule : ICarterModule
         if (me is null)
             return (null, null, Results.Problem(statusCode: StatusCodes.Status403Forbidden, title: "Нет записи в справочнике сотрудников",
                 detail: "Учётная запись не связана со справочником сотрудников — обратитесь к администратору."));
-        if (document.AuthorId == me || IsReviewer(http.User) && document.Status is DocumentStatuses.UnderReview or DocumentStatuses.Accepted)
+        var viewer = await DocumentViewer.OfAsync(http.User, me, document, approval, ct);
+        if (DocumentTransitions.CanPrint(document.Status, viewer.IsAuthor, viewer.IsReviewer, viewer.IsSignatory))
             return (document, me, null);
         return (null, null, Results.Problem(statusCode: StatusCodes.Status403Forbidden, title: "Печать недоступна",
-            detail: "Печатную форму формирует автор, а методист — для документов на проверке и принятых."));
+            detail: "Печатную форму формирует автор, методист — с проверки документа, согласующий — на согласовании."));
     }
-
-    private static bool IsReviewer(ClaimsPrincipal user) => user.IsInRole(AppRoles.Methodist);
 }
 
 /// <summary>

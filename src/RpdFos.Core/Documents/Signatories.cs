@@ -93,7 +93,8 @@ public sealed class InstituteDirectorResolver : SignatoryResolver
 
 /// <summary>
 /// Подписанты документа по листу согласования шаблона. Председатель УМК по направлению пока определяется
-/// по категории (<c>lookup.role:umk_chair</c>); связь с направлением — этап 6, как и ручное назначение (FR-REV-13).
+/// по категории (<c>lookup.role:umk_chair</c>); связь с направлением — этап 6, шаг B5. Электронные места и ручное
+/// назначение (FR-REV-13) — <see cref="DocumentApproval"/>.
 /// </summary>
 public sealed class SignatoryResolution(AppDbContext db)
 {

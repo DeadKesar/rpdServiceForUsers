@@ -53,6 +53,7 @@ public static class DependencyInjection
         services.AddScoped<DocumentEditing>();
         services.AddScoped<DocumentReview>();
         services.AddScoped<SignatoryResolution>();
+        services.AddScoped<DocumentApproval>();
         // Печатные формы: хранилище сформированных файлов на диске, настройки — раздел Generation.
         services.AddOptions<GenerationSettings>();
         services.AddSingleton<GeneratedFileStore>();
