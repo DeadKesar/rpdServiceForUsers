@@ -8,7 +8,8 @@ using static OpenIddict.Abstractions.OpenIddictConstants;
 namespace RpdFos.Api.Tests.Integration;
 
 /// <summary>
-/// Тестовая схема аутентификации: роль берётся из заголовка запроса, токен не нужен.
+/// Тестовая схема аутентификации: роль берётся из заголовка запроса, токен не нужен. Несколько ролей — через
+/// запятую: каждая становится своим утверждением role, как в токене доступа (этап 6, B1).
 /// Подменяется только способ входа — политики доступа остаются рабочими.
 /// </summary>
 public sealed class TestAuthHandler(
@@ -30,12 +31,9 @@ public sealed class TestAuthHandler(
         var subject = Request.Headers.TryGetValue(SubjectHeader, out var s) && !string.IsNullOrEmpty(s)
             ? s.ToString()
             : Guid.NewGuid().ToString();
+        var roles = role.ToString().Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         var identity = new ClaimsIdentity(
-            [
-                new Claim(Claims.Subject, subject),
-                new Claim(Claims.Name, $"Тестовый {role}"),
-                new Claim(Claims.Role, role.ToString())
-            ],
+            [new Claim(Claims.Subject, subject), new Claim(Claims.Name, $"Тестовый {role}"), .. roles.Select(r => new Claim(Claims.Role, r))],
             authenticationType: SchemeName, nameType: Claims.Name, roleType: Claims.Role);
 
         return Task.FromResult(AuthenticateResult.Success(

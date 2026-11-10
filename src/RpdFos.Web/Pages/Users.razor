@@ -18,7 +18,7 @@ else
 {
     <table class="table table-sm align-middle">
         <thead>
-            <tr><th>Email</th><th>ФИО</th><th>Роль</th><th>Запись справочника сотрудников</th><th>Учётная запись</th></tr>
+            <tr><th>Email</th><th>ФИО</th><th>Роли</th><th>Запись справочника сотрудников</th><th>Учётная запись</th></tr>
         </thead>
         <tbody>
             @foreach (var a in accounts)
@@ -26,7 +26,30 @@ else
                 <tr class="@(a.IsActive ? "" : "text-muted")">
                     <td>@a.Email</td>
                     <td>@a.FullName</td>
-                    <td>@RoleTitle(a.Role)</td>
+                    <td>
+                        @* Ролей может быть несколько (этап 6, B1): заведующий кафедрой — и преподаватель, и согласующий. *@
+                        @if (rolesFor == a.Id)
+                        {
+                            @foreach (var (roleCode, roleTitle) in Roles)
+                            {
+                                var boxId = $"role-{a.Id}-{roleCode}";
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="@boxId" checked="@editedRoles.Contains(roleCode)"
+                                           @onchange="e => Toggle(editedRoles, roleCode, e.Value is true)" />
+                                    <label class="form-check-label" for="@boxId">@roleTitle</label>
+                                </div>
+                            }
+                            <div class="mt-1 text-nowrap">
+                                <button class="btn btn-primary btn-sm" type="button" disabled="@(editedRoles.Count == 0)" @onclick="() => SetRolesAsync(a)">Сохранить</button>
+                                <button class="btn btn-outline-secondary btn-sm" type="button" @onclick="() => rolesFor = null">Отмена</button>
+                            </div>
+                        }
+                        else
+                        {
+                            <div>@RolesTitle(a.Roles)</div>
+                            <button class="btn btn-link btn-sm p-0" type="button" @onclick="() => EditRoles(a)">Изменить роли</button>
+                        }
+                    </td>
                     <td>@(a.Directory is { } d ? Describe(d) : "— не связана")</td>
                     <td>
                         @* Этап 5.2 (FR-ADM-01): временный пароль, отключение и возврат; запись справочника не меняется. *@
@@ -71,15 +94,19 @@ else
         <label class="form-label">Временный пароль</label>
         <InputText class="form-control" type="password" @bind-Value="model.Password" />
     </div>
-    <div class="mb-3">
-        <label class="form-label">Роль</label>
-        <InputSelect class="form-select" @bind-Value="model.Role">
-            @foreach (var (roleCode, roleTitle) in Roles)
-            {
-                <option value="@roleCode">@roleTitle</option>
-            }
-        </InputSelect>
-    </div>
+    <fieldset class="mb-3">
+        <legend class="form-label">Роли</legend>
+        @foreach (var (roleCode, roleTitle) in Roles)
+        {
+            var boxId = $"new-role-{roleCode}";
+            <div class="form-check form-check-inline">
+                <input class="form-check-input" type="checkbox" id="@boxId" checked="@model.Roles.Contains(roleCode)"
+                       @onchange="e => Toggle(model.Roles, roleCode, e.Value is true)" />
+                <label class="form-check-label" for="@boxId">@roleTitle</label>
+            </div>
+        }
+        <div class="form-text">Можно отметить несколько: заведующий кафедрой — и преподаватель, и утверждающий.</div>
+    </fieldset>
 
     <fieldset class="mb-3">
         <legend class="form-label">Запись справочника сотрудников (необязательно)</legend>
@@ -179,11 +206,16 @@ else
 
     private async Task CreateAsync()
     {
+        if (model.Roles.Count == 0)
+        {
+            (messageIsError, message) = (true, "Отметьте хотя бы одну роль.");
+            return;
+        }
         try
         {
             var response = await Http.PostAsJsonAsync("api/admin/users", new
             {
-                model.Email, model.FullName, model.Password, model.Role, DirectoryUserId = selected?.Id
+                model.Email, model.FullName, model.Password, Roles = model.Roles.ToArray(), DirectoryUserId = selected?.Id
             });
             if (response.IsSuccessStatusCode)
             {
@@ -208,6 +240,24 @@ else
         {
             e.Redirect();
         }
+    }
+
+    private Guid? rolesFor;
+    private HashSet<string> editedRoles = [];
+
+    private void EditRoles(Account account) => (rolesFor, editedRoles) = (account.Id, [.. account.Roles]);
+
+    private static void Toggle(HashSet<string> roles, string role, bool on)
+    {
+        if (on) roles.Add(role);
+        else roles.Remove(role);
+    }
+
+    private async Task SetRolesAsync(Account account)
+    {
+        await RunAsync(() => Http.PutAsJsonAsync($"api/admin/users/{account.Id}/roles", new { roles = editedRoles }),
+            $"Роли {account.Email} изменены. У вошедшего пользователя они обновятся при следующем входе.");
+        if (!messageIsError) rolesFor = null;
     }
 
     private Guid? passwordFor;
@@ -247,8 +297,9 @@ else
         }
     }
 
-    private static string RoleTitle(string? role) =>
-        Roles.FirstOrDefault(r => r.Code == role) is { Title: { } title } ? title : role ?? "—";
+    // Названия ролей — в порядке списка ролей системы.
+    private static string RolesTitle(IReadOnlyCollection<string> roles) =>
+        roles.Count == 0 ? "—" : string.Join(", ", Roles.Where(r => roles.Contains(r.Code)).Select(r => r.Title));
 
     private static string Describe(DirectoryRecord r) =>
         string.Join(", ", new[] { r.ShortName, r.Position, r.Department }.Where(s => !string.IsNullOrEmpty(s)))
@@ -265,11 +316,11 @@ else
         [Required(ErrorMessage = "Введите пароль"), MinLength(8, ErrorMessage = "Не короче 8 символов")]
         public string Password { get; set; } = "";
 
-        public string Role { get; set; } = "teacher";
+        public HashSet<string> Roles { get; } = ["teacher"];
     }
 
     private sealed record DirectoryRecord(
         Guid Id, string ShortName, string? FullName, string? Position, string? OfficialDesignation, string? Department, bool IsActive);
-    private sealed record Account(Guid Id, string Email, string FullName, string? Role, DirectoryRecord? Directory, bool IsActive = true);
+    private sealed record Account(Guid Id, string Email, string FullName, List<string> Roles, DirectoryRecord? Directory, bool IsActive = true);
     private sealed record Problem(string? Title, string? Detail, Dictionary<string, string[]>? Errors);
 }

@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Components.WebAssembly.Authentication;
 using Microsoft.AspNetCore.Components.WebAssembly.Hosting;
 using Radzen;
 using RpdFos.Web;
+using RpdFos.Web.Auth;
 
 var builder = WebAssemblyHostBuilder.CreateDefault(args);
 builder.RootComponents.Add<App>("#app");
@@ -27,9 +28,9 @@ builder.Services.AddOidcAuthentication(options =>
     // (см. комментарий в примере OpenIddict «Balosar»).
     options.ProviderOptions.ResponseMode = "query";
 
-    // Роли — в утверждении «role» (так их выдаёт сервер).
+    // Роли — в утверждении «role» (так их выдаёт сервер); несколько ролей приходят массивом — его разбирает фабрика.
     options.ProviderOptions.DefaultScopes.Add("roles");
     options.UserOptions.RoleClaim = "role";
-});
+}).AddAccountClaimsPrincipalFactory<RolesClaimsPrincipalFactory>();
 
 await builder.Build().RunAsync();

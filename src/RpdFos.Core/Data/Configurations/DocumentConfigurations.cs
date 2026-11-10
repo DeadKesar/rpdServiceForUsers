@@ -116,3 +116,32 @@ internal sealed class DocumentCommentConfiguration : IEntityTypeConfiguration<Do
         e.HasOne<Employee>().WithMany().HasForeignKey(x => x.ResolvedBy).OnDelete(DeleteBehavior.Restrict);
     }
 }
+
+// Электронное согласование (раздел 2.4 ВКР): ключ и индексы — как в проекте. Ограничения держат правила отметок:
+// отметка — только у назначенного, время — у согласия, комментарий — у возврата.
+internal sealed class DocumentSignatureConfiguration : IEntityTypeConfiguration<DocumentSignature>
+{
+    public void Configure(EntityTypeBuilder<DocumentSignature> e)
+    {
+        var statuses = string.Join(", ", SignatureStatuses.All.Select(s => $"'{s}'"));
+
+        e.ToTable("document_signatures", t =>
+        {
+            t.HasCheckConstraint("ck_document_signatures_status", $"status IN ({statuses})");
+            t.HasCheckConstraint("ck_document_signatures_signatory",
+                $"status = '{SignatureStatuses.Pending}' OR resolved_user_id IS NOT NULL");
+            t.HasCheckConstraint("ck_document_signatures_approved",
+                $"(status = '{SignatureStatuses.Approved}') = (approved_at IS NOT NULL)");
+            t.HasCheckConstraint("ck_document_signatures_rejected",
+                $"status <> '{SignatureStatuses.Rejected}' OR comment IS NOT NULL");
+        });
+        e.Property(x => x.Role).HasMaxLength(50);
+        e.Property(x => x.Resolver).HasMaxLength(255);
+        e.Property(x => x.Status).HasMaxLength(20);
+        e.HasIndex(x => new { x.DocumentId, x.Role }).IsUnique();
+        e.HasIndex(x => new { x.DocumentId, x.Status });
+        e.HasIndex(x => new { x.ResolvedUserId, x.Status });
+        e.HasOne<Document>().WithMany().HasForeignKey(x => x.DocumentId).OnDelete(DeleteBehavior.Cascade);
+        e.HasOne<Employee>().WithMany().HasForeignKey(x => x.ResolvedUserId).OnDelete(DeleteBehavior.Restrict);
+    }
+}

@@ -1308,6 +1308,76 @@ namespace RpdFos.Core.Migrations
                         });
                 });
 
+            modelBuilder.Entity("RpdFos.Core.Data.Entities.DocumentSignature", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset?>("ApprovedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("approved_at");
+
+                    b.Property<string>("Comment")
+                        .HasColumnType("text")
+                        .HasColumnName("comment");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid>("DocumentId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("document_id");
+
+                    b.Property<Guid?>("ResolvedUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("resolved_user_id");
+
+                    b.Property<string>("Resolver")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("resolver");
+
+                    b.Property<string>("Role")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("role");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("status");
+
+                    b.HasKey("Id")
+                        .HasName("pk_document_signatures");
+
+                    b.HasIndex("DocumentId", "Role")
+                        .IsUnique()
+                        .HasDatabaseName("ix_document_signatures_document_id_role");
+
+                    b.HasIndex("DocumentId", "Status")
+                        .HasDatabaseName("ix_document_signatures_document_id_status");
+
+                    b.HasIndex("ResolvedUserId", "Status")
+                        .HasDatabaseName("ix_document_signatures_resolved_user_id_status");
+
+                    b.ToTable("document_signatures", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_document_signatures_approved", "(status = 'approved') = (approved_at IS NOT NULL)");
+
+                            t.HasCheckConstraint("ck_document_signatures_rejected", "status <> 'rejected' OR comment IS NOT NULL");
+
+                            t.HasCheckConstraint("ck_document_signatures_signatory", "status = 'pending' OR resolved_user_id IS NOT NULL");
+
+                            t.HasCheckConstraint("ck_document_signatures_status", "status IN ('pending', 'approved', 'rejected')");
+                        });
+                });
+
             modelBuilder.Entity("RpdFos.Core.Data.Entities.DocumentStatusChange", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1952,6 +2022,57 @@ namespace RpdFos.Core.Migrations
                         });
                 });
 
+            modelBuilder.Entity("RpdFos.Core.Data.Entities.Notification", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid?>("DocumentId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("document_id");
+
+                    b.Property<DateTimeOffset?>("EmailedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("emailed_at");
+
+                    b.Property<string>("EventType")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("event_type");
+
+                    b.Property<string>("Payload")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("payload");
+
+                    b.Property<DateTimeOffset?>("ReadAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("read_at");
+
+                    b.Property<Guid>("RecipientId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("recipient_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_notifications");
+
+                    b.HasIndex("DocumentId")
+                        .HasDatabaseName("ix_notifications_document_id");
+
+                    b.HasIndex("RecipientId", "CreatedAt")
+                        .HasDatabaseName("ix_notifications_recipient_id_created_at")
+                        .HasFilter("read_at IS NULL");
+
+                    b.ToTable("notifications", (string)null);
+                });
+
             modelBuilder.Entity("RpdFos.Core.Data.Entities.ParserRun", b =>
                 {
                     b.Property<Guid>("Id")
@@ -2479,6 +2600,22 @@ namespace RpdFos.Core.Migrations
                         .HasConstraintName("fk_document_hours_documents_document_id");
                 });
 
+            modelBuilder.Entity("RpdFos.Core.Data.Entities.DocumentSignature", b =>
+                {
+                    b.HasOne("RpdFos.Core.Data.Entities.Document", null)
+                        .WithMany()
+                        .HasForeignKey("DocumentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_document_signatures_documents_document_id");
+
+                    b.HasOne("RpdFos.Core.Data.Entities.Employee", null)
+                        .WithMany()
+                        .HasForeignKey("ResolvedUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_document_signatures_employees_resolved_user_id");
+                });
+
             modelBuilder.Entity("RpdFos.Core.Data.Entities.DocumentStatusChange", b =>
                 {
                     b.HasOne("RpdFos.Core.Data.Entities.Employee", null)
@@ -2606,6 +2743,22 @@ namespace RpdFos.Core.Migrations
                         .HasForeignKey("ResolvedBy")
                         .OnDelete(DeleteBehavior.Restrict)
                         .HasConstraintName("fk_matrix_unmatched_rows_users_resolved_by");
+                });
+
+            modelBuilder.Entity("RpdFos.Core.Data.Entities.Notification", b =>
+                {
+                    b.HasOne("RpdFos.Core.Data.Entities.Document", null)
+                        .WithMany()
+                        .HasForeignKey("DocumentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .HasConstraintName("fk_notifications_documents_document_id");
+
+                    b.HasOne("RpdFos.Core.Data.Entities.Employee", null)
+                        .WithMany()
+                        .HasForeignKey("RecipientId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_notifications_users_recipient_id");
                 });
 
             modelBuilder.Entity("RpdFos.Core.Data.Entities.ParserRun", b =>

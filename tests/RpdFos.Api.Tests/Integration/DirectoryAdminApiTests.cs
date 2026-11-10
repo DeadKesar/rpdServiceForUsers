@@ -151,7 +151,7 @@ public class DirectoryAdminApiTests(DatabaseFixture app)
         var (admin, _) = await DocumentData.UserAsync(app, AppRoles.Admin);
         var email = $"user-{Guid.NewGuid():N}@example.test";
         var created = await admin.PostAsJsonAsync("/api/admin/users",
-            new CreateUserRequest(email, "Сотрудник Обезличенный", "Start#2026a", AppRoles.Teacher));
+            new CreateUserRequest(email, "Сотрудник Обезличенный", "Start#2026a", [AppRoles.Teacher]));
         var user = (await created.Content.ReadFromJsonAsync<UserItem>())!;
 
         var weak = await admin.PostAsJsonAsync($"/api/admin/users/{user.Id}/password", new PasswordRequest("123"));

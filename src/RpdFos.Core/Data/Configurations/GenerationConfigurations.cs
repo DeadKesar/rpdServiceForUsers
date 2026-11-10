@@ -58,3 +58,17 @@ internal sealed class AuditLogConfiguration : IEntityTypeConfiguration<AuditLogE
         e.HasOne<Employee>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Restrict);
     }
 }
+
+// Уведомления (правка по ревизии архитектуры, FR-REV-08): частичный индекс обслуживает счётчик непрочитанных.
+internal sealed class NotificationConfiguration : IEntityTypeConfiguration<Notification>
+{
+    public void Configure(EntityTypeBuilder<Notification> e)
+    {
+        e.ToTable("notifications");
+        e.Property(x => x.EventType).HasMaxLength(50);
+        e.Property(x => x.Payload).HasColumnType("jsonb");
+        e.HasIndex(x => new { x.RecipientId, x.CreatedAt }).HasFilter("read_at IS NULL");
+        e.HasOne<Employee>().WithMany().HasForeignKey(x => x.RecipientId).OnDelete(DeleteBehavior.Restrict);
+        e.HasOne<Document>().WithMany().HasForeignKey(x => x.DocumentId).OnDelete(DeleteBehavior.Cascade);
+    }
+}

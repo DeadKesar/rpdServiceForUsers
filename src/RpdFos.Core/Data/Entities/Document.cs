@@ -112,6 +112,34 @@ public class Document : IVersioned
         return Move(DocumentStatuses.Accepted);
     }
 
+    /// <summary>
+    /// Старт согласования: принятый документ уходит согласующим, когда подписанты всех электронных мест назначены
+    /// (UC-07, шаг 3). Возвращает прежний статус.
+    /// </summary>
+    public string StartApproval()
+    {
+        Require(DocumentTransitions.CanStartApproval(Status), DocumentTransitions.StartApprovalAction);
+        return Move(DocumentStatuses.Approval);
+    }
+
+    /// <summary>Согласие отметили все электронные согласующие (UC-08). Возвращает прежний статус.</summary>
+    public string Approve(DateTimeOffset now)
+    {
+        Require(DocumentTransitions.CanSign(Status), DocumentTransitions.ApproveAction);
+        ApprovedAt = now;
+        return Move(DocumentStatuses.Approved);
+    }
+
+    /// <summary>
+    /// Возврат с согласования — методисту, в «На проверке»: он решает, исправить самому или вернуть автору (UC-09).
+    /// Возвращает прежний статус.
+    /// </summary>
+    public string ReturnFromApproval()
+    {
+        Require(DocumentTransitions.CanSign(Status), DocumentTransitions.RejectAction);
+        return Move(DocumentStatuses.UnderReview);
+    }
+
     /// <summary>Мягкое удаление: статус и флаг — вместе. Возвращает прежний статус.</summary>
     public string Delete(DateTimeOffset now)
     {
@@ -150,7 +178,8 @@ public static class DocumentTransitions
     public const string EditAction = "изменить", SaveAction = "сохранить", DeleteAction = "удалить",
         SubmitAction = "отправить на проверку", ReturnAction = "вернуть на доработку", AcceptAction = "принять",
         CommentAction = "оставить замечание", ResolveAction = "отметить замечание разрешённым",
-        TakeAction = "взять на проверку";
+        TakeAction = "взять на проверку", StartApprovalAction = "отправить на согласование", ApproveAction = "согласовать",
+        RejectAction = "вернуть с согласования", AssignAction = "назначить подписанта";
 
     /// <summary>
     /// Автор правит черновик, сохранённый черновик и документ на доработке; на проверке и после приёма документ
@@ -213,6 +242,27 @@ public static class DocumentTransitions
     /// </summary>
     public static bool CanResolveComment(string status, bool isAuthor, bool isReviewer, bool ownComment) =>
         isAuthor && CanResolveComments(status) || isReviewer && ownComment && CanReview(status);
+
+    /// <summary>Согласование стартует из «Принят»: при приёме — само, после ручного назначения — кнопкой (этап 6, B2).</summary>
+    public static bool CanStartApproval(string status) => status is DocumentStatuses.Accepted;
+
+    /// <summary>Согласующие отмечают согласие или возвращают документ, пока он на согласовании (UC-08, UC-09).</summary>
+    public static bool CanSign(string status) => status is DocumentStatuses.Approval;
+
+    /// <summary>
+    /// Подписанта назначают и заменяют, пока его отметки ждут: в «Принят» — тех, кого не нашло правило, на
+    /// согласовании — отсутствующего (FR-REV-13).
+    /// </summary>
+    public static bool CanAssignSignatory(string status) => status is DocumentStatuses.Accepted or DocumentStatuses.Approval;
+
+    /// <summary>
+    /// Печатную форму формирует автор — в любом статусе, методист — с проверки и до согласованного документа,
+    /// согласующий — на согласовании и после него: предварительный PDF он формирует сам (этап 6, B2–B3).
+    /// </summary>
+    public static bool CanPrint(string status, bool isAuthor, bool isReviewer, bool isSignatory) =>
+        isAuthor
+        || isReviewer && status is DocumentStatuses.UnderReview or DocumentStatuses.Accepted or DocumentStatuses.Approval or DocumentStatuses.Approved
+        || isSignatory && status is DocumentStatuses.Approval or DocumentStatuses.Approved;
 
     public static string Refusal(string status, string action) =>
         $"Документ в статусе «{DocumentStatuses.Title(status)}» нельзя {action}.";

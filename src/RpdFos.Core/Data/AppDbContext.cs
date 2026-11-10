@@ -17,6 +17,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<DocumentCompetenceLink> DocumentCompetenceLinks => Set<DocumentCompetenceLink>();
     public DbSet<DocumentStatusChange> DocumentStatusHistory => Set<DocumentStatusChange>();
     public DbSet<DocumentComment> DocumentComments => Set<DocumentComment>();
+    public DbSet<DocumentSignature> DocumentSignatures => Set<DocumentSignature>();
     public DbSet<GenerationTask> GenerationTasks => Set<GenerationTask>();
     public DbSet<GeneratedFile> GeneratedFiles => Set<GeneratedFile>();
 
@@ -40,6 +41,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<ParserRun> ParserRuns => Set<ParserRun>();
     public DbSet<DirectoryImport> DirectoryImports => Set<DirectoryImport>();
     public DbSet<AuditLogEntry> AuditLog => Set<AuditLogEntry>();
+    public DbSet<Notification> Notifications => Set<Notification>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {

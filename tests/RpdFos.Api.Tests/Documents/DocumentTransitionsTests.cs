@@ -92,6 +92,83 @@ public class DocumentTransitionsTests
     }
 
     [Fact]
+    public void Approval_cycle_moves_through_statuses()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var document = new Document { Status = S.UnderReview };
+
+        document.Accept();
+        Assert.Equal(S.Accepted, document.StartApproval());
+        // Возврат с согласования — методисту в «На проверке», а не автору (UC-09).
+        Assert.Equal(S.Approval, document.ReturnFromApproval());
+        Assert.Equal(S.UnderReview, document.Status);
+
+        document.Accept();
+        document.StartApproval();
+        Assert.Equal(S.Approval, document.Approve(now));
+        Assert.Equal((S.Approved, now), (document.Status, document.ApprovedAt));
+    }
+
+    [Theory]
+    [InlineData(S.Draft, false, false, false, false)]
+    [InlineData(S.UnderReview, false, false, false, true)]
+    [InlineData(S.Accepted, true, false, true, true)]
+    [InlineData(S.Approval, false, true, true, false)]
+    [InlineData(S.Approved, false, false, false, false)]
+    public void Approval_actions_by_status(string status, bool start, bool sign, bool assign, bool correctPlan)
+    {
+        // В «Принят» ждут назначения и исправляют поля плана; на согласовании исправлений нет; согласованный закрыт.
+        Assert.Equal(start, DocumentTransitions.CanStartApproval(status));
+        Assert.Equal(sign, DocumentTransitions.CanSign(status));
+        Assert.Equal(assign, DocumentTransitions.CanAssignSignatory(status));
+        Assert.Equal(correctPlan, DocumentTransitions.CanCorrectPlanFields(status));
+
+        var document = new Document { Status = status };
+        if (!start) Assert.Throws<InvalidOperationException>(() => document.StartApproval());
+        if (!sign)
+        {
+            Assert.Throws<InvalidOperationException>(() => document.Approve(DateTimeOffset.UtcNow));
+            Assert.Throws<InvalidOperationException>(() => document.ReturnFromApproval());
+        }
+    }
+
+    [Theory]
+    [InlineData(S.Draft, false, false)]
+    [InlineData(S.UnderReview, true, false)]
+    [InlineData(S.Accepted, true, false)]
+    [InlineData(S.Approval, true, true)]
+    [InlineData(S.Approved, true, true)]
+    public void Printing_by_status_and_role(string status, bool reviewer, bool signatory)
+    {
+        // Автор печатает всегда; методист — с проверки; согласующий — на согласовании и после; остальные — нет.
+        Assert.True(DocumentTransitions.CanPrint(status, isAuthor: true, isReviewer: false, isSignatory: false));
+        Assert.Equal(reviewer, DocumentTransitions.CanPrint(status, isAuthor: false, isReviewer: true, isSignatory: false));
+        Assert.Equal(signatory, DocumentTransitions.CanPrint(status, isAuthor: false, isReviewer: false, isSignatory: true));
+        Assert.False(DocumentTransitions.CanPrint(status, isAuthor: false, isReviewer: false, isSignatory: false));
+    }
+
+    [Fact]
+    public void Signature_is_marked_once_and_reassigned_only_while_pending()
+    {
+        var (first, second) = (Guid.NewGuid(), Guid.NewGuid());
+        var now = DateTimeOffset.UtcNow;
+        var row = new DocumentSignature { Role = SignatoryRoles.UmuHead };
+        row.Reset("lookup.role:umu_head", first, now);
+
+        row.Assign(second);
+        row.Approve(now);
+        Assert.Equal((second, SignatureStatuses.Approved, now), (row.ResolvedUserId, row.Status, row.ApprovedAt));
+        Assert.Throws<InvalidOperationException>(() => row.Assign(first));
+        Assert.Throws<InvalidOperationException>(() => row.Reject("Поздно"));
+
+        // Новый круг: строка снова ждёт отметки, прежняя отметка снята.
+        row.Reset("lookup.role:umu_head", first, now.AddDays(1));
+        Assert.Equal((first, SignatureStatuses.Pending, null, null), (row.ResolvedUserId, row.Status, row.ApprovedAt, row.Comment));
+        row.Reject("Нет литературы");
+        Assert.Equal((SignatureStatuses.Rejected, "Нет литературы"), (row.Status, row.Comment));
+    }
+
+    [Fact]
     public void Comment_is_resolved_once()
     {
         var comment = new DocumentComment();

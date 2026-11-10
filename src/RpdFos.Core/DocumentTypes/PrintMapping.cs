@@ -155,7 +155,7 @@ public static partial class PrintMappingValidator
 
     /// <summary>
     /// Ошибки листа согласования: только известные категории подписантов, правила определения и размещения,
-    /// без повторов мест.
+    /// без повторов мест. У электронных мест не повторяется и категория: она — ключ строки согласования документа.
     /// </summary>
     public static IReadOnlyList<string> ValidateSignatures(IReadOnlyList<SignatureSeat> signatures)
     {
@@ -171,6 +171,8 @@ public static partial class PrintMappingValidator
         }
         foreach (var duplicate in signatures.GroupBy(s => s.Id).Where(g => g.Count() > 1))
             errors.Add($"Место {duplicate.Key} повторяется");
+        foreach (var duplicate in signatures.Where(s => s.Electronic).GroupBy(s => s.Role).Where(g => g.Count() > 1))
+            errors.Add($"Категория {duplicate.Key} повторяется у электронных мест");
         return errors;
     }
 }

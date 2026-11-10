@@ -32,6 +32,14 @@ public static class AuditEvents
     /// <summary>Автор удалил свой черновик (этап 6, A5): <c>{ "title", "status" }</c>.</summary>
     public const string DocumentDeleted = "document.deleted";
 
+    /// <summary>
+    /// Согласование (этап 6, часть B): старт круга — <c>{ "seats": [{ "role", "resolver", "signatory" }] }</c>, отметки
+    /// согласующих — <c>{ "role" }</c> и <c>{ "role", "comment" }</c>, назначение или замена подписанта —
+    /// <c>{ "role", "before", "after" }</c>. По ним виден и прежний круг: строки согласования новый круг сбрасывает.
+    /// </summary>
+    public const string ApprovalStarted = "document.approval_started", SignatureApproved = "document.signature_approved",
+        SignatureRejected = "document.signature_rejected", SignatoryAssigned = "document.signatory_assigned";
+
     /// <summary>Справочник сотрудников со страницы администратора (этап 5.2): <c>{ "before", "after" }</c>.</summary>
     public const string EmployeeCreated = "employee.created", EmployeeUpdated = "employee.updated",
         EmployeeDeactivated = "employee.deactivated", EmployeeReactivated = "employee.reactivated",

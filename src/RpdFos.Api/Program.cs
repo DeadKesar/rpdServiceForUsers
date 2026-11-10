@@ -90,6 +90,9 @@ builder.Services.AddAuthorizationBuilder()
     .AddPolicy(Policies.Reviewers, p => p
         .AddAuthenticationSchemes(OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme)
         .RequireRole(AppRoles.Methodist))
+    .AddPolicy(Policies.Approvers, p => p
+        .AddAuthenticationSchemes(OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme)
+        .RequireRole(AppRoles.Approver))
     .AddPolicy(Policies.JobsDashboard, p => p
         .AddAuthenticationSchemes(IdentityConstants.ApplicationScheme)
         .RequireRole(AppRoles.Admin));

@@ -12,6 +12,7 @@ namespace RpdFos.Api.Features.Users;
 /// <summary>
 /// Срез «Пользователи»: учётные записи создаёт Администратор, самостоятельной регистрации нет.
 /// У каждой учётной записи — запись в справочнике сотрудников (новая или существующая, из файла должностей).
+/// Ролей у учётной записи может быть несколько (этап 6, B1): заведующий кафедрой — и преподаватель, и согласующий.
 /// </summary>
 public class UsersModule : ICarterModule
 {
@@ -34,23 +35,20 @@ public class UsersModule : ICarterModule
             var recordBySubject = (await DirectoryRecordItem.Project(linked, db).ToListAsync(ct))
                 .ToDictionary(r => subjectOf[r.Id]);
 
-            // В прототипе у пользователя одна роль.
-            return accounts.Select(a => new AccountItem(a.Id, a.Email ?? "", a.FullName, roles[a.Id].FirstOrDefault(),
+            return accounts.Select(a => new AccountItem(a.Id, a.Email ?? "", a.FullName, Ordered(roles[a.Id]),
                 recordBySubject.GetValueOrDefault(a.Id.ToString()), a.LockoutEnd != DateTimeOffset.MaxValue)).ToList();
         });
 
         g.MapPost("/{id:guid}/password", SetPassword);
+        g.MapPut("/{id:guid}/roles", SetRoles);
         g.MapPost("/{id:guid}/deactivate", (Guid id, HttpContext http, UserManager<AppUser> users) => SetEnabled(id, false, http, users));
         g.MapPost("/{id:guid}/activate", (Guid id, HttpContext http, UserManager<AppUser> users) => SetEnabled(id, true, http, users));
 
         g.MapPost("/", async (CreateUserRequest rq, UserManager<AppUser> users, DirectoryAccounts directory,
             AppDbContext db, CancellationToken ct) =>
         {
-            if (!AppRoles.All.Contains(rq.Role))
-                return Results.Problem(
-                    statusCode: StatusCodes.Status422UnprocessableEntity,
-                    title: "Неизвестная роль",
-                    detail: $"Роль «{rq.Role}» не существует.");
+            if (RolesProblem(rq.Roles) is { } wrong) return wrong;
+            var newRoles = Ordered(rq.Roles!);
 
             // Учётная запись, роль и запись справочника — вместе или ничего: без commit транзакция откатится,
             // и учётная запись без роли или без записи справочника не останется.
@@ -61,7 +59,7 @@ public class UsersModule : ICarterModule
             if (!created.Succeeded)
                 return ValidationProblem(created);
 
-            var assigned = await users.AddToRoleAsync(user, rq.Role);
+            var assigned = await users.AddToRolesAsync(user, newRoles);
             if (!assigned.Succeeded)
                 return ValidationProblem(assigned);
 
@@ -81,8 +79,46 @@ public class UsersModule : ICarterModule
 
             await tx.CommitAsync(ct);
             return Results.Created($"/api/admin/users/{user.Id}",
-                new UserItem(user.Id, rq.Email, rq.FullName, rq.Role, employee!.Id));
+                new UserItem(user.Id, rq.Email, rq.FullName, newRoles, employee!.Id));
         });
+    }
+
+    // Роли — в порядке списка ролей системы, без повторов: порядок выбора флажков значения не имеет.
+    private static string[] Ordered(IEnumerable<string?> roles) => AppRoles.All.Where(roles.Contains).ToArray();
+
+    private static IResult? RolesProblem(IReadOnlyCollection<string>? roles) =>
+        roles is null || roles.Count == 0
+            ? Results.Problem(statusCode: StatusCodes.Status422UnprocessableEntity, title: "Не выбрана роль",
+                detail: "У учётной записи должна быть хотя бы одна роль.")
+            : roles.FirstOrDefault(r => !AppRoles.All.Contains(r)) is { } unknown
+                ? Results.Problem(statusCode: StatusCodes.Status422UnprocessableEntity, title: "Неизвестная роль",
+                    detail: $"Роль «{unknown}» не существует.")
+                : null;
+
+    /// <summary>
+    /// Роли учётной записи меняет администратор (FR-ADM-01): новый набор заменяет прежний. Снять с себя роль
+    /// администратора нельзя. У вошедшего пользователя роли обновятся при следующем входе: они записаны в токене.
+    /// </summary>
+    private static async Task<IResult> SetRoles(Guid id, RolesRequest rq, HttpContext http, UserManager<AppUser> users, AppDbContext db,
+        CancellationToken ct)
+    {
+        var user = await users.FindByIdAsync(id.ToString());
+        if (user is null) return AccountNotFound();
+        if (RolesProblem(rq.Roles) is { } wrong) return wrong;
+        var wanted = Ordered(rq.Roles!);
+        if (!wanted.Contains(AppRoles.Admin) && http.User.FindFirst(DirectoryAccounts.SubjectClaim)?.Value == user.Id.ToString())
+            return Results.Problem(statusCode: StatusCodes.Status409Conflict, title: "Нельзя снять с себя роль администратора",
+                detail: "Администратор потерял бы доступ к странице пользователей.");
+
+        // Снять и добавить — вместе или ничего: учётная запись не останется без ролей.
+        await using var tx = await db.Database.BeginTransactionAsync(ct);
+        var current = await users.GetRolesAsync(user);
+        var removed = await users.RemoveFromRolesAsync(user, current.Except(wanted));
+        if (!removed.Succeeded) return ValidationProblem(removed);
+        var added = await users.AddToRolesAsync(user, wanted.Except(current));
+        if (!added.Succeeded) return ValidationProblem(added);
+        await tx.CommitAsync(ct);
+        return Results.Ok(wanted);
     }
 
     // Учётная запись отключена администратором — бессрочная блокировка Identity (этап 5.2, FR-ADM-01).
@@ -136,13 +172,17 @@ public class UsersModule : ICarterModule
 /// <paramref name="DirectoryUserId"/> — необязательный: привязать учётную запись к существующей записи
 /// справочника сотрудников (например, загруженной из файла должностей) вместо создания новой.
 /// </summary>
-public record CreateUserRequest(string Email, string FullName, string Password, string Role, Guid? DirectoryUserId = null);
+public record CreateUserRequest(string Email, string FullName, string Password, string[]? Roles, Guid? DirectoryUserId = null);
 
-public record UserItem(Guid Id, string Email, string FullName, string Role, Guid DirectoryUserId);
+public record UserItem(Guid Id, string Email, string FullName, IReadOnlyList<string> Roles, Guid DirectoryUserId);
 
-/// <summary>Учётная запись: роль и связанная запись справочника сотрудников (null — не связана).</summary>
+/// <summary>Учётная запись: роли и связанная запись справочника сотрудников (null — не связана).</summary>
 /// <param name="IsActive">Учётная запись не отключена администратором (этап 5.2).</param>
-public record AccountItem(Guid Id, string Email, string FullName, string? Role, DirectoryRecordItem? Directory, bool IsActive = true);
+public record AccountItem(
+    Guid Id, string Email, string FullName, IReadOnlyList<string> Roles, DirectoryRecordItem? Directory, bool IsActive = true);
+
+/// <summary>Новый набор ролей учётной записи.</summary>
+public record RolesRequest(string[]? Roles);
 
 /// <summary>Новый временный пароль учётной записи.</summary>
 public record PasswordRequest(string? Password);

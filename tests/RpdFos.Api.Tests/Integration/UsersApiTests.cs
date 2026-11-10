@@ -27,7 +27,7 @@ public class UsersApiTests(DatabaseFixture app)
     public async Task New_account_gets_its_own_directory_record()
     {
         var email = NewEmail();
-        var response = await CreateAsync(new CreateUserRequest(email, "Петров Пётр Петрович", Password, AppRoles.Teacher));
+        var response = await CreateAsync(new CreateUserRequest(email, "Петров Пётр Петрович", Password, [AppRoles.Teacher]));
 
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         var item = (await response.Content.ReadFromJsonAsync<UserItem>())!;
@@ -55,7 +55,7 @@ public class UsersApiTests(DatabaseFixture app)
         });
 
         var email = NewEmail();
-        var response = await CreateAsync(new CreateUserRequest(email, "Сидоров Семён Семёнович", Password, AppRoles.Teacher, record.Id));
+        var response = await CreateAsync(new CreateUserRequest(email, "Сидоров Семён Семёнович", Password, [AppRoles.Teacher], record.Id));
 
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         var item = (await response.Content.ReadFromJsonAsync<UserItem>())!;
@@ -71,7 +71,7 @@ public class UsersApiTests(DatabaseFixture app)
 
         // Вторую учётную запись к той же записи не привязать — и сама учётная запись не остаётся.
         var otherEmail = NewEmail();
-        var again = await CreateAsync(new CreateUserRequest(otherEmail, "Сидоров Семён Семёнович", Password, AppRoles.Teacher, record.Id));
+        var again = await CreateAsync(new CreateUserRequest(otherEmail, "Сидоров Семён Семёнович", Password, [AppRoles.Teacher], record.Id));
         Assert.Equal(HttpStatusCode.Conflict, again.StatusCode);
         await app.WithDbAsync(async db => Assert.False(await db.Users.AnyAsync(u => u.Email == otherEmail)));
     }
@@ -80,7 +80,7 @@ public class UsersApiTests(DatabaseFixture app)
     public async Task Unknown_directory_record_is_404_and_account_is_not_created()
     {
         var email = NewEmail();
-        var response = await CreateAsync(new CreateUserRequest(email, "Иванов Иван Иванович", Password, AppRoles.Teacher, Guid.NewGuid()));
+        var response = await CreateAsync(new CreateUserRequest(email, "Иванов Иван Иванович", Password, [AppRoles.Teacher], Guid.NewGuid()));
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
         await app.WithDbAsync(async db => Assert.False(await db.Users.AnyAsync(u => u.Email == email)));
@@ -90,14 +90,59 @@ public class UsersApiTests(DatabaseFixture app)
     public async Task Accounts_list_shows_role_and_directory_record()
     {
         var email = NewEmail();
-        var created = (await (await CreateAsync(new CreateUserRequest(email, "Орлов Олег Олегович", Password, AppRoles.Methodist)))
+        var created = (await (await CreateAsync(new CreateUserRequest(email, "Орлов Олег Олегович", Password, [AppRoles.Methodist])))
             .Content.ReadFromJsonAsync<UserItem>())!;
 
         var list = await app.CreateClientFor(AppRoles.Admin).GetFromJsonAsync<List<AccountItem>>("/api/admin/users");
 
         var item = Assert.Single(list!, a => a.Email == email);
-        Assert.Equal((created.Id, "Орлов Олег Олегович", AppRoles.Methodist), (item.Id, item.FullName, item.Role));
+        Assert.Equal((created.Id, "Орлов Олег Олегович", AppRoles.Methodist), (item.Id, item.FullName, Assert.Single(item.Roles)));
         Assert.Equal((created.DirectoryUserId, "Орлов О. О."), (item.Directory!.Id, item.Directory.ShortName));
+    }
+
+    [Fact]
+    public async Task Account_gets_several_roles_and_admin_changes_them()
+    {
+        // Заведующий кафедрой — и преподаватель, и согласующий (этап 6, B1).
+        var admin = app.CreateClientFor(AppRoles.Admin);
+        var email = NewEmail();
+        var created = (await (await CreateAsync(new CreateUserRequest(email, "Зимин Захар Захарович", Password,
+            [AppRoles.Approver, AppRoles.Teacher]))).Content.ReadFromJsonAsync<UserItem>())!;
+        // Порядок — как в списке ролей системы, а не как выбрали.
+        Assert.Equal([AppRoles.Teacher, AppRoles.Approver], created.Roles);
+
+        async Task<IReadOnlyList<string>> RolesAsync() =>
+            (await admin.GetFromJsonAsync<List<AccountItem>>("/api/admin/users"))!.Single(a => a.Id == created.Id).Roles;
+        Assert.Equal([AppRoles.Teacher, AppRoles.Approver], await RolesAsync());
+
+        var changed = await admin.PutAsJsonAsync($"/api/admin/users/{created.Id}/roles", new RolesRequest([AppRoles.Methodist, AppRoles.Approver]));
+        Assert.Equal(HttpStatusCode.OK, changed.StatusCode);
+        Assert.Equal([AppRoles.Methodist, AppRoles.Approver], await RolesAsync());
+
+        // Без ролей и с неизвестной ролью — 422, набор не меняется.
+        foreach (var wrong in new[] { new RolesRequest([]), new RolesRequest(null), new RolesRequest([AppRoles.Teacher, "dean"]) })
+            Assert.Equal(HttpStatusCode.UnprocessableEntity,
+                (await admin.PutAsJsonAsync($"/api/admin/users/{created.Id}/roles", wrong)).StatusCode);
+        Assert.Equal(HttpStatusCode.UnprocessableEntity,
+            (await CreateAsync(new CreateUserRequest(NewEmail(), "Зимин Захар Захарович", Password, []))).StatusCode);
+        Assert.Equal([AppRoles.Methodist, AppRoles.Approver], await RolesAsync());
+        Assert.Equal(HttpStatusCode.NotFound,
+            (await admin.PutAsJsonAsync($"/api/admin/users/{Guid.NewGuid()}/roles", new RolesRequest([AppRoles.Teacher]))).StatusCode);
+    }
+
+    [Fact]
+    public async Task Admin_cannot_drop_own_admin_role()
+    {
+        var created = (await (await CreateAsync(new CreateUserRequest(NewEmail(), "Юдин Юрий Юрьевич", Password,
+            [AppRoles.Admin, AppRoles.Teacher]))).Content.ReadFromJsonAsync<UserItem>())!;
+        var self = app.CreateClientFor(AppRoles.Admin, created.Id.ToString());
+
+        var refused = await self.PutAsJsonAsync($"/api/admin/users/{created.Id}/roles", new RolesRequest([AppRoles.Teacher]));
+        Assert.Equal(HttpStatusCode.Conflict, refused.StatusCode);
+        // Добавить себе роль, оставив администратора, можно.
+        var kept = await self.PutAsJsonAsync($"/api/admin/users/{created.Id}/roles", new RolesRequest([AppRoles.Admin, AppRoles.Approver]));
+        Assert.Equal(HttpStatusCode.OK, kept.StatusCode);
+        Assert.Equal([AppRoles.Approver, AppRoles.Admin], await kept.Content.ReadFromJsonAsync<List<string>>());
     }
 
     [Fact]
@@ -211,7 +256,7 @@ public class UsersApiTests(DatabaseFixture app)
     [Fact]
     public async Task Directory_record_of_current_user_is_found_by_sub()
     {
-        var response = await CreateAsync(new CreateUserRequest(NewEmail(), "Кузнецов Кирилл Кириллович", Password, AppRoles.Methodist));
+        var response = await CreateAsync(new CreateUserRequest(NewEmail(), "Кузнецов Кирилл Кириллович", Password, [AppRoles.Methodist]));
         var item = (await response.Content.ReadFromJsonAsync<UserItem>())!;
 
         await using var scope = app.Services.CreateAsyncScope();
