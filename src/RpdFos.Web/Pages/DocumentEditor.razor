@@ -18,7 +18,15 @@
 <NavigationLock ConfirmExternalNavigation="@dirty" OnBeforeInternalNavigation="OnBeforeNavigationAsync" />
 <ConfirmDialog @ref="confirm" />
 
-<p><a href="documents">← Мои документы</a></p>
+@* Согласующий приходит из своей очереди; «Мои документы» есть у тех, кто документы пишет или видит все. *@
+<p>
+    <AuthorizeView Roles="teacher,methodist,admin" Context="auth">
+        <a href="documents" class="me-3">← Мои документы</a>
+    </AuthorizeView>
+    <AuthorizeView Roles="approver" Context="auth">
+        <a href="approvals">← Согласование</a>
+    </AuthorizeView>
+</p>
 
 @if (details is null || context is null)
 {
@@ -67,6 +75,11 @@ else
         @if (details.Actions.TakeForReview)
         {
             <button class="btn btn-outline-success" disabled="@busy" @onclick="() => taking = !taking">Взять на проверку</button>
+        }
+        @if (details.Actions.Approve)
+        {
+            <button class="btn btn-success" disabled="@busy" @onclick="ApproveAsync">Согласовать</button>
+            <button class="btn btn-warning" disabled="@busy" @onclick="() => rejecting = !rejecting">Вернуть на проверку</button>
         }
         @if (details.Editable || details.Actions.CorrectPlan)
         {
@@ -130,6 +143,35 @@ else
                     <button class="btn btn-sm btn-success" disabled="@(busy || string.IsNullOrWhiteSpace(takeReason))" @onclick="TakeAsync">Взять</button>
                     <button class="btn btn-sm btn-link" @onclick="() => taking = false">Отмена</button>
                 </div>
+            </div>
+        </div>
+    }
+
+    @if (rejecting && details.Actions.Approve)
+    {
+        <div class="card mb-3">
+            <div class="card-body py-2">
+                <div class="small mb-1">
+                    Документ вернётся методисту в «На проверке». После нового приёма согласование начнётся заново — для всех согласующих.
+                </div>
+                <textarea class="form-control form-control-sm" rows="2" placeholder="Комментарий (обязательно): его увидит методист"
+                          @bind="rejectComment" @bind:event="oninput"></textarea>
+                <div class="mt-2 d-flex gap-2">
+                    <button class="btn btn-sm btn-warning" disabled="@(busy || string.IsNullOrWhiteSpace(rejectComment))" @onclick="RejectAsync">Вернуть</button>
+                    <button class="btn btn-sm btn-link" @onclick="() => rejecting = false">Отмена</button>
+                </div>
+            </div>
+        </div>
+    }
+
+    @* Возврат с согласования (UC-09) — не замечание к полю: методист решает сам, исправить или вернуть автору. *@
+    @if (details.Approval?.Returned is { } back)
+    {
+        <div class="alert alert-warning py-2">
+            <div class="fw-semibold">Возвращён с согласования</div>
+            <div>@back.By, @back.At.ToLocalTime().ToString("dd.MM.yyyy HH:mm"): @back.Comment</div>
+            <div class="small mt-1">
+                Исправьте документ сами или оставьте замечание к полю и верните его автору. Новый приём начнёт согласование заново.
             </div>
         </div>
     }
@@ -332,6 +374,8 @@ else
     private string? returnComment;
     private bool taking;
     private string? takeReason;
+    private bool rejecting;
+    private string? rejectComment;
     // Заголовок плашки конфликта: документ взял на проверку методист (этап 6, A1) — иначе «изменён в другой сессии».
     private string? conflictTitle;
     private const string TakenByReviewer = "Документ взят на проверку методистом";
@@ -386,6 +430,7 @@ else
         current = sections.Any(s => s.Key == current) ? current : sections.FirstOrDefault(s => s.Visible)?.Key;
         (dirty, conflict, copied, fieldErrors, returning, returnComment) = (false, false, null, [], false, null);
         (taking, takeReason, conflictTitle) = (false, null, null);
+        (rejecting, rejectComment) = (false, null);
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -459,6 +504,19 @@ else
         "approved" => $"{prefix}Документ согласован: электронных согласующих в шаблоне нет.",
         _ => $"{prefix}Согласование не запущено: не у всех мест найден подписант — назначьте согласующих в панели «Согласование»."
     };
+
+    // «Согласовать» (UC-08): отметку не отозвать — с подтверждением. Отметили все — документ «Согласован».
+    private async Task ApproveAsync()
+    {
+        if (!await confirm.AskAsync($"Согласовать документ «{details!.Document.DisciplineName}»?", "Согласование")) return;
+        await ChangeStatusAsync("approval/approve", new { }, "Согласие отмечено.", r => r.Status == "approved"
+            ? "Согласие отмечено. Документ согласован всеми согласующими."
+            : "Согласие отмечено. Документ ждёт остальных согласующих.");
+    }
+
+    // «Вернуть на проверку» (UC-09): комментарий обязателен, документ уходит методисту.
+    private async Task RejectAsync() =>
+        await ChangeStatusAsync("approval/reject", new { comment = rejectComment }, "Документ возвращён методисту на проверку.");
 
     // Подписант назначен в панели «Согласование»: версия и доступные действия изменились — документ перечитывается.
     private async Task OnApprovalChangedAsync(string text)

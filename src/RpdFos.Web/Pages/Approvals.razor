@@ -1,0 +1,71 @@
+@page "/approvals"
+@attribute [Authorize(Roles = "approver")]
+@using System.Net.Http.Json
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.WebAssembly.Authentication
+@using RpdFos.Web.Models
+@inject HttpClient Http
+
+<PageTitle>Согласование</PageTitle>
+
+@* Очередь согласования (S-31): документы, ждущие отметки пользователя. Согласование параллельное — порядок не задан;
+   в списке — от отправленных раньше к отправленным позже. Отметка ставится на странице документа. *@
+<h1 class="h3">Документы на согласовании</h1>
+
+@if (message is not null)
+{
+    <div class="alert alert-danger py-2">@message</div>
+}
+else if (documents is null)
+{
+    <p>Загрузка…</p>
+}
+else if (documents.Count == 0)
+{
+    <p class="text-muted">Документов, ждущих вашего согласования, нет.</p>
+}
+else
+{
+    <table class="table table-sm align-middle">
+        <thead>
+            <tr><th>Отправлен на согласование</th><th>Дисциплина</th><th>Тип</th><th>Автор</th><th>План</th></tr>
+        </thead>
+        <tbody>
+            @foreach (var d in documents)
+            {
+                <tr>
+                    <td class="text-nowrap">@(d.SentAt?.ToLocalTime().ToString("dd.MM.yyyy HH:mm") ?? "—")</td>
+                    <td><a href="documents/@d.Id">@d.DisciplineCode @d.DisciplineName</a></td>
+                    <td>@(d.Type == "fos" ? "ФОС" : "РПД")</td>
+                    <td>@d.AuthorName</td>
+                    <td class="small text-muted">@d.Plan?.Title</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    private List<ApprovalQueueItem>? documents;
+    private string? message;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var response = await Http.GetAsync("api/approvals");
+            if (response.IsSuccessStatusCode) documents = await response.Content.ReadFromJsonAsync<List<ApprovalQueueItem>>() ?? [];
+            else
+            {
+                // Например, учётная запись не связана со справочником сотрудников.
+                var problem = await response.Content.ReadFromJsonAsync<DocumentProblem>();
+                message = problem?.Detail is { } detail ? $"{problem.Title}. {detail}"
+                    : problem?.Title ?? $"Очередь не получена (код ответа {(int)response.StatusCode}).";
+            }
+        }
+        catch (AccessTokenNotAvailableException e)
+        {
+            e.Redirect();
+        }
+    }
+}
