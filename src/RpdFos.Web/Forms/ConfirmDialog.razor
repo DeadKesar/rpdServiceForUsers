@@ -1,5 +1,6 @@
 @* Подтверждение внутри приложения вместо window.confirm (этап 6, A3): кнопки «Да» / «Нет», окно не блокирует
-   страницу и проверку в браузере. Страница держит один экземпляр (@ref) и спрашивает через AskAsync. *@
+   страницу и проверку в браузере. Страница держит один экземпляр (@ref) и спрашивает через AskAsync. Фокус — на «Нет»:
+   случайный Enter не должен ни удалять, ни принимать. *@
 
 @if (question is not null)
 {
@@ -13,8 +14,8 @@
                 </div>
                 <div class="modal-body" style="white-space: pre-line">@question</div>
                 <div class="modal-footer py-2">
-                    <button type="button" class="btn @yesClass" @ref="yesButton" @onclick="() => Answer(true)">Да</button>
-                    <button type="button" class="btn btn-outline-secondary" @onclick="() => Answer(false)">Нет</button>
+                    <button type="button" class="btn @yesClass" @onclick="() => Answer(true)">Да</button>
+                    <button type="button" class="btn btn-outline-secondary" @ref="noButton" @onclick="() => Answer(false)">Нет</button>
                 </div>
             </div>
         </div>
@@ -26,7 +27,7 @@
     private string? title;
     private string yesClass = "btn-primary";
     private TaskCompletionSource<bool>? answer;
-    private ElementReference yesButton;
+    private ElementReference noButton;
     private bool focus;
 
     /// <summary>Показывает вопрос и ждёт ответа: true — «Да».</summary>
@@ -59,6 +60,6 @@
     {
         if (!focus || question is null) return;
         focus = false;
-        await yesButton.FocusAsync();
+        await noButton.FocusAsync();
     }
 }

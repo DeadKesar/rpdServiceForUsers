@@ -157,7 +157,6 @@ public sealed class DocumentEditing(
         await history.SnapshotAsync(document, editorId, VersionTriggers.ManualSave, ct);
     }
 
-    /// <summary>Мягкое удаление с записью в истории статусов.</summary>
     /// <summary>
     /// Мягкое удаление черновика автором (этап 6, A5): история статусов и журнал аудита (NFR-SEC-07). Удалённый
     /// документ скрыт фильтром запросов — по дисциплине можно создать новый.

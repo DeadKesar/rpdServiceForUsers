@@ -559,11 +559,11 @@ public record ReturnRequest(int Version, string? Comment);
 /// <summary>Замечание: JSON Pointer поля и текст.</summary>
 public record CommentRequest(string? FieldPath, string? Text);
 
-/// <summary>Раздел сохранён: новая версия, статус (после «Сохранить» правка возвращает черновик) и заполненность раздела.</summary>
 /// <summary>Раздел проверен без сохранения: состояние всех разделов по присланному и ошибки черновика.</summary>
 public record SectionChecked(IReadOnlyList<SectionState> Sections, IReadOnlyList<string> HiddenPaths,
     IReadOnlyList<DocumentValidationError> Errors);
 
+/// <summary>Раздел сохранён: новая версия, статус (после «Сохранить» правка возвращает черновик) и заполненность раздела.</summary>
 public record SectionSaved(int Version, string Status, string StatusTitle, SectionState Section, DateTimeOffset SavedAt,
     IReadOnlyList<SectionState>? Sections = null, IReadOnlyList<PlanCorrection>? PlanCorrections = null,
     IReadOnlyList<string>? HiddenPaths = null, JsonElement? Payload = null);
