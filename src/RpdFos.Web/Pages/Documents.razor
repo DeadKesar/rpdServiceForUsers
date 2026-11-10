@@ -83,7 +83,7 @@ else
                     <td class="text-end">
                         @if (d.CanDelete)
                         {
-                            <button class="btn btn-sm btn-outline-danger" disabled="@deleting" @onclick="() => DeleteAsync(d)"
+                            <button class="btn btn-sm btn-outline-danger text-nowrap" disabled="@deleting" @onclick="() => DeleteAsync(d)"
                                     @onclick:stopPropagation>Удалить</button>
                         }
                     </td>

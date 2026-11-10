@@ -445,7 +445,9 @@ else
             var response = await Http.DeleteAsync($"api/documents/{Id}?version={version}");
             if (response.IsSuccessStatusCode)
             {
-                dirty = false;
+                // Документа больше нет: до перехода страница перерисуется ещё раз, и панель печати не должна
+                // запрашивать задачи удалённого документа (404).
+                (dirty, details, context) = (false, null, null);
                 Navigation.NavigateTo("documents");
                 return;
             }
