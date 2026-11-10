@@ -176,7 +176,8 @@
                 return;
             }
             Close();
-            await OnChanged.InvokeAsync($"Согласующий назначен: {seat.Title} — {person.ShortName}.");
+            // «Фамилия И. О.» уже кончается точкой.
+            await OnChanged.InvokeAsync($"Согласующий назначен: {seat.Title} — {person.ShortName.TrimEnd('.')}.");
         }
         catch (AccessTokenNotAvailableException e)
         {
