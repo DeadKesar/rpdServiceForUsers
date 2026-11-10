@@ -16,14 +16,33 @@ public sealed record DocumentItem(Guid Id, string Type, string Title, string Sta
 
 /// <summary>Что пользователь может сделать с документом: отправить, проверить (вернуть, принять, замечания), разрешать замечания.</summary>
 public sealed record DocumentActions(bool Submit, bool Review, bool ResolveComments, bool Print, bool CorrectPlan = false,
-    bool TakeForReview = false, bool ResolveOwnComments = false, bool Delete = false);
+    bool TakeForReview = false, bool ResolveOwnComments = false, bool Delete = false, bool Approve = false);
+
+/// <summary>
+/// Согласование документа (этап 6, B2–B3): места электронного согласования и что может зритель — назначить или
+/// заменить подписанта, запустить согласование принятого документа. <paramref name="Returned"/> — прежний круг
+/// закончился возвратом: кто, когда, с каким комментарием (методисту и администратору).
+/// </summary>
+public sealed record ApprovalState(List<ApprovalSeatItem> Seats, bool CanAssign, bool CanStart, ApprovalReturn? Returned);
+
+/// <summary>Место согласования: назначенный, его отметка и время, комментарий возврата.</summary>
+/// <param name="CanSign">У назначенного есть действующая учётная запись с ролью «Утверждающий».</param>
+/// <param name="Mine">Назначен текущий пользователь.</param>
+public sealed record ApprovalSeatItem(string Role, string Title, Guid? SignatoryId, string? SignatoryName, string? Position,
+    string Status, string StatusTitle, DateTimeOffset? MarkedAt, string? Comment, bool CanSign, bool Mine);
+
+public sealed record ApprovalReturn(string? By, DateTimeOffset At, string? Comment);
+
+/// <summary>Документ в очереди согласующего (S-31).</summary>
+public sealed record ApprovalQueueItem(Guid Id, string Type, string DisciplineCode, string DisciplineName, string AuthorName,
+    PlanItem? Plan, DateTimeOffset? SentAt);
 
 /// <summary>Исправление поля из учебного плана: место, было, стало, кто и когда.</summary>
 public sealed record PlanCorrection(string Path, JsonElement? Before, JsonElement? After, string? ChangedBy, DateTimeOffset ChangedAt);
 
 public sealed record DocumentDetails(DocumentItem Document, JsonElement Payload, JsonElement Schema, DocumentMetadata Metadata,
     bool Editable, DocumentActions Actions, JsonElement? TemplateDefaults = null, List<PlanCorrection>? PlanCorrections = null,
-    Guid? ViewerId = null);
+    Guid? ViewerId = null, ApprovalState? Approval = null);
 
 public sealed record DocumentMetadata(List<SectionState> Sections, List<string> ReadOnlyPaths, List<string> HiddenPaths,
     List<CompetenceCandidate> CompetenceCandidates, PlanDisciplineChoices? PlanDisciplines,
@@ -76,8 +95,11 @@ public static class DocumentTitles
     ];
 }
 
-/// <summary>Статус сменился: новая версия и статус; при отправке — предупреждения полной проверки.</summary>
-public sealed record DocumentReviewed(int Version, string Status, string StatusTitle, List<FieldError> Warnings);
+/// <summary>
+/// Статус сменился: новая версия и статус; при отправке — предупреждения полной проверки. Тот же ответ читается и у
+/// действий согласования — там предупреждений нет.
+/// </summary>
+public sealed record DocumentReviewed(int Version, string Status, string StatusTitle, List<FieldError>? Warnings = null);
 
 /// <summary>Замечание методиста к полю: кто и когда оставил, разрешено ли и кем.</summary>
 public sealed record CommentItem(Guid Id, string FieldPath, string Text, Guid AuthorId, string AuthorName, DateTimeOffset CreatedAt,

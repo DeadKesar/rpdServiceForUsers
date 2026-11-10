@@ -1,0 +1,196 @@
+@using System.Net.Http.Json
+@using Microsoft.AspNetCore.Components.WebAssembly.Authentication
+@using RpdFos.Web.Models
+@inject HttpClient Http
+
+@* Панель «Согласование» (этап 6, B2–B3): места электронного согласования, назначенные, отметки, время, комментарий.
+   Методист и администратор назначают и заменяют подписанта по поиску в справочнике, пока его отметки ждут
+   (FR-REV-13). Запуск согласования — у страницы документа: это смена статуса с подтверждением. *@
+<div class="card mb-3">
+    <div class="card-body py-2">
+        <div class="fw-semibold mb-1">Согласование</div>
+        @if (State.Seats.Count == 0)
+        {
+            <div class="small text-muted">
+                Согласующие ещё не определены: документ принят до появления электронного согласования.
+                Запуск определит их по листу согласования шаблона.
+            </div>
+        }
+        else
+        {
+            <table class="table table-sm small align-middle mb-1">
+                <thead>
+                    <tr><th>Место</th><th>Согласующий</th><th>Отметка</th><th>Время</th><th>Комментарий</th><th></th></tr>
+                </thead>
+                <tbody>
+                    @foreach (var s in State.Seats)
+                    {
+                        <tr>
+                            <td>@s.Title</td>
+                            <td>
+                                @if (s.SignatoryName is null)
+                                {
+                                    <span class="text-danger">не найден в справочнике</span>
+                                }
+                                else
+                                {
+                                    <span>@s.SignatoryName</span>
+                                    @if (s.Mine)
+                                    {
+                                        <span class="badge text-bg-info ms-1">вы</span>
+                                    }
+                                    @if (s.Position is not null)
+                                    {
+                                        <div class="text-muted">@s.Position</div>
+                                    }
+                                    @* Без учётной записи с ролью «Утверждающий» отметку поставить некому — согласование встанет. *@
+                                    @if (!s.CanSign && s.Status == "pending")
+                                    {
+                                        <div class="text-danger">нет учётной записи с ролью «Утверждающий» — отметить не сможет</div>
+                                    }
+                                }
+                            </td>
+                            <td><span class="badge @Badge(s.Status)">@s.StatusTitle</span></td>
+                            <td class="text-nowrap">@(s.MarkedAt?.ToLocalTime().ToString("dd.MM.yyyy HH:mm") ?? "—")</td>
+                            <td>@s.Comment</td>
+                            <td class="text-end text-nowrap">
+                                @if (State.CanAssign && s.Status == "pending")
+                                {
+                                    <button class="btn btn-link btn-sm p-0" disabled="@Busy" @onclick="() => Open(s)">
+                                        @(s.SignatoryId is null ? "Назначить" : "Заменить")
+                                    </button>
+                                }
+                            </td>
+                        </tr>
+                        @if (assigning == s.Role)
+                        {
+                            <tr>
+                                <td colspan="6">
+                                    <div class="input-group input-group-sm mb-1" style="max-width: 420px">
+                                        <input class="form-control" placeholder="Фамилия" @bind="surname" @bind:event="oninput"
+                                               @onkeydown="OnSearchKeyAsync" />
+                                        <button class="btn btn-outline-secondary" type="button" @onclick="SearchAsync">Найти</button>
+                                        <button class="btn btn-outline-secondary" type="button" @onclick="Close">Отмена</button>
+                                    </div>
+                                    @if (candidates is { Count: 0 })
+                                    {
+                                        <div class="text-muted">Активных записей справочника с такой фамилией нет.</div>
+                                    }
+                                    else if (candidates is not null)
+                                    {
+                                        <ul class="list-group" style="max-width: 720px">
+                                            @foreach (var c in candidates)
+                                            {
+                                                <li class="list-group-item py-1 d-flex justify-content-between align-items-center">
+                                                    <span>@Describe(c)</span>
+                                                    <button class="btn btn-sm btn-outline-primary" type="button" disabled="@Busy"
+                                                            @onclick="() => AssignAsync(s, c)">Назначить</button>
+                                                </li>
+                                            }
+                                        </ul>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    }
+                </tbody>
+            </table>
+        }
+        @if (State.CanStart)
+        {
+            <button class="btn btn-sm btn-success" disabled="@Busy" @onclick="OnStart">Запустить согласование</button>
+        }
+        else if (Status == "accepted" && State.Seats.Any(s => s.SignatoryId is null))
+        {
+            <div class="small text-danger">
+                Согласование не запущено: не у всех мест найден подписант.
+                @(State.CanAssign ? "Назначьте согласующих — затем методист запускает согласование." : "Их назначает методист или администратор.")
+            </div>
+        }
+        else if (Status == "accepted")
+        {
+            <div class="small text-muted">Согласующие назначены — согласование запускает методист.</div>
+        }
+        @if (message is not null)
+        {
+            <div class="alert alert-danger py-1 small mt-2 mb-0">@message</div>
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public Guid DocumentId { get; set; }
+    [Parameter, EditorRequired] public ApprovalState State { get; set; } = default!;
+
+    /// <summary>Статус документа — для подсказки, чего ждёт согласование.</summary>
+    [Parameter] public string Status { get; set; } = "";
+
+    /// <summary>Страница занята сохранением или сменой статуса.</summary>
+    [Parameter] public bool Busy { get; set; }
+
+    /// <summary>Перед назначением — сохранить открытый раздел: после него документ перечитывается.</summary>
+    [Parameter] public Func<Task<bool>>? BeforeAction { get; set; }
+
+    /// <summary>«Запустить согласование» — смену статуса с подтверждением выполняет страница документа.</summary>
+    [Parameter] public EventCallback OnStart { get; set; }
+
+    /// <summary>Подписант назначен: страница перечитывает документ и показывает сообщение.</summary>
+    [Parameter] public EventCallback<string> OnChanged { get; set; }
+
+    private string? assigning;
+    private string surname = "";
+    private List<DirectoryPerson>? candidates;
+    private string? message;
+
+    private void Open(ApprovalSeatItem seat) => (assigning, surname, candidates, message) = (seat.Role, "", null, null);
+
+    private void Close() => (assigning, candidates) = (null, null);
+
+    private Task OnSearchKeyAsync(KeyboardEventArgs e) => e.Key == "Enter" ? SearchAsync() : Task.CompletedTask;
+
+    private async Task SearchAsync()
+    {
+        message = null;
+        try
+        {
+            candidates = await Http.GetFromJsonAsync<List<DirectoryPerson>>($"api/directory?surname={Uri.EscapeDataString(surname.Trim())}") ?? [];
+        }
+        catch (AccessTokenNotAvailableException e)
+        {
+            e.Redirect();
+        }
+    }
+
+    private async Task AssignAsync(ApprovalSeatItem seat, DirectoryPerson person)
+    {
+        message = null;
+        if (BeforeAction is not null && !await BeforeAction()) return;
+        try
+        {
+            var response = await Http.PostAsJsonAsync($"api/documents/{DocumentId}/approval/seats/{seat.Role}/assign", new { employeeId = person.Id });
+            if (!response.IsSuccessStatusCode)
+            {
+                var problem = await response.Content.ReadFromJsonAsync<DocumentProblem>();
+                message = problem?.Detail is { } detail ? $"{problem.Title}. {detail}"
+                    : problem?.Title ?? $"Согласующий не назначен (код ответа {(int)response.StatusCode}).";
+                return;
+            }
+            Close();
+            await OnChanged.InvokeAsync($"Согласующий назначен: {seat.Title} — {person.ShortName}.");
+        }
+        catch (AccessTokenNotAvailableException e)
+        {
+            e.Redirect();
+        }
+    }
+
+    private static string Describe(DirectoryPerson p) =>
+        string.Join(", ", new[] { p.ShortName, p.Position, p.Department }.Where(s => !string.IsNullOrEmpty(s)));
+
+    private static string Badge(string status) => status switch
+    {
+        "approved" => "text-bg-success",
+        "rejected" => "text-bg-warning",
+        _ => "text-bg-secondary"
+    };
+}

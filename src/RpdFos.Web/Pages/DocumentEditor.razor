@@ -92,6 +92,12 @@ else
         <PrintPanel DocumentId="Id" BeforePrint="SaveSectionAsync" />
     }
 
+    @if (details.Approval is { } approval)
+    {
+        <ApprovalPanel DocumentId="Id" State="approval" Status="@d.Status" Busy="@(busy || conflict)" BeforeAction="SaveSectionAsync"
+                       OnStart="StartApprovalAsync" OnChanged="OnApprovalChangedAsync" />
+    }
+
     @if (returning && details.Actions.Review)
     {
         <div class="card mb-3">
@@ -413,7 +419,9 @@ else
     private static string ReadOnlyReason(string status) => status switch
     {
         "under_review" => "Документ на проверке у методиста — изменить его можно после возврата на доработку.",
-        "accepted" => "Документ принят методистом.",
+        "accepted" => "Документ принят методистом. Согласование начнётся, когда будут назначены все согласующие.",
+        "approval" => "Документ на согласовании: изменить его нельзя. Согласующий может вернуть документ методисту.",
+        "approved" => "Документ согласован: правки закрыты.",
         "returned" => "Документ на доработке у автора.",
         _ => "Документ открыт только для просмотра: изменяет его автор, пока документ в работе."
     };
@@ -432,7 +440,31 @@ else
         // Приём запускает согласование (UC-07): отзыва нет, поэтому — подтверждение (этап 6, A3).
         if (!await confirm.AskAsync("Вы отправляете документ на согласование. Уверены?", "Принять документ")) return;
         if (!await SaveSectionAsync()) return;
-        await ChangeStatusAsync("accept", new { version }, "Документ принят.");
+        await ChangeStatusAsync("accept", new { version }, "Документ принят.", r => ApprovalStartText(r, "Документ принят. "));
+    }
+
+    // «Запустить согласование» принятого документа после ручного назначения подписантов (этап 6, B2). Отзыва нет —
+    // то же подтверждение, что перед приёмом.
+    private async Task StartApprovalAsync()
+    {
+        if (!await confirm.AskAsync("Вы отправляете документ на согласование. Уверены?", "Запуск согласования")) return;
+        if (!await SaveSectionAsync()) return;
+        await ChangeStatusAsync("approval/start", new { version }, "Документ отправлен на согласование.", r => ApprovalStartText(r, ""));
+    }
+
+    // Приём сам запускает согласование (UC-07); не нашлись подписанты — документ остаётся «Принят».
+    private static string ApprovalStartText(DocumentReviewed r, string prefix) => r.Status switch
+    {
+        "approval" => $"{prefix}Документ отправлен на согласование.",
+        "approved" => $"{prefix}Документ согласован: электронных согласующих в шаблоне нет.",
+        _ => $"{prefix}Согласование не запущено: не у всех мест найден подписант — назначьте согласующих в панели «Согласование»."
+    };
+
+    // Подписант назначен в панели «Согласование»: версия и доступные действия изменились — документ перечитывается.
+    private async Task OnApprovalChangedAsync(string text)
+    {
+        await LoadAsync();
+        (messageIsError, message) = (false, text);
     }
 
     // Удаление своего черновика (этап 6, A5): несохранённое не сохраняем — документ удаляется целиком.
@@ -480,7 +512,9 @@ else
     }
 
     // Смена статуса: при успехе документ перечитывается — права и доступные действия зависят от нового статуса.
-    private async Task<DocumentReviewed?> ChangeStatusAsync(string action, object body, string done)
+    // doneBy — сообщение по итоговому статусу: приём может запустить согласование, а может и не запустить.
+    private async Task<DocumentReviewed?> ChangeStatusAsync(string action, object body, string done,
+        Func<DocumentReviewed, string>? doneBy = null)
     {
         busy = true;
         try
@@ -489,7 +523,7 @@ else
             if (response.IsSuccessStatusCode && await response.Content.ReadFromJsonAsync<DocumentReviewed>() is { } reviewed)
             {
                 await LoadAsync();
-                (messageIsError, message) = (false, done);
+                (messageIsError, message) = (false, doneBy?.Invoke(reviewed) ?? done);
                 return reviewed;
             }
 
