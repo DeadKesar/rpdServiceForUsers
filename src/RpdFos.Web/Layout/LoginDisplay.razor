@@ -3,6 +3,7 @@
 
 <AuthorizeView>
     <Authorized>
+        <NotificationBell />
         @* Утверждение name сервер заполняет ФИО из учётной записи. *@
         @context.User.Identity?.Name
         <button class="nav-link btn btn-link" @onclick="BeginLogOut">Выйти</button>

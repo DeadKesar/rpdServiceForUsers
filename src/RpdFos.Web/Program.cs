@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Components.WebAssembly.Hosting;
 using Radzen;
 using RpdFos.Web;
 using RpdFos.Web.Auth;
+using RpdFos.Web.Notifications;
 
 var builder = WebAssemblyHostBuilder.CreateDefault(args);
 builder.RootComponents.Add<App>("#app");
@@ -13,6 +14,9 @@ builder.RootComponents.Add<HeadOutlet>("head::after");
 builder.Services.AddHttpClient("api", c => c.BaseAddress = new Uri(builder.HostEnvironment.BaseAddress))
     .AddHttpMessageHandler<BaseAddressAuthorizationMessageHandler>();
 builder.Services.AddScoped(sp => sp.GetRequiredService<IHttpClientFactory>().CreateClient("api"));
+
+// Лента уведомлений колокольчика: одна на вкладку, опрос ведёт компонент в шапке (этап 6.1, C5).
+builder.Services.AddScoped<NotificationFeed>();
 
 // Компоненты Radzen: редактор форматированного текста документа.
 builder.Services.AddRadzenComponents();

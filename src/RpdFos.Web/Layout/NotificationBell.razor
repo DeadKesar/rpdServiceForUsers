@@ -1,0 +1,134 @@
+@using RpdFos.Web.Models
+@using RpdFos.Web.Notifications
+@implements IDisposable
+@inject NotificationFeed Feed
+@inject NavigationManager Navigation
+
+@* Колокольчик в шапке (этап 6.1, C5; FR-REV-08, S-03): число непрочитанных и список последних уведомлений. Компонент
+   стоит в содержимом AuthorizeView у вошедшего пользователя: появляется — запускает опрос ленты (NotificationFeed),
+   исчезает при выходе — останавливает. Опрос остановлен (пользователя уже нет, а AuthorizeView ещё не обновился) —
+   колокольчика нет: мёртвый значок с пустой лентой хуже его отсутствия. Закрывается кликом вне списка (прозрачная
+   подложка), клавишей Esc и переходом на другую страницу. *@
+@if (Feed.IsPolling)
+{
+<div class="bell" @onkeydown="OnKeyDown">
+    <button type="button" class="bell-button" title="@Label" aria-label="@Label" aria-haspopup="true"
+            aria-expanded="@(open ? "true" : "false")" @onclick="Toggle">
+        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="currentColor" viewBox="0 0 16 16" aria-hidden="true">
+            <path d="M8 16a2 2 0 0 0 2-2H6a2 2 0 0 0 2 2m.995-14.901a1 1 0 1 0-1.99 0A5 5 0 0 0 3 6c0 1.098-.5 6-2 7h14c-1.5-1-2-5.902-2-7 0-2.42-1.72-4.44-4.005-4.901" />
+        </svg>
+        @if (Feed.Unread > 0)
+        {
+            <span class="bell-count" aria-hidden="true">@CountText</span>
+        }
+    </button>
+
+    @if (open)
+    {
+        <div class="bell-backdrop" @onclick="Close"></div>
+        <div class="bell-panel" role="region" aria-label="Уведомления">
+            <div class="bell-head">
+                <strong>Уведомления</strong>
+                <button type="button" class="bell-action" disabled="@(Feed.Unread == 0)" @onclick="MarkAllReadAsync">Прочитать все</button>
+            </div>
+
+            @if (failure is not null)
+            {
+                <div class="bell-failure" role="alert">@failure</div>
+            }
+
+            @if (!Feed.Loaded)
+            {
+                <p class="bell-empty">Загрузка…</p>
+            }
+            else if (Feed.Items.Count == 0)
+            {
+                <p class="bell-empty">Уведомлений нет.</p>
+            }
+            else
+            {
+                <ul class="bell-list">
+                    @foreach (var n in Feed.Items)
+                    {
+                        <li @key="n.Id" class="@(n.ReadAt is null ? "unread" : "read")">
+                            <div class="bell-text">@n.Text</div>
+                            <div class="bell-foot">
+                                <span class="bell-time">@n.CreatedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</span>
+                                @if (n.DocumentId is { } documentId)
+                                {
+                                    @* Переход по ссылке сам отмечает уведомление прочитанным. *@
+                                    <a href="documents/@documentId" @onclick="() => Open(n)">Открыть документ</a>
+                                }
+                                @if (n.ReadAt is null)
+                                {
+                                    <button type="button" class="bell-action" @onclick="() => MarkReadAsync(n.Id)">Прочитано</button>
+                                }
+                            </div>
+                        </li>
+                    }
+                </ul>
+            }
+        </div>
+    }
+</div>
+}
+
+@code {
+    private const string FailureText = "Не удалось выполнить действие: нет связи с сервером. Повторите позже.";
+
+    private bool open;
+    private string? failure;
+
+    private string Label => Feed.Unread == 0 ? "Уведомления" : $"Уведомления, непрочитанных: {Feed.Unread}";
+
+    // Значок небольшой: больше 99 — «99+».
+    private string CountText => Feed.Unread > 99 ? "99+" : Feed.Unread.ToString();
+
+    protected override void OnInitialized()
+    {
+        Feed.Changed += OnFeedChanged;
+        Navigation.LocationChanged += OnLocationChanged;
+        Feed.Start();
+    }
+
+    // Выход: пользователь пропал из AuthorizeView — компонент удаляется, опрос прекращается.
+    public void Dispose()
+    {
+        Feed.Changed -= OnFeedChanged;
+        Navigation.LocationChanged -= OnLocationChanged;
+        Feed.Stop();
+    }
+
+    private void OnFeedChanged() => _ = InvokeAsync(StateHasChanged);
+
+    private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
+    {
+        if (!open) return;
+        open = false;
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    private void Toggle()
+    {
+        open = !open;
+        failure = null;
+        if (open) _ = Feed.RefreshAsync(); // открыли список — показать свежее, не дожидаясь минутного опроса
+    }
+
+    private void Close() => open = false;
+
+    private void OnKeyDown(KeyboardEventArgs e)
+    {
+        if (open && e.Key == "Escape") Close();
+    }
+
+    private void Open(NotificationItem n)
+    {
+        Close();
+        if (n.ReadAt is null) _ = Feed.MarkReadAsync(n.Id); // страница откроется сама, отметка уходит параллельно
+    }
+
+    private async Task MarkReadAsync(Guid id) => failure = await Feed.MarkReadAsync(id) ? null : FailureText;
+
+    private async Task MarkAllReadAsync() => failure = await Feed.MarkAllReadAsync() ? null : FailureText;
+}

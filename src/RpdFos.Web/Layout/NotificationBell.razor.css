@@ -1,0 +1,189 @@
+/* Колокольчик в шапке (этап 6.1, C5). Шапка (.top-row в MainLayout.razor.css) задаёт всем ссылкам и кнопкам-ссылкам
+   поля слева и запрет переноса, а ссылке-первому-ребёнку ещё и нулевую ширину; внутри списка эти правила отменяются
+   селекторами с большей специфичностью. */
+
+.bell {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    margin-right: 1rem;
+}
+
+.bell-button {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    padding: .35rem .5rem;
+    border: 0;
+    border-radius: .375rem;
+    background: transparent;
+    color: #495057;
+}
+
+    .bell-button:hover {
+        background: rgba(0, 0, 0, .06);
+        color: #212529;
+    }
+
+/* Значок с числом непрочитанных — в правом верхнем углу колокольчика. Цвет не единственный признак: рядом число. */
+.bell-count {
+    position: absolute;
+    top: -.15rem;
+    right: -.2rem;
+    min-width: 1.2rem;
+    height: 1.2rem;
+    padding: 0 .3rem;
+    border-radius: .6rem;
+    background: #c62828;
+    color: #fff;
+    font-size: .72rem;
+    font-weight: 700;
+    line-height: 1.2rem;
+    text-align: center;
+}
+
+/* Прозрачная подложка на весь экран: клик вне списка его закрывает. */
+.bell-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 1040;
+}
+
+.bell-panel {
+    position: absolute;
+    top: calc(100% + .35rem);
+    right: 0;
+    z-index: 1050;
+    width: 27rem;
+    max-width: calc(100vw - 1.5rem);
+    max-height: min(32rem, 75vh);
+    overflow-y: auto;
+    background: #fff;
+    border: 1px solid #d6d5d5;
+    border-radius: .5rem;
+    box-shadow: 0 .5rem 1rem rgba(0, 0, 0, .15);
+    text-align: left;
+    white-space: normal;
+}
+
+.bell-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: .6rem .85rem;
+    border-bottom: 1px solid #e3e3e3;
+    position: sticky;
+    top: 0;
+    background: #fff;
+}
+
+.bell-empty {
+    margin: 0;
+    padding: 1rem .85rem;
+    color: #6c757d;
+}
+
+.bell-failure {
+    margin: .5rem .85rem 0;
+    padding: .35rem .6rem;
+    border-radius: .375rem;
+    background: #fff3cd;
+    color: #664d03;
+    font-size: .875rem;
+}
+
+.bell-list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+    .bell-list li {
+        padding: .6rem .85rem;
+        border-bottom: 1px solid #eee;
+        border-left: 3px solid transparent;
+    }
+
+        .bell-list li:last-child {
+            border-bottom: 0;
+        }
+
+        /* Непрочитанное: цветная полоса слева и светлый фон; прочитанное — приглушено. */
+        .bell-list li.unread {
+            border-left-color: #1b6ec2;
+            background: #eef5fd;
+        }
+
+        .bell-list li.read {
+            color: #6c757d;
+        }
+
+.bell-text {
+    font-size: .9rem;
+    overflow-wrap: anywhere;
+}
+
+.bell-foot {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: .25rem 1rem;
+    margin-top: .25rem;
+    font-size: .8rem;
+}
+
+.bell-time {
+    color: #6c757d;
+}
+
+/* Ссылка на документ: правила шапки для a (поле слева, нулевая ширина первого ребёнка) здесь отменены. */
+.bell-panel .bell-foot a {
+    margin-left: 0;
+    width: auto;
+    text-align: left;
+    white-space: nowrap;
+    text-decoration: none;
+}
+
+    .bell-panel .bell-foot a:hover {
+        text-decoration: underline;
+    }
+
+/* Кнопки-ссылки внутри списка: без рамки и без поля слева. */
+.bell-panel .bell-action {
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: #0071c1;
+    font-size: inherit;
+    white-space: nowrap;
+}
+
+    .bell-panel .bell-action:hover:not(:disabled) {
+        text-decoration: underline;
+    }
+
+    .bell-panel .bell-action:disabled {
+        color: #9aa0a6;
+    }
+
+.bell-head .bell-action {
+    font-size: .85rem;
+}
+
+/* Узкий экран: колокольчик стоит у левого края шапки, и список, выровненный по его правому краю, ушёл бы за экран.
+   Список привязан к самой шапке (в MainLayout.razor.css она position: relative) и занимает её ширину. */
+@media (max-width: 640.98px) {
+    .bell {
+        position: static;
+    }
+
+    .bell-panel {
+        top: 100%;
+        left: .5rem;
+        right: .5rem;
+        width: auto;
+        max-width: none;
+    }
+}
