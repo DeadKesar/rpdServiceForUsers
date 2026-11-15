@@ -78,7 +78,7 @@ public static class SignatureStatuses
         Pending => "ожидает",
         Approved => "согласовано",
         Rejected => "возвращено",
-        Interrupted => "круг прерван",
+        Interrupted => "прерван",
         _ => status
     };
 }

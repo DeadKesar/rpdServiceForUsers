@@ -272,7 +272,7 @@ public class DocumentApprovalApiTests(DatabaseFixture app)
 
     /// <summary>
     /// Замечание автора после показа C2: строка согласующего, не успевшего отметиться до возврата, в таблице остаётся
-    /// «ожидает» до нового приёма, и методист читал её как живую. В панели такая строка подписана явно — «круг прерван»;
+    /// «ожидает» до нового приёма, и методист читал её как живую. В панели такая строка подписана явно — «прерван»;
     /// новый круг возвращает ей «ожидает».
     /// </summary>
     [Fact]
@@ -288,7 +288,7 @@ public class DocumentApprovalApiTests(DatabaseFixture app)
             DocumentStatuses.UnderReview);
 
         var returned = (await DetailsAsync(methodist, created)).Approval!;
-        Assert.Equal([(SignatoryRoles.DepartmentHead, SignatureStatuses.Interrupted, "круг прерван"),
+        Assert.Equal([(SignatoryRoles.DepartmentHead, SignatureStatuses.Interrupted, "прерван"),
                 (SignatoryRoles.UmuHead, SignatureStatuses.Rejected, "возвращено")],
             returned.Seats.Select(s => (s.Role, s.Status, s.StatusTitle)));
         // В таблице строка не менялась: прежний круг остаётся до нового приёма (решение B1).
