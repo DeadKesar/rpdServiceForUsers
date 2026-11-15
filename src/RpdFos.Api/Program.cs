@@ -181,7 +181,7 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 app.UseBlazorFrameworkFiles(); // веб-клиент Blazor раздаётся этим же хостом: один адрес, CORS не нужен
-app.UseStaticFiles();
+app.UseStaticFiles(ClientShell.CreateStaticFileOptions()); // index.html — без кэша браузера, остальное как обычно
 
 app.UseRouting();
 app.UseAuthentication();
@@ -201,7 +201,7 @@ if (jobsEnabled)
     app.Services.GetRequiredService<IRecurringJobManager>().AddOrUpdate<GeneratedFilesCleanup>(
         "generated-files-cleanup", JobQueues.Generation, job => job.RunAsync(CancellationToken.None), Cron.Daily());
 }
-app.MapFallbackToFile("index.html");
+app.MapFallbackToFile(ClientShell.FileName, ClientShell.CreateStaticFileOptions()); // адреса клиента: /, /documents…
 
 await app.RunAsync();
 
