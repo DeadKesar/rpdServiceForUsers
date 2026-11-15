@@ -71,12 +71,40 @@ public class DocumentsModule : ICarterModule
             .ToListAsync(ct);
         var planIds = rows.Select(r => r.CurriculumPlanId).Distinct().ToList();
         var plans = await PlanItem.Query(db).Where(p => planIds.Contains(p.Id)).ToDictionaryAsync(p => p.Id, ct);
+        // Пометка «с согласования» — тем, кто разбирает возвраты (методист и администратор): так же, как плашка в
+        // документе, автору она не нужна (этап 6.1, C4).
+        var returned = SeesAll(http.User)
+            ? await ReturnsFromApprovalAsync(
+                db, rows.Where(r => r.Document.Status == DocumentStatuses.UnderReview).Select(r => r.Document.Id).ToList(), ct)
+            : [];
 
         return rows.Select(r => new DocumentListItem(r.Document.Id, r.Document.Title, r.Document.Type, r.Document.Status,
             DocumentStatuses.Title(r.Document.Status), r.Document.IsOutdated, r.Code, r.Name, plans.GetValueOrDefault(r.CurriculumPlanId),
             r.Document.TemplateRevision, r.Author, r.Document.UpdatedAt, r.Document.SubmittedAt, r.Document.Version,
             // Удаляет автор свой черновик (S-10: «открыть, удалить»; этап 6, A5).
-            r.Document.AuthorId == me && DocumentTransitions.CanDelete(r.Document.Status))).ToList();
+            r.Document.AuthorId == me && DocumentTransitions.CanDelete(r.Document.Status),
+            returned.GetValueOrDefault(r.Document.Id))).ToList();
+    }
+
+    /// <summary>
+    /// Документы на проверке, чей последний переход в этот статус пришёл с согласования (этап 6.1, C4): кто вернул и
+    /// когда. Последний переход, а не любой: после возврата автору и новой отправки (или взятия методистом) последним
+    /// становится другой переход, и пометка снимается.
+    /// </summary>
+    private static async Task<Dictionary<Guid, ReturnedFromApproval>> ReturnsFromApprovalAsync(
+        AppDbContext db, List<Guid> underReview, CancellationToken ct)
+    {
+        if (underReview.Count == 0) return [];
+
+        var arrivals = await (
+                from h in db.DocumentStatusHistory.AsNoTracking()
+                where underReview.Contains(h.DocumentId) && h.ToStatus == DocumentStatuses.UnderReview
+                join e in db.Employees on h.ChangedBy equals e.Id
+                select new { h.DocumentId, h.FromStatus, h.ChangedAt, e.ShortName })
+            .ToListAsync(ct);
+        return arrivals.GroupBy(a => a.DocumentId).Select(g => g.MaxBy(a => a.ChangedAt)!)
+            .Where(a => a.FromStatus == DocumentStatuses.Approval)
+            .ToDictionary(a => a.DocumentId, a => new ReturnedFromApproval(a.ShortName, a.ChangedAt));
     }
 
     /// <summary>
@@ -606,10 +634,14 @@ public record DocumentSaved(int Version, string Status, string StatusTitle, Date
 /// <summary>Статус сменился: новая версия и статус; при отправке — предупреждения полной проверки.</summary>
 public record DocumentReviewed(int Version, string Status, string StatusTitle, IReadOnlyList<DocumentValidationError> Warnings);
 
+/// <param name="FromApproval">Документ на проверке вернулся с согласования — методисту и администратору (этап 6.1, C4).</param>
 public record DocumentListItem(
     Guid Id, string Title, string Type, string Status, string StatusTitle, bool IsOutdated, string DisciplineCode,
     string DisciplineName, PlanItem? Plan, int TemplateRevision, string AuthorName, DateTimeOffset UpdatedAt,
-    DateTimeOffset? SubmittedAt, int Version = 0, bool CanDelete = false);
+    DateTimeOffset? SubmittedAt, int Version = 0, bool CanDelete = false, ReturnedFromApproval? FromApproval = null);
+
+/// <summary>Кто и когда вернул документ с согласования на проверку: пометка «с согласования» в очереди «Проверка».</summary>
+public record ReturnedFromApproval(string By, DateTimeOffset At);
 
 /// <summary>Дисциплина плана для создания документа; есть документ — ссылка на него, если он доступен пользователю.</summary>
 public record DisciplineOption(Guid Id, string Code, string Name, Guid? DocumentId, string? DocumentAuthor, bool CanOpen);

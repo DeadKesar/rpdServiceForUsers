@@ -11,8 +11,9 @@ using RpdFos.Core.Documents;
 namespace RpdFos.Api.Features.Approvals;
 
 /// <summary>
-/// Срез «Согласование» (этап 6, B2–B3; UC-07 – UC-09): очередь согласующего (S-31), отметки «Согласовать» и
-/// «Вернуть на проверку», ручное назначение подписанта (FR-REV-13) и запуск согласования принятого документа.
+/// Срез «Согласование» (этап 6, B2–B3; UC-07 – UC-09): очередь согласующего (S-31) и список «Отмеченные мной»
+/// (этап 6.1, C4), отметки «Согласовать» и «Вернуть на проверку», ручное назначение подписанта (FR-REV-13) и запуск
+/// согласования принятого документа.
 /// Правила — в ядре (<see cref="DocumentApproval"/>, <see cref="DocumentTransitions"/>). Состояние согласования
 /// документа приходит вместе с ним (<see cref="DocumentDetails.Approval"/>).
 /// </summary>
@@ -21,6 +22,7 @@ public class ApprovalsModule : ICarterModule
     public void AddRoutes(IEndpointRouteBuilder app)
     {
         app.MapGet("/api/approvals", Queue).WithTags("Approvals").RequireAuthorization(Policies.Approvers);
+        app.MapGet("/api/approvals/marked", Marked).WithTags("Approvals").RequireAuthorization(Policies.Approvers);
 
         var g = app.MapGroup("/api/documents/{id:guid}/approval").WithTags("Approvals").RequireAuthorization();
         g.MapPost("/start", Start).RequireAuthorization(Policies.Reviewers);
@@ -57,6 +59,44 @@ public class ApprovalsModule : ICarterModule
 
         return Results.Ok(rows.OrderBy(r => r.SentAt).Select(r => new ApprovalQueueItem(
             r.Id, r.Type, r.Code, r.Name, r.Author, plans.GetValueOrDefault(r.CurriculumPlanId), r.SentAt)).ToList());
+    }
+
+    /// <summary>
+    /// «Отмеченные мной» (FR-REV-05, S-31): документы, где в текущем круге стоит отметка пользователя — согласие или
+    /// возврат. Круг — строки document_signatures: возврат оставляет их до нового приёма, а новый приём сбрасывает, и
+    /// документ снова ждёт отметки в очереди. Сверху — последние отметки.
+    /// </summary>
+    private static async Task<IResult> Marked(HttpContext http, AppDbContext db, DirectoryAccounts directory, CancellationToken ct)
+    {
+        if (await directory.FindIdAsync(http.User, ct) is not Guid me) return NoDirectoryRecord();
+
+        var rows = await (
+                from s in db.DocumentSignatures.AsNoTracking()
+                where s.ResolvedUserId == me && (s.Status == SignatureStatuses.Approved || s.Status == SignatureStatuses.Rejected)
+                join d in db.Documents.AsNoTracking() on s.DocumentId equals d.Id
+                join x in db.Disciplines on d.DisciplineId equals x.Id
+                join a in db.Employees on d.AuthorId equals a.Id
+                select new
+                {
+                    d.Id, d.Type, x.Code, x.Name, Author = a.ShortName, d.Status, Mark = s.Status, s.ApprovedAt,
+                    // Время возврата в строке не хранится: оно в истории статусов — последний переход «На согласовании →
+                    // На проверке». Строка возврата остаётся только от последнего круга, так что это и есть её возврат.
+                    ReturnedAt = db.DocumentStatusHistory
+                        .Where(h => h.DocumentId == d.Id && h.FromStatus == DocumentStatuses.Approval && h.ToStatus == DocumentStatuses.UnderReview)
+                        .Max(h => (DateTimeOffset?)h.ChangedAt)
+                })
+            .ToListAsync(ct);
+
+        // Несколько мест одного человека в документе отмечаются вместе, но назначить ещё одно можно и после отметки:
+        // документ в списке один, с последней из его отметок.
+        return Results.Ok(rows
+            .Select(r => (Row: r, At: r.Mark == SignatureStatuses.Approved ? r.ApprovedAt : r.ReturnedAt))
+            .GroupBy(x => x.Row.Id)
+            .Select(g => g.OrderByDescending(x => x.At).First())
+            .OrderByDescending(x => x.At).ThenBy(x => x.Row.Code)
+            .Select(x => new MarkedApprovalItem(x.Row.Id, x.Row.Type, x.Row.Code, x.Row.Name, x.Row.Author, x.Row.Status,
+                DocumentStatuses.Title(x.Row.Status), x.Row.Mark, SignatureStatuses.Title(x.Row.Mark), x.At))
+            .ToList());
     }
 
     /// <summary>
@@ -169,6 +209,14 @@ public class ApprovalsModule : ICarterModule
 /// <summary>Документ в очереди согласующего: автор, дисциплина, тип, дата отправки на согласование.</summary>
 public record ApprovalQueueItem(
     Guid Id, string Type, string DisciplineCode, string DisciplineName, string AuthorName, PlanItem? Plan, DateTimeOffset? SentAt);
+
+/// <summary>
+/// Документ в списке «Отмеченные мной» (S-31): статус документа сейчас и отметка пользователя в текущем круге —
+/// <paramref name="Mark"/> (<c>approved</c> или <c>rejected</c>), её подпись и время.
+/// </summary>
+public record MarkedApprovalItem(
+    Guid Id, string Type, string DisciplineCode, string DisciplineName, string AuthorName, string Status, string StatusTitle,
+    string Mark, string MarkTitle, DateTimeOffset? MarkedAt);
 
 /// <summary>Подписант места — запись справочника сотрудников.</summary>
 public record AssignRequest(Guid EmployeeId);

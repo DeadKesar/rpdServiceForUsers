@@ -124,6 +124,7 @@ public class DocumentApprovalApiTests(DatabaseFixture app)
         {
             Assert.Equal(HttpStatusCode.Forbidden, (await client.PostAsync(Url(created, "approval/approve"), null)).StatusCode);
             Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync("/api/approvals")).StatusCode);
+            Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync("/api/approvals/marked")).StatusCode);
         }
         await app.WithDbAsync(async db => Assert.All(
             await db.DocumentSignatures.Where(s => s.DocumentId == created.Document.Id).ToListAsync(),
@@ -399,6 +400,154 @@ public class DocumentApprovalApiTests(DatabaseFixture app)
         });
     }
 
+    /// <summary>
+    /// «Отмеченные мной» (этап 6.1, C4; FR-REV-05, S-31): документы, где в текущем круге стоит отметка пользователя —
+    /// согласие или возврат; чужих нет. Возврат оставляет отметки круга, новый приём сбрасывает их: документ снова в
+    /// очереди и из списка отмеченных ушёл.
+    /// </summary>
+    [Fact]
+    public async Task Marked_list_holds_my_marks_of_the_current_round_and_a_new_round_returns_the_document_to_the_queue()
+    {
+        var (_, methodist, created, version) = await UnderReviewAsync("Б1.О.13");
+        var (head, headRecord) = await DocumentData.SignatoryAsync(app, created.Document.DisciplineId, SignatoryRoles.DepartmentHead);
+        var (umu, _) = await DocumentData.SignatoryAsync(app, created.Document.DisciplineId, SignatoryRoles.UmuHead);
+        var (stranger, _) = await DocumentData.UserAsync(app, AppRoles.Approver);
+        var id = created.Document.Id;
+        var authorName = "";
+        await app.WithDbAsync(async db => authorName = (await db.Employees.SingleAsync(e => e.Id == created.Document.AuthorId)).ShortName);
+
+        // Круг идёт, отметок нет: ни у кого из них документа в списке отмеченных нет.
+        version = await ExpectAsync(methodist.PostAsJsonAsync(Url(created, "accept"), new DocumentVersionRequest(version)), DocumentStatuses.Approval);
+        foreach (var client in new[] { head, umu, stranger })
+            Assert.DoesNotContain(await MarkedAsync(client), m => m.Id == id);
+
+        // Согласие заведующего: документ ушёл из его очереди и стоит в списке — с отметкой и её временем.
+        await ExpectAsync(head.PostAsync(Url(created, "approval/approve"), null), DocumentStatuses.Approval);
+        Assert.DoesNotContain(await QueueAsync(head), q => q.Id == id);
+        var approved = Assert.Single(await MarkedAsync(head), m => m.Id == id);
+        Assert.Equal((created.Document.DisciplineCode, created.Document.DisciplineName, created.Document.Type, authorName),
+            (approved.DisciplineCode, approved.DisciplineName, approved.Type, approved.AuthorName));
+        Assert.Equal((DocumentStatuses.Approval, DocumentStatuses.Title(DocumentStatuses.Approval), SignatureStatuses.Approved, "согласовано"),
+            (approved.Status, approved.StatusTitle, approved.Mark, approved.MarkTitle));
+        await app.WithDbAsync(async db => Assert.Equal(
+            (await db.DocumentSignatures.SingleAsync(s => s.DocumentId == id && s.ResolvedUserId == headRecord.Id)).ApprovedAt,
+            approved.MarkedAt));
+        // Начальник УМУ ещё не отметился, посторонний согласующий документа не видит.
+        foreach (var client in new[] { umu, stranger })
+            Assert.DoesNotContain(await MarkedAsync(client), m => m.Id == id);
+
+        // Возврат начальника УМУ: отметка «возвращено», её время — из истории статусов; документ у методиста.
+        version = await ExpectAsync(umu.PostAsJsonAsync(Url(created, "approval/reject"), new RejectRequest("Нет литературы")),
+            DocumentStatuses.UnderReview);
+        var rejected = Assert.Single(await MarkedAsync(umu), m => m.Id == id);
+        Assert.Equal((DocumentStatuses.UnderReview, SignatureStatuses.Rejected, "возвращено", await ReturnTimeAsync(id)),
+            (rejected.Status, rejected.Mark, rejected.MarkTitle, rejected.MarkedAt));
+        // Согласие заведующего принадлежит тому же кругу и остаётся, пока не начат новый; ждать отметок у обоих нечего.
+        var kept = Assert.Single(await MarkedAsync(head), m => m.Id == id);
+        Assert.Equal((DocumentStatuses.UnderReview, SignatureStatuses.Approved, approved.MarkedAt), (kept.Status, kept.Mark, kept.MarkedAt));
+        foreach (var client in new[] { head, umu })
+            Assert.DoesNotContain(await QueueAsync(client), q => q.Id == id);
+
+        // Новый приём — новый круг: отметки сброшены, документ снова в очереди обоих и из списков отмеченных ушёл.
+        await ExpectAsync(methodist.PostAsJsonAsync(Url(created, "accept"), new DocumentVersionRequest(version)), DocumentStatuses.Approval);
+        foreach (var client in new[] { head, umu })
+        {
+            Assert.Contains(await QueueAsync(client), q => q.Id == id);
+            Assert.DoesNotContain(await MarkedAsync(client), m => m.Id == id);
+        }
+
+        // Оба согласовали: документ «Согласован», у обоих в списке — «согласовано».
+        await ExpectAsync(umu.PostAsync(Url(created, "approval/approve"), null), DocumentStatuses.Approval);
+        await ExpectAsync(head.PostAsync(Url(created, "approval/approve"), null), DocumentStatuses.Approved);
+        foreach (var client in new[] { head, umu })
+        {
+            var done = Assert.Single(await MarkedAsync(client), m => m.Id == id);
+            Assert.Equal((DocumentStatuses.Approved, SignatureStatuses.Approved), (done.Status, done.Mark));
+        }
+    }
+
+    /// <summary>
+    /// В «Отмеченных мной» сверху — последние отметки, а документ, где у человека два места, стоит один раз: его
+    /// отметки в документе ставятся вместе.
+    /// </summary>
+    [Fact]
+    public async Task Marked_list_puts_the_latest_mark_first_and_lists_a_document_once()
+    {
+        // Два документа одной дисциплины в разных шаблонах: заведующий кафедрой и начальник УМУ у них общие.
+        var (_, methodist, first, firstVersion) = await UnderReviewAsync("Б1.О.13");
+        var (_, _, second, secondVersion) = await UnderReviewAsync("Б1.О.13");
+        var (head, headRecord) = await DocumentData.SignatoryAsync(app, first.Document.DisciplineId, SignatoryRoles.DepartmentHead);
+        await ExpectAsync(methodist.PostAsJsonAsync(Url(first, "accept"), new DocumentVersionRequest(firstVersion)), DocumentStatuses.Approval);
+        await ExpectAsync(methodist.PostAsJsonAsync(Url(second, "accept"), new DocumentVersionRequest(secondVersion)), DocumentStatuses.Approval);
+
+        // Во втором документе заведующий занимает и место начальника УМУ (ручное назначение, FR-REV-13).
+        var assigned = await methodist.PostAsJsonAsync(
+            Url(second, $"approval/seats/{SignatoryRoles.UmuHead}/assign"), new AssignRequest(headRecord.Id));
+        Assert.Equal(HttpStatusCode.OK, assigned.StatusCode);
+
+        // Сначала он отмечает второй документ — обе его строки сразу, потом первый: последний в списке — сверху.
+        await ExpectAsync(head.PostAsync(Url(second, "approval/approve"), null), DocumentStatuses.Approved);
+        await ExpectAsync(head.PostAsync(Url(first, "approval/approve"), null), DocumentStatuses.Approval);
+
+        var marked = (await MarkedAsync(head)).Where(m => m.Id == first.Document.Id || m.Id == second.Document.Id).ToList();
+        Assert.Equal([first.Document.Id, second.Document.Id], marked.Select(m => m.Id));
+        Assert.True(marked[0].MarkedAt > marked[1].MarkedAt);
+        Assert.Equal([DocumentStatuses.Approval, DocumentStatuses.Approved], marked.Select(m => m.Status));
+        await app.WithDbAsync(async db => Assert.Equal(2,
+            await db.DocumentSignatures.CountAsync(s => s.DocumentId == second.Document.Id && s.ResolvedUserId == headRecord.Id)));
+    }
+
+    /// <summary>
+    /// Пометка «с согласования» в очереди «Проверка» (этап 6.1, C4; FR-REV-01, S-30): у документа на проверке последний
+    /// переход в этот статус пришёл с согласования — в ответе списка кто и когда вернул. У отправленного автором её нет;
+    /// возврат автору и новая отправка её снимают. Пометку получают методист и администратор, автор — нет.
+    /// </summary>
+    [Fact]
+    public async Task Review_queue_marks_the_documents_returned_from_approval()
+    {
+        var (author, methodist, returned, version) = await UnderReviewAsync("Б1.О.13");
+        var (_, _, sent, _) = await UnderReviewAsync("Б1.О.12");
+        var (head, headRecord) = await DocumentData.SignatoryAsync(app, returned.Document.DisciplineId, SignatoryRoles.DepartmentHead);
+        var (umu, umuRecord) = await DocumentData.SignatoryAsync(app, returned.Document.DisciplineId, SignatoryRoles.UmuHead);
+        var (admin, _) = await DocumentData.UserAsync(app, AppRoles.Admin);
+        var (id, sentId) = (returned.Document.Id, sent.Document.Id);
+
+        // Оба документа отправил автор — помечать нечего.
+        var queue = (await ReviewQueueAsync(methodist)).Where(d => d.Id == id || d.Id == sentId).ToList();
+        Assert.Equal(2, queue.Count);
+        Assert.All(queue, d => Assert.Null(d.FromApproval));
+
+        // Начальник УМУ вернул документ с согласования: на согласовании в очереди его не было, теперь он с пометкой.
+        await ExpectAsync(methodist.PostAsJsonAsync(Url(returned, "accept"), new DocumentVersionRequest(version)), DocumentStatuses.Approval);
+        Assert.DoesNotContain(await ReviewQueueAsync(methodist), d => d.Id == id);
+        version = await ExpectAsync(umu.PostAsJsonAsync(Url(returned, "approval/reject"), new RejectRequest("Нет литературы")),
+            DocumentStatuses.UnderReview);
+        var firstReturn = Assert.Single(await ReviewQueueAsync(methodist), d => d.Id == id).FromApproval!;
+        Assert.Equal((umuRecord.ShortName, await ReturnTimeAsync(id)), (firstReturn.By, firstReturn.At));
+        // Отправленный автором — без пометки; администратору пометка видна так же, автору — нет.
+        Assert.Null(Assert.Single(await ReviewQueueAsync(methodist), d => d.Id == sentId).FromApproval);
+        Assert.Equal(firstReturn, Assert.Single(await ReviewQueueAsync(admin), d => d.Id == id).FromApproval);
+        Assert.Null(Assert.Single(await ReviewQueueAsync(author), d => d.Id == id).FromApproval);
+
+        // Второй круг и второй возврат — пометка про последний: кто вернул теперь, а не в первый раз.
+        await ExpectAsync(methodist.PostAsJsonAsync(Url(returned, "accept"), new DocumentVersionRequest(version)), DocumentStatuses.Approval);
+        version = await ExpectAsync(head.PostAsJsonAsync(Url(returned, "approval/reject"), new RejectRequest("Не согласен с темой")),
+            DocumentStatuses.UnderReview);
+        var secondReturn = Assert.Single(await ReviewQueueAsync(methodist), d => d.Id == id).FromApproval!;
+        Assert.Equal((headRecord.ShortName, await ReturnTimeAsync(id)), (secondReturn.By, secondReturn.At));
+        Assert.True(secondReturn.At > firstReturn.At);
+
+        // Методист вернул документ автору, тот исправил и отправил снова: последний переход — уже не с согласования.
+        var remark = await methodist.PostAsJsonAsync(Url(returned, "comments"), new CommentRequest("/thematic_plan/0/hours", "Разбейте часы по темам"));
+        Assert.Equal(HttpStatusCode.Created, remark.StatusCode);
+        var comment = (await remark.Content.ReadFromJsonAsync<CommentItem>())!;
+        version = await ExpectAsync(methodist.PostAsJsonAsync(Url(returned, "return"), new ReturnRequest(version, null)), DocumentStatuses.Returned);
+        Assert.DoesNotContain(await ReviewQueueAsync(methodist), d => d.Id == id);
+        Assert.True((await author.PostAsync(Url(returned, $"comments/{comment.Id}/resolve"), null)).IsSuccessStatusCode);
+        await ExpectAsync(author.PostAsJsonAsync(Url(returned, "submit"), new DocumentVersionRequest(version)), DocumentStatuses.UnderReview);
+        Assert.Null(Assert.Single(await ReviewQueueAsync(methodist), d => d.Id == id).FromApproval);
+    }
+
     private async Task<(HttpClient Author, HttpClient Methodist, DocumentDetails Created, int Version)> UnderReviewAsync(
         string code, IReadOnlyCollection<string>? electronicSeats = null)
     {
@@ -413,6 +562,23 @@ public class DocumentApprovalApiTests(DatabaseFixture app)
 
     private static async Task<List<ApprovalQueueItem>> QueueAsync(HttpClient client) =>
         (await client.GetFromJsonAsync<List<ApprovalQueueItem>>("/api/approvals"))!;
+
+    private static async Task<List<MarkedApprovalItem>> MarkedAsync(HttpClient client) =>
+        (await client.GetFromJsonAsync<List<MarkedApprovalItem>>("/api/approvals/marked"))!;
+
+    // Очередь «Проверка»: документы на проверке; методисту и администратору — со всеми авторами, автору — только его.
+    private static async Task<List<DocumentListItem>> ReviewQueueAsync(HttpClient client) =>
+        (await client.GetFromJsonAsync<List<DocumentListItem>>("/api/documents?status=under_review"))!;
+
+    // Время последнего возврата с согласования — по истории статусов, как его берёт и сервер.
+    private async Task<DateTimeOffset> ReturnTimeAsync(Guid documentId)
+    {
+        var at = default(DateTimeOffset);
+        await app.WithDbAsync(async db => at = await db.DocumentStatusHistory
+            .Where(h => h.DocumentId == documentId && h.FromStatus == DocumentStatuses.Approval && h.ToStatus == DocumentStatuses.UnderReview)
+            .MaxAsync(h => h.ChangedAt));
+        return at;
+    }
 
     private static async Task<DocumentDetails> DetailsAsync(HttpClient client, DocumentDetails document) =>
         (await client.GetFromJsonAsync<DocumentDetails>(Url(document, "")))!;

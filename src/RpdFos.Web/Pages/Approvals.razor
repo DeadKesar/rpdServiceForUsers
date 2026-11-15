@@ -8,64 +8,111 @@
 
 <PageTitle>Согласование</PageTitle>
 
-@* Очередь согласования (S-31): документы, ждущие отметки пользователя. Согласование параллельное — порядок не задан;
-   в списке — от отправленных раньше к отправленным позже. Отметка ставится на странице документа. *@
+@* Согласование (S-31). Первый список — очередь: документы, ждущие отметки пользователя; порядок согласования не задан,
+   в списке — от отправленных раньше к отправленным позже; отметка ставится на странице документа. Второй — «Отмеченные
+   мной» (этап 6.1, C4): документы, где в текущем круге стоит отметка пользователя, согласие или возврат; после отметки
+   документ уходит из очереди, и без этого списка открыть его можно было только по прямой ссылке. Сверху — последние. *@
 <h1 class="h3">Документы на согласовании</h1>
 
 @if (message is not null)
 {
     <div class="alert alert-danger py-2">@message</div>
 }
-else if (documents is null)
+else if (documents is null || marked is null)
 {
     <p>Загрузка…</p>
 }
-else if (documents.Count == 0)
-{
-    <p class="text-muted">Документов, ждущих вашего согласования, нет.</p>
-}
 else
 {
-    <table class="table table-sm align-middle">
-        <thead>
-            <tr><th>Отправлен на согласование</th><th>Дисциплина</th><th>Тип</th><th>Автор</th><th>План</th></tr>
-        </thead>
-        <tbody>
-            @foreach (var d in documents)
-            {
-                <tr>
-                    <td class="text-nowrap">@(d.SentAt?.ToLocalTime().ToString("dd.MM.yyyy HH:mm") ?? "—")</td>
-                    <td><a href="documents/@d.Id">@d.DisciplineCode @d.DisciplineName</a></td>
-                    <td>@(d.Type == "fos" ? "ФОС" : "РПД")</td>
-                    <td>@d.AuthorName</td>
-                    <td class="small text-muted">@d.Plan?.Title</td>
-                </tr>
-            }
-        </tbody>
-    </table>
+    <h2 class="h5">Ждут вашей отметки</h2>
+    @if (documents.Count == 0)
+    {
+        <p class="text-muted">Документов, ждущих вашего согласования, нет.</p>
+    }
+    else
+    {
+        <table class="table table-sm align-middle">
+            <thead>
+                <tr><th>Отправлен на согласование</th><th>Дисциплина</th><th>Тип</th><th>Автор</th><th>План</th></tr>
+            </thead>
+            <tbody>
+                @foreach (var d in documents)
+                {
+                    <tr>
+                        <td class="text-nowrap">@(d.SentAt?.ToLocalTime().ToString("dd.MM.yyyy HH:mm") ?? "—")</td>
+                        <td><a href="documents/@d.Id">@d.DisciplineCode @d.DisciplineName</a></td>
+                        <td>@(d.Type == "fos" ? "ФОС" : "РПД")</td>
+                        <td>@d.AuthorName</td>
+                        <td class="small text-muted">@d.Plan?.Title</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+
+    <h2 class="h5 mt-4">Отмеченные мной</h2>
+    @if (marked.Count == 0)
+    {
+        <p class="text-muted">Отметок в текущих кругах согласования у вас нет.</p>
+    }
+    else
+    {
+        <table class="table table-sm align-middle">
+            <thead>
+                <tr><th>Дисциплина</th><th>Автор</th><th>Тип</th><th>Статус документа</th><th>Отметка</th><th>Время</th></tr>
+            </thead>
+            <tbody>
+                @foreach (var m in marked)
+                {
+                    <tr>
+                        <td><a href="documents/@m.Id">@m.DisciplineCode @m.DisciplineName</a></td>
+                        <td>@m.AuthorName</td>
+                        <td class="text-nowrap">@(m.Type == "fos" ? "ФОС" : "РПД")</td>
+                        <td>@m.StatusTitle</td>
+                        <td><span class="badge @Badge(m.Mark)">@m.MarkTitle</span></td>
+                        <td class="text-nowrap">@(m.MarkedAt?.ToLocalTime().ToString("dd.MM.yyyy HH:mm") ?? "—")</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
 }
 
 @code {
     private List<ApprovalQueueItem>? documents;
+    private List<MarkedApprovalItem>? marked;
     private string? message;
 
     protected override async Task OnInitializedAsync()
     {
         try
         {
-            var response = await Http.GetAsync("api/approvals");
-            if (response.IsSuccessStatusCode) documents = await response.Content.ReadFromJsonAsync<List<ApprovalQueueItem>>() ?? [];
-            else
-            {
-                // Например, учётная запись не связана со справочником сотрудников.
-                var problem = await response.Content.ReadFromJsonAsync<DocumentProblem>();
-                message = problem?.Detail is { } detail ? $"{problem.Title}. {detail}"
-                    : problem?.Title ?? $"Очередь не получена (код ответа {(int)response.StatusCode}).";
-            }
+            // Обе выдачи отказывают одинаково (например, учётная запись не связана со справочником сотрудников),
+            // поэтому второй запрос — только если первый прошёл.
+            (documents, message) = await LoadAsync<ApprovalQueueItem>("api/approvals", "Очередь");
+            if (message is null) (marked, message) = await LoadAsync<MarkedApprovalItem>("api/approvals/marked", "Список отмеченных");
         }
         catch (AccessTokenNotAvailableException e)
         {
             e.Redirect();
         }
     }
+
+    private async Task<(List<T>? Items, string? Message)> LoadAsync<T>(string url, string what)
+    {
+        var response = await Http.GetAsync(url);
+        if (response.IsSuccessStatusCode) return (await response.Content.ReadFromJsonAsync<List<T>>() ?? [], null);
+
+        var problem = await response.Content.ReadFromJsonAsync<DocumentProblem>();
+        return (null, problem?.Detail is { } detail ? $"{problem.Title}. {detail}"
+            : problem?.Title ?? $"{what} не получен (код ответа {(int)response.StatusCode}).");
+    }
+
+    // Цвета отметок — как в панели «Согласование» на странице документа.
+    private static string Badge(string mark) => mark switch
+    {
+        "approved" => "text-bg-success",
+        "rejected" => "text-bg-warning",
+        _ => "text-bg-secondary"
+    };
 }

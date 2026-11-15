@@ -8,7 +8,9 @@
 
 <PageTitle>Проверка</PageTitle>
 
-@* Очередь проверки (S-30): документы на проверке — от отправленных раньше к отправленным позже. *@
+@* Очередь проверки (S-30): документы на проверке — от отправленных раньше к отправленным позже. Документ, который вернул
+   согласующий, помечен «с согласования» (этап 6.1, C4); дата отправки у него прежняя — автором, а кто и когда вернул,
+   написано в пометке. *@
 <h1 class="h3">Документы на проверке</h1>
 
 @if (documents is null)
@@ -30,7 +32,17 @@ else
             {
                 <tr>
                     <td class="text-nowrap">@(d.SubmittedAt?.ToLocalTime().ToString("dd.MM.yyyy HH:mm") ?? "—")</td>
-                    <td><a href="documents/@d.Id">@d.DisciplineCode @d.DisciplineName</a></td>
+                    <td>
+                        <a href="documents/@d.Id">@d.DisciplineCode @d.DisciplineName</a>
+                        @if (d.FromApproval is { } back)
+                        {
+                            @* Без родовых форм («возврат», не «вернул»): пол согласующего системе неизвестен. *@
+                            <div class="small">
+                                <span class="badge text-bg-warning">с согласования</span>
+                                <span class="text-muted">возврат: @back.By, @back.At.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</span>
+                            </div>
+                        }
+                    </td>
                     <td>@(d.Type == "fos" ? "ФОС" : "РПД")</td>
                     <td>@d.AuthorName</td>
                     <td class="small text-muted">@d.Plan?.Title</td>

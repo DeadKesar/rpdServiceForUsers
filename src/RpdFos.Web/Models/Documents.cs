@@ -4,9 +4,13 @@ namespace RpdFos.Web.Models;
 
 // Контракт API документов (Features/Documents) на стороне клиента.
 
+/// <param name="FromApproval">Документ на проверке вернулся с согласования (приходит методисту и администратору).</param>
 public sealed record DocumentListItem(Guid Id, string Title, string Type, string Status, string StatusTitle, bool IsOutdated,
     string DisciplineCode, string DisciplineName, PlanItem? Plan, int TemplateRevision, string AuthorName, DateTimeOffset UpdatedAt,
-    DateTimeOffset? SubmittedAt, int Version = 0, bool CanDelete = false);
+    DateTimeOffset? SubmittedAt, int Version = 0, bool CanDelete = false, ReturnedFromApproval? FromApproval = null);
+
+/// <summary>Кто и когда вернул документ с согласования на проверку.</summary>
+public sealed record ReturnedFromApproval(string By, DateTimeOffset At);
 
 public sealed record DisciplineOption(Guid Id, string Code, string Name, Guid? DocumentId, string? DocumentAuthor, bool CanOpen);
 
@@ -36,6 +40,13 @@ public sealed record ApprovalReturn(string? By, DateTimeOffset At, string? Comme
 /// <summary>Документ в очереди согласующего (S-31).</summary>
 public sealed record ApprovalQueueItem(Guid Id, string Type, string DisciplineCode, string DisciplineName, string AuthorName,
     PlanItem? Plan, DateTimeOffset? SentAt);
+
+/// <summary>
+/// Документ в списке «Отмеченные мной» (S-31): статус документа сейчас и отметка пользователя в текущем круге —
+/// <paramref name="Mark"/> (<c>approved</c> или <c>rejected</c>), её подпись и время.
+/// </summary>
+public sealed record MarkedApprovalItem(Guid Id, string Type, string DisciplineCode, string DisciplineName, string AuthorName,
+    string Status, string StatusTitle, string Mark, string MarkTitle, DateTimeOffset? MarkedAt);
 
 /// <summary>Исправление поля из учебного плана: место, было, стало, кто и когда.</summary>
 public sealed record PlanCorrection(string Path, JsonElement? Before, JsonElement? After, string? ChangedBy, DateTimeOffset ChangedAt);
