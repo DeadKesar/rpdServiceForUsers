@@ -14,11 +14,12 @@ public enum ReviewProblem { NoUnresolvedComments, UnresolvedComments, UnknownFie
 /// <summary>
 /// Проверка документа: отправка автором с полной проверкой, возврат на доработку и приём методистом, замечания
 /// к полям. Каждая смена статуса — запись в истории и снимок версии (<c>status_change</c>). Права пользователя
-/// проверяет вызывающий; сохраняет тоже он — с версией клиента.
+/// проверяет вызывающий; сохраняет тоже он — с версией клиента. Уведомления о событиях создаются в том же сохранении
+/// (этап 6.1, C3).
 /// </summary>
 public sealed class DocumentReview(
     AppDbContext db, DocumentTypeRegistry registry, IDocumentValidator validator, ValidationRuleSet rules, DocumentHistory history,
-    DocumentApproval approval, TimeProvider clock)
+    DocumentApproval approval, DocumentNotifications notifications, TimeProvider clock)
 {
     public const string ReturnedWithComments = "Замечаний: {0}";
 
@@ -37,8 +38,10 @@ public sealed class DocumentReview(
         var issues = await CheckAsync(document, ct);
         if (DocumentSubmission.HasErrors(issues)) return new(false, issues);
 
-        history.StatusChanged(document, document.Submit(clock.GetUtcNow()), authorId);
+        var from = document.Submit(clock.GetUtcNow());
+        var at = history.StatusChanged(document, from, authorId);
         await history.SnapshotAsync(document, authorId, VersionTriggers.StatusChange, ct);
+        await notifications.SubmittedAsync(document, authorId, again: from == DocumentStatuses.Returned, at, ct);
         return new(true, issues);
     }
 
@@ -49,8 +52,10 @@ public sealed class DocumentReview(
     public async Task<ReviewProblem?> TakeAsync(Document document, Guid reviewerId, string? reason, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(reason)) return ReviewProblem.EmptyText;
-        history.StatusChanged(document, document.TakeForReview(clock.GetUtcNow()), reviewerId, reason.Trim());
+        var text = reason.Trim();
+        var at = history.StatusChanged(document, document.TakeForReview(clock.GetUtcNow()), reviewerId, text);
         await history.SnapshotAsync(document, reviewerId, VersionTriggers.StatusChange, ct);
+        await notifications.TakenForReviewAsync(document, reviewerId, text, at, ct);
         return null;
     }
 
@@ -74,9 +79,10 @@ public sealed class DocumentReview(
         if (open == 0) return ReviewProblem.NoUnresolvedComments;
 
         var from = document.ReturnForRework();
-        history.StatusChanged(document, from, reviewerId,
-            string.IsNullOrWhiteSpace(comment) ? string.Format(ReturnedWithComments, open) : comment.Trim());
+        var general = string.IsNullOrWhiteSpace(comment) ? null : comment.Trim();
+        var at = history.StatusChanged(document, from, reviewerId, general ?? string.Format(ReturnedWithComments, open));
         await history.SnapshotAsync(document, reviewerId, VersionTriggers.StatusChange, ct);
+        await notifications.ReturnedForReworkAsync(document, reviewerId, open, general, at, ct);
         return null;
     }
 
@@ -93,10 +99,12 @@ public sealed class DocumentReview(
         var issues = await CheckAsync(document, ct);
         if (DocumentSubmission.HasErrors(issues)) return (ReviewProblem.CheckFailed, issues, null);
 
-        history.StatusChanged(document, document.Accept(), reviewerId);
+        var acceptedAt = history.StatusChanged(document, document.Accept(), reviewerId);
         var start = await approval.BeginAsync(document, reviewerId, ct);
         // Один снимок на приём и старт: содержимое между ними не меняется.
         await history.SnapshotAsync(document, reviewerId, VersionTriggers.StatusChange, ct);
+        // Автору — после старта: в уведомлении сказано, чем он кончился. Время — приёма, раньше уведомлений старта.
+        await notifications.AcceptedAsync(document, reviewerId, start, acceptedAt, ct);
         return (null, issues, start);
     }
 

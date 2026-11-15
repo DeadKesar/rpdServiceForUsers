@@ -16,12 +16,16 @@ public sealed class DocumentHistory(AppDbContext db, DocumentProjections project
 
     private DateTimeOffset lastChange;
 
-    public void StatusChanged(Document document, string from, Guid by, string? comment = null) =>
+    /// <summary>Записывает переход статуса и возвращает его время: уведомление о событии получает то же время.</summary>
+    public DateTimeOffset StatusChanged(Document document, string from, Guid by, string? comment = null)
+    {
+        var at = NextMoment();
         db.DocumentStatusHistory.Add(new DocumentStatusChange
         {
-            DocumentId = document.Id, FromStatus = from, ToStatus = document.Status, ChangedBy = by, Comment = comment,
-            ChangedAt = NextMoment()
+            DocumentId = document.Id, FromStatus = from, ToStatus = document.Status, ChangedBy = by, Comment = comment, ChangedAt = at
         });
+        return at;
+    }
 
     // Два перехода одного сохранения (приём и старт согласования) стоят в истории в порядке событий: время второго —
     // позже первого не меньше чем на 2 мкс, чтобы различаться и после округления до точности timestamptz.

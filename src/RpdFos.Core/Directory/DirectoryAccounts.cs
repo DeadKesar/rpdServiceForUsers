@@ -112,5 +112,27 @@ public sealed class DirectoryAccounts(AppDbContext db, TimeProvider clock)
             .FirstOrDefaultAsync(ct);
     }
 
+    /// <summary>
+    /// Записи справочника, чьи учётные записи имеют роль, — получатели рассылки «всем методистам» (этап 6.1, C3).
+    /// Берутся только действующие: запись активна, вход разрешён, учётная запись не отключена администратором
+    /// (бессрочная блокировка, этап 5.2).
+    /// </summary>
+    public async Task<IReadOnlyList<Guid>> ActiveHoldersOfAsync(string role, CancellationToken ct = default)
+    {
+        var holders = await (
+                from ur in db.UserRoles
+                join r in db.Roles on ur.RoleId equals r.Id
+                join u in db.Users on ur.UserId equals u.Id
+                where r.Name == role
+                select new { ur.UserId, u.LockoutEnd })
+            .ToListAsync(ct);
+        var subjects = holders.Where(h => h.LockoutEnd != DateTimeOffset.MaxValue).Select(h => h.UserId.ToString()).ToList();
+        if (subjects.Count == 0) return [];
+
+        return await db.Employees
+            .Where(e => e.IsActive && e.CanLogin && e.IdentitySubject != null && subjects.Contains(e.IdentitySubject))
+            .Select(e => e.Id).ToListAsync(ct);
+    }
+
     private static string? NullIfEmpty(string text) => string.IsNullOrWhiteSpace(text) ? null : text;
 }

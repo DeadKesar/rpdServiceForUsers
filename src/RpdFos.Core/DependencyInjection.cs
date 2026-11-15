@@ -50,6 +50,7 @@ public static class DependencyInjection
         services.AddScoped<DocumentProjections>();
         services.AddScoped<DocumentCreation>();
         services.AddScoped<DocumentHistory>();
+        services.AddScoped<DocumentNotifications>();
         services.AddScoped<DocumentEditing>();
         services.AddScoped<DocumentReview>();
         services.AddScoped<SignatoryResolution>();

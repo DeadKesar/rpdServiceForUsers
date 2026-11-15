@@ -59,9 +59,10 @@ public sealed record ApprovalState(IReadOnlyList<ApprovalSeatState> Seats, Appro
 /// Строки возвращённого круга остаются до следующего приёма — методист видит, кто и почему вернул; новый круг
 /// начинает их заново. Отметки и состав прежних кругов — в журнале аудита.
 /// </para>
-/// Права пользователя проверяет вызывающий; сохраняет тоже он.
+/// Права пользователя проверяет вызывающий; сохраняет тоже он — вместе с уведомлениями о событиях круга (этап 6.1, C3).
 /// </summary>
-public sealed class DocumentApproval(AppDbContext db, SignatoryResolution signatories, DocumentHistory history, TimeProvider clock)
+public sealed class DocumentApproval(
+    AppDbContext db, SignatoryResolution signatories, DocumentHistory history, DocumentNotifications notifications, TimeProvider clock)
 {
     private static readonly JsonSerializerOptions Json = new() { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
 
@@ -75,7 +76,7 @@ public sealed class DocumentApproval(AppDbContext db, SignatoryResolution signat
         var rows = await ResetRoundAsync(document, seats, ct);
         var unassigned = Unassigned(rows, seats);
         if (unassigned.Count > 0) return new(false, unassigned);
-        Start(document, rows, by);
+        await StartRoundAsync(document, rows, seats, by, ct);
         return new(true, []);
     }
 
@@ -92,16 +93,21 @@ public sealed class DocumentApproval(AppDbContext db, SignatoryResolution signat
         if (rows.Count == 0) start = await BeginAsync(document, by, ct);
         else
         {
-            var unassigned = Unassigned(rows, await SeatsAsync(document, ct));
+            var seats = await SeatsAsync(document, ct);
+            var unassigned = Unassigned(rows, seats);
             if (unassigned.Count > 0) return (ApprovalProblem.Unassigned, new(false, unassigned));
-            Start(document, rows, by);
+            await StartRoundAsync(document, rows, seats, by, ct);
             start = new(true, []);
         }
         if (start.Started) await history.SnapshotAsync(document, by, VersionTriggers.StatusChange, ct);
         return (null, start);
     }
 
-    /// <summary>Назначить или заменить подписанта места — пока его отметки ждут (FR-REV-13). Замена — в журнал аудита.</summary>
+    /// <summary>
+    /// Назначить или заменить подписанта места — пока его отметки ждут (FR-REV-13). Замена — в журнал аудита. Круг уже
+    /// идёт — назначенный получает уведомление «ждёт вашего согласования»; в «Принят» круга ещё нет, назначенного
+    /// уведомит его старт.
+    /// </summary>
     public async Task<ApprovalProblem?> AssignAsync(Document document, string role, Guid employeeId, Guid by, CancellationToken ct = default)
     {
         if (!DocumentTransitions.CanAssignSignatory(document.Status)) return ApprovalProblem.WrongStatus;
@@ -115,6 +121,10 @@ public sealed class DocumentApproval(AppDbContext db, SignatoryResolution signat
             new JsonObject { ["role"] = row.Role, ["before"] = row.ResolvedUserId, ["after"] = employeeId }));
         row.Assign(employeeId);
         Touch(document);
+        if (document.Status == DocumentStatuses.Approval)
+            await notifications.AwaitingMarkAsync(document, by,
+                new Dictionary<Guid, IReadOnlyList<string>> { [employeeId] = [TitleOf(await SeatsAsync(document, ct), row.Role)] },
+                clock.GetUtcNow(), ct);
         return null;
     }
 
@@ -136,8 +146,9 @@ public sealed class DocumentApproval(AppDbContext db, SignatoryResolution signat
         Touch(document);
         if (rows.All(r => r.Status == SignatureStatuses.Approved))
         {
-            history.StatusChanged(document, document.Approve(now), signatoryId);
+            var approvedAt = history.StatusChanged(document, document.Approve(now), signatoryId);
             await history.SnapshotAsync(document, signatoryId, VersionTriggers.Approved, ct);
+            await notifications.ApprovedAsync(document, signatoryId, approvedAt, ct);
         }
         return null;
     }
@@ -159,8 +170,9 @@ public sealed class DocumentApproval(AppDbContext db, SignatoryResolution signat
             db.AuditLog.Add(Audit(document, signatoryId, AuditEvents.SignatureRejected,
                 new JsonObject { ["role"] = row.Role, ["comment"] = text }));
         }
-        history.StatusChanged(document, document.ReturnFromApproval(), signatoryId, text);
+        var returnedAt = history.StatusChanged(document, document.ReturnFromApproval(), signatoryId, text);
         await history.SnapshotAsync(document, signatoryId, VersionTriggers.StatusChange, ct);
+        await notifications.ReturnedFromApprovalAsync(document, signatoryId, text, returnedAt, ct);
         return null;
     }
 
@@ -233,9 +245,10 @@ public sealed class DocumentApproval(AppDbContext db, SignatoryResolution signat
         rows.Where(r => r.ResolvedUserId is null)
             .Select(r => seats.FirstOrDefault(s => s.Role == r.Role)?.Title ?? SignatoryRoles.Title(r.Role)).ToList();
 
-    private void Start(Document document, IReadOnlyList<DocumentSignature> rows, Guid by)
+    private async Task StartRoundAsync(
+        Document document, IReadOnlyList<DocumentSignature> rows, IReadOnlyList<SignatureSeat> seats, Guid by, CancellationToken ct)
     {
-        history.StatusChanged(document, document.StartApproval(), by);
+        var startedAt = history.StatusChanged(document, document.StartApproval(), by);
         db.AuditLog.Add(Audit(document, by, AuditEvents.ApprovalStarted, new JsonObject
         {
             ["seats"] = new JsonArray(rows.Select(r => (JsonNode)new JsonObject
@@ -244,8 +257,23 @@ public sealed class DocumentApproval(AppDbContext db, SignatoryResolution signat
             }).ToArray())
         }));
         // В листе согласования шаблона нет электронных мест — отмечать некому: согласие «всех» уже есть (UC-08).
-        if (rows.Count == 0) history.StatusChanged(document, document.Approve(clock.GetUtcNow()), by);
+        if (rows.Count == 0)
+        {
+            var approvedAt = history.StatusChanged(document, document.Approve(clock.GetUtcNow()), by);
+            await notifications.ApprovedAsync(document, by, approvedAt, ct);
+            return;
+        }
+
+        // Согласующим — «ждёт вашего согласования»: одно уведомление на человека со всеми его местами.
+        await notifications.AwaitingMarkAsync(document, by,
+            rows.Where(r => r.ResolvedUserId is not null).GroupBy(r => r.ResolvedUserId!.Value)
+                .ToDictionary(g => g.Key, g => (IReadOnlyList<string>)g.Select(r => TitleOf(seats, r.Role)).ToList()),
+            startedAt, ct);
     }
+
+    // Название места: из листа согласования шаблона, иначе — общее название категории.
+    private static string TitleOf(IReadOnlyList<SignatureSeat> seats, string role) =>
+        seats.FirstOrDefault(s => s.Role == role)?.Title ?? SignatoryRoles.Title(role);
 
     // Строки пользователя, ждущие отметки. Порядок отказов: чужой документ, не тот статус, отметка уже стоит.
     private async Task<(List<DocumentSignature> Mine, List<DocumentSignature> Rows, ApprovalProblem? Problem)> PendingOfAsync(

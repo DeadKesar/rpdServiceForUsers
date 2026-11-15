@@ -25,7 +25,7 @@ public sealed record SectionUpdateResult(SectionUpdateProblem? Problem, IReadOnl
 /// </summary>
 public sealed class DocumentEditing(
     AppDbContext db, DocumentTypeRegistry registry, IDocumentValidator validator, RichTextSanitizer sanitizer,
-    ValidationRuleSet rules, DocumentHistory history, TimeProvider clock)
+    ValidationRuleSet rules, DocumentHistory history, DocumentNotifications notifications, TimeProvider clock)
 {
     public const string ReadOnlyChanged = "Поле из учебного плана — изменять нельзя";
 
@@ -116,7 +116,7 @@ public sealed class DocumentEditing(
         if (scope == DocumentEditScope.PlanOnly) document.CorrectPlanFields(updatedJson);
         else if (document.Edit(updatedJson) is { } previous) history.StatusChanged(document, previous, editorId);
         var now = clock.GetUtcNow();
-        if (broken.Count > 0) ReturnToAuthor(document, broken, schema, editorId, now);
+        if (broken.Count > 0) await ReturnToAuthorAsync(document, broken, schema, editorId, now, ct);
         foreach (var c in corrections)
             db.AuditLog.Add(new AuditLogEntry
             {
@@ -132,11 +132,13 @@ public sealed class DocumentEditing(
     }
 
     // «Принят → На доработке»: замечание от исправившего к месту первой ошибки раздела — по одному на раздел, текст —
-    // ошибки раздела; в истории — причина возврата.
-    private void ReturnToAuthor(Document document, IReadOnlyList<DocumentValidationError> errors, JsonElement schema, Guid editorId,
-        DateTimeOffset now)
+    // ошибки раздела; в истории — причина возврата. Автору — уведомление с числом замечаний (этап 6.1, C3).
+    private async Task ReturnToAuthorAsync(
+        Document document, IReadOnlyList<DocumentValidationError> errors, JsonElement schema, Guid editorId, DateTimeOffset now,
+        CancellationToken ct)
     {
-        history.StatusChanged(document, document.ReturnAfterPlanCorrection(), editorId, ReturnedAfterPlanCorrection);
+        var returnedAt = history.StatusChanged(document, document.ReturnAfterPlanCorrection(), editorId, ReturnedAfterPlanCorrection);
+        var remarks = 0;
         foreach (var group in errors.GroupBy(e => DocumentSubmission.Section(e.Path)))
         {
             var place = group.First().Path;
@@ -146,7 +148,9 @@ public sealed class DocumentEditing(
                 DocumentId = document.Id, AuthorId = editorId, FieldPath = place, CreatedAt = now,
                 Text = $"После исправления данных плана: {string.Join("; ", group.Select(e => e.Message).Distinct())}."
             });
+            remarks++;
         }
+        await notifications.ReturnedAfterPlanCorrectionAsync(document, editorId, remarks, returnedAt, ct);
     }
 
     /// <summary>«Сохранить»: новый снимок версии; черновик становится сохранённым черновиком.</summary>
