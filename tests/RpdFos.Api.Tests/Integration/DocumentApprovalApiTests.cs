@@ -302,6 +302,71 @@ public class DocumentApprovalApiTests(DatabaseFixture app)
         await app.WithDbAsync(async db => Assert.NotNull((await db.Documents.SingleAsync(d => d.Id == created.Document.Id)).ApprovedAt));
     }
 
+    /// <summary>
+    /// Решение автора 15.11.2026 (этап 6.1, C2): заведующий кафедрой согласует собственный РПД сам. Одна запись
+    /// справочника — и автор документа, и подписант места; у учётной записи две роли — преподаватель и утверждающий.
+    /// Ни приём, ни очередь, ни отметка не требуют, чтобы согласующий был не автором; своя отметка стоит в любой
+    /// очерёдности — первой или последней.
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Author_who_is_also_the_signatory_marks_their_own_document(bool authorMarksFirst)
+    {
+        var disciplineId = await DocumentData.DisciplineAsync(app, "Б1.О.13");
+        var (head, headRecord) = await DocumentData.SignatoryAsync(app, disciplineId, SignatoryRoles.DepartmentHead,
+            $"{AppRoles.Teacher},{AppRoles.Approver}");
+        var (umu, umuRecord) = await DocumentData.SignatoryAsync(app, disciplineId, SignatoryRoles.UmuHead);
+        var (methodist, _) = await DocumentData.UserAsync(app, AppRoles.Methodist);
+        var template = await DocumentData.PublishedTemplateAsync(app);
+
+        var created = await DocumentData.CreateAsync(app, head, template.Id, "Б1.О.13");
+        Assert.Equal(headRecord.Id, created.Document.AuthorId);
+        var version = await DocumentData.FillForSubmissionAsync(head, created);
+        version = await ExpectAsync(head.PostAsJsonAsync(Url(created, "submit"), new DocumentVersionRequest(version)), DocumentStatuses.UnderReview);
+        await ExpectAsync(methodist.PostAsJsonAsync(Url(created, "accept"), new DocumentVersionRequest(version)), DocumentStatuses.Approval);
+
+        // Документ в очереди автора как в очереди любого согласующего; правок на согласовании нет, отметка и печать есть.
+        var queued = Assert.Single(await QueueAsync(head), q => q.Id == created.Document.Id);
+        Assert.Equal(headRecord.ShortName, queued.AuthorName);
+        var forHead = await DetailsAsync(head, created);
+        Assert.Equal((false, true, true), (forHead.Editable, forHead.Actions.Approve, forHead.Actions.Print));
+        Assert.Equal([SignatoryRoles.DepartmentHead], forHead.Approval!.Seats.Where(s => s.Mine).Select(s => s.Role));
+        Assert.Null(forHead.Approval.Returned);
+
+        // Первая отметка — документ остаётся на согласовании, из очереди ушёл тот, кто отметил.
+        var (first, last, lastRecord) = authorMarksFirst ? (head, umu, umuRecord) : (umu, head, headRecord);
+        await ExpectAsync(first.PostAsync(Url(created, "approval/approve"), null), DocumentStatuses.Approval);
+        Assert.DoesNotContain(await QueueAsync(first), q => q.Id == created.Document.Id);
+        Assert.Contains(await QueueAsync(last), q => q.Id == created.Document.Id);
+
+        // Последняя — «Согласован», в том числе когда последним отмечает сам автор.
+        await ExpectAsync(last.PostAsync(Url(created, "approval/approve"), null), DocumentStatuses.Approved);
+        Assert.DoesNotContain(await QueueAsync(last), q => q.Id == created.Document.Id);
+        Assert.Equal(HttpStatusCode.Conflict, (await head.PostAsync(Url(created, "approval/approve"), null)).StatusCode);
+
+        // Автору правки закрыты, печать доступна — как и остальным участникам.
+        var approved = await DetailsAsync(head, created);
+        Assert.Equal((false, false, true), (approved.Editable, approved.Actions.Approve, approved.Actions.Print));
+        Assert.All(approved.Approval!.Seats, s => Assert.Equal(SignatureStatuses.Approved, s.Status));
+        var title = JsonNode.Parse(approved.Payload.GetProperty("title_page").GetRawText())!;
+        Assert.Equal(HttpStatusCode.Conflict,
+            (await head.PatchAsJsonAsync(Url(created, "sections/title_page"), Section(approved.Document.Version, title))).StatusCode);
+        foreach (var participant in new[] { head, methodist, umu })
+            Assert.Equal(HttpStatusCode.Accepted, (await participant.PostAsync(Url(created, "print/docx"), null)).StatusCode);
+
+        await app.WithDbAsync(async db =>
+        {
+            Assert.NotNull((await db.Documents.SingleAsync(d => d.Id == created.Document.Id)).ApprovedAt);
+            var history = await db.DocumentStatusHistory.Where(h => h.DocumentId == created.Document.Id).OrderBy(h => h.ChangedAt).ToListAsync();
+            // «Согласован» ставит последний отметивший: заведующий — автор документа или начальник УМУ.
+            Assert.Equal((DocumentStatuses.Approval, DocumentStatuses.Approved, lastRecord.Id), (history[^1].FromStatus!, history[^1].ToStatus, history[^1].ChangedBy));
+            var rows = await db.DocumentSignatures.Where(s => s.DocumentId == created.Document.Id).ToListAsync();
+            Assert.Equal(2, rows.Count);
+            Assert.All(rows, r => Assert.Equal((SignatureStatuses.Approved, true), (r.Status, r.ApprovedAt is not null)));
+        });
+    }
+
     private async Task<(HttpClient Author, HttpClient Methodist, DocumentDetails Created, int Version)> UnderReviewAsync(
         string code, IReadOnlyCollection<string>? electronicSeats = null)
     {
