@@ -65,6 +65,12 @@ public static class SignatureStatuses
 {
     public const string Pending = "pending", Approved = "approved", Rejected = "rejected";
 
+    /// <summary>
+    /// Только для показа, в таблице не хранится (потому и нет в <see cref="All"/>): строка ждала отметки, когда круг
+    /// закончился возвратом. В таблице она остаётся <see cref="Pending"/> до нового приёма, но ждать ей уже нечего.
+    /// </summary>
+    public const string Interrupted = "interrupted";
+
     public static readonly string[] All = [Pending, Approved, Rejected];
 
     public static string Title(string status) => status switch
@@ -72,6 +78,7 @@ public static class SignatureStatuses
         Pending => "ожидает",
         Approved => "согласовано",
         Rejected => "возвращено",
+        Interrupted => "круг прерван",
         _ => status
     };
 }

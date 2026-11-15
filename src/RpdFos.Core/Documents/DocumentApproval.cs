@@ -36,7 +36,8 @@ public enum ApprovalProblem
 public sealed record ApprovalStart(bool Started, IReadOnlyList<string> Unassigned);
 
 /// <summary>
-/// Место электронного согласования документа: кто назначен и что отметил. <see cref="CanSign"/> — у назначенного
+/// Место электронного согласования документа: кто назначен и что отметил. <see cref="Status"/> — статус строки; у ждавшей
+/// отметки строки окончившегося круга — <see cref="SignatureStatuses.Interrupted"/>. <see cref="CanSign"/> — у назначенного
 /// есть действующая учётная запись с ролью «Утверждающий»: без неё отметку поставить некому.
 /// </summary>
 public sealed record ApprovalSeatState(
@@ -177,7 +178,10 @@ public sealed class DocumentApproval(AppDbContext db, SignatoryResolution signat
         var ids = rows.Select(r => r.ResolvedUserId).OfType<Guid>().Distinct().ToList();
         var people = await db.Employees.AsNoTracking().Where(e => ids.Contains(e.Id)).ToDictionaryAsync(e => e.Id, ct);
         var able = await ApproversAsync(people.Values, ct);
-        var returned = rows.Any(r => r.Status == SignatureStatuses.Rejected) ? await LastReturnAsync(document.Id, ct) : null;
+        // Возврат закончил круг. Его строки остаются в таблице до нового приёма, и не успевшая отметиться осталась бы
+        // «ожидает» — как живая; в панели её подписывают явно (замечание автора после C2).
+        var ended = rows.Any(r => r.Status == SignatureStatuses.Rejected);
+        var returned = ended ? await LastReturnAsync(document.Id, ct) : null;
 
         var order = new Dictionary<string, int>();
         foreach (var seat in seats) order.TryAdd(seat.Role, order.Count);
@@ -185,7 +189,8 @@ public sealed class DocumentApproval(AppDbContext db, SignatoryResolution signat
         {
             var person = r.ResolvedUserId is Guid id ? people.GetValueOrDefault(id) : null;
             return new ApprovalSeatState(r.Role, seats.FirstOrDefault(s => s.Role == r.Role)?.Title ?? SignatoryRoles.Title(r.Role),
-                person?.Id, person?.ShortName, person?.Position, r.Status,
+                person?.Id, person?.ShortName, person?.Position,
+                ended && r.Status == SignatureStatuses.Pending ? SignatureStatuses.Interrupted : r.Status,
                 r.Status == SignatureStatuses.Rejected ? returned?.At : r.ApprovedAt, r.Comment,
                 person is not null && able.Contains(person.Id));
         }).ToList(), returned);

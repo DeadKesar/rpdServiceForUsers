@@ -270,6 +270,38 @@ public class DocumentApprovalApiTests(DatabaseFixture app)
         });
     }
 
+    /// <summary>
+    /// Замечание автора после показа C2: строка согласующего, не успевшего отметиться до возврата, в таблице остаётся
+    /// «ожидает» до нового приёма, и методист читал её как живую. В панели такая строка подписана явно — «круг прерван»;
+    /// новый круг возвращает ей «ожидает».
+    /// </summary>
+    [Fact]
+    public async Task Return_from_approval_labels_the_rows_that_did_not_mark_as_interrupted()
+    {
+        var (_, methodist, created, version) = await UnderReviewAsync("Б1.О.12");
+        var (head, _) = await DocumentData.SignatoryAsync(app, created.Document.DisciplineId, SignatoryRoles.DepartmentHead);
+        var (umu, _) = await DocumentData.SignatoryAsync(app, created.Document.DisciplineId, SignatoryRoles.UmuHead);
+        await ExpectAsync(methodist.PostAsJsonAsync(Url(created, "accept"), new DocumentVersionRequest(version)), DocumentStatuses.Approval);
+
+        // Начальник УМУ возвращает документ, заведующий кафедрой отметиться не успел.
+        version = await ExpectAsync(umu.PostAsJsonAsync(Url(created, "approval/reject"), new RejectRequest("Нет литературы")),
+            DocumentStatuses.UnderReview);
+
+        var returned = (await DetailsAsync(methodist, created)).Approval!;
+        Assert.Equal([(SignatoryRoles.DepartmentHead, SignatureStatuses.Interrupted, "круг прерван"),
+                (SignatoryRoles.UmuHead, SignatureStatuses.Rejected, "возвращено")],
+            returned.Seats.Select(s => (s.Role, s.Status, s.StatusTitle)));
+        // В таблице строка не менялась: прежний круг остаётся до нового приёма (решение B1).
+        await app.WithDbAsync(async db => Assert.Equal([SignatureStatuses.Pending, SignatureStatuses.Rejected],
+            await db.DocumentSignatures.Where(s => s.DocumentId == created.Document.Id).OrderBy(s => s.Role)
+                .Select(s => s.Status).ToListAsync()));
+
+        // Новый круг: обе строки снова «ожидает».
+        await ExpectAsync(methodist.PostAsJsonAsync(Url(created, "accept"), new DocumentVersionRequest(version)), DocumentStatuses.Approval);
+        Assert.All((await DetailsAsync(methodist, created)).Approval!.Seats,
+            s => Assert.Equal((SignatureStatuses.Pending, "ожидает"), (s.Status, s.StatusTitle)));
+    }
+
     [Fact]
     public async Task Document_accepted_before_approval_existed_is_started_from_the_panel()
     {
