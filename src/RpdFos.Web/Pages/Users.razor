@@ -16,6 +16,8 @@
 }
 else
 {
+    @* Узкий экран: таблица прокручивается в обёртке, а не рвёт слова по буквам (общее правило — app.css). *@
+    <div class="table-responsive">
     <table class="table table-sm align-middle">
         <thead>
             <tr><th>Email</th><th>ФИО</th><th>Роли</th><th>Запись справочника сотрудников</th><th>Учётная запись</th></tr>
@@ -56,7 +58,8 @@ else
                         <div class="small mb-1">@(a.IsActive ? "активна" : "отключена — вход запрещён")</div>
                         @if (passwordFor == a.Id)
                         {
-                            <div class="input-group input-group-sm" style="max-width: 320px">
+                            @* В прокручиваемой таблице колонка сжимается до самого узкого содержимого — поле пароля держит ширину. *@
+                            <div class="input-group input-group-sm" style="min-width: 16rem; max-width: 320px">
                                 <input class="form-control" type="password" placeholder="Новый временный пароль" @bind="newPassword" />
                                 <button class="btn btn-primary" type="button" @onclick="() => SetPasswordAsync(a)">Задать</button>
                                 <button class="btn btn-outline-secondary" type="button" @onclick="() => passwordFor = null">Отмена</button>
@@ -74,6 +77,7 @@ else
             }
         </tbody>
     </table>
+    </div>
 }
 
 <h2 class="h4 mt-4">Новый пользователь</h2>

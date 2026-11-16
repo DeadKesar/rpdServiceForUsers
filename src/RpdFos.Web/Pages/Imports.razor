@@ -63,6 +63,8 @@
 
     @if (current.Issues.Count > 0)
     {
+        @* Узкий экран: таблицы прокручиваются в обёртке, а не рвут слова по буквам (общее правило — app.css). *@
+        <div class="table-responsive">
         <table class="table table-sm">
             <thead>
                 <tr><th>Тип</th><th>Файл</th><th>Лист / таблица</th><th>Строка</th><th>Сообщение</th></tr>
@@ -80,6 +82,7 @@
                 }
             </tbody>
         </table>
+        </div>
     }
     @if (current.Status is "succeeded" or "partial")
     {
@@ -98,6 +101,7 @@ else if (runs.Count == 0)
 }
 else
 {
+    <div class="table-responsive">
     <table class="table table-sm table-hover">
         <thead>
             <tr><th>Начат</th><th>Статус</th><th>Дисциплин</th><th>Компетенций</th><th>Сотрудников</th><th>Ошибок</th><th>Предупреждений</th></tr>
@@ -106,7 +110,7 @@ else
             @foreach (var r in runs)
             {
                 <tr role="button" @onclick="() => ShowAsync(r.Id)">
-                    <td>@r.StartedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</td>
+                    <td class="text-nowrap">@r.StartedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</td>
                     <td>@StatusTitle(r.Status)</td>
                     <td>@r.Counts.Disciplines</td>
                     <td>@r.Counts.Competences</td>
@@ -117,6 +121,7 @@ else
             }
         </tbody>
     </table>
+    </div>
 }
 
 @code {

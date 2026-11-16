@@ -55,6 +55,8 @@ else if (items.Count == 0)
 }
 else
 {
+    @* Узкий экран: таблица прокручивается в обёртке, а не рвёт слова по буквам (общее правило — app.css). *@
+    <div class="table-responsive">
     <table class="table table-hover">
         <thead>
             <tr><th>Дисциплина</th><th>Тип</th><th>Статус</th><th>Изменён</th><th>Автор</th><th></th></tr>
@@ -78,7 +80,7 @@ else
                             <span class="badge text-bg-warning ms-1" title="Вышла новая редакция шаблона">устарел</span>
                         }
                     </td>
-                    <td>@d.UpdatedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</td>
+                    <td class="text-nowrap">@d.UpdatedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</td>
                     <td>@d.AuthorName</td>
                     <td class="text-end">
                         @if (d.CanDelete)
@@ -91,6 +93,7 @@ else
             }
         </tbody>
     </table>
+    </div>
 }
 
 @code {
