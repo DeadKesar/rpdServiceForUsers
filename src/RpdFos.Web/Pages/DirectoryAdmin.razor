@@ -231,7 +231,11 @@
 
 @if (records is null)
 {
-    <p>Загрузка…</p>
+    @* При обрыве связи вместо «Загрузки…» — сообщение вверху страницы. *@
+    @if (!offline)
+    {
+        <p>Загрузка…</p>
+    }
 }
 else if (records.Count == 0)
 {
@@ -257,7 +261,7 @@ else
                         <td>@e.Position</td>
                         <td>@e.OfficialDesignation</td>
                         <td>
-                            @* Председатель УМК без направления (из файла должностей) документов не подписывает. *@
+                            @* Председатель УМК без направления документов не подписывает: правило листа согласования ищет по направлению. *@
                             @if (e.SignatoryRole == "umk_chair" && e.DirectionId is null)
                             {
                                 <span class="text-warning-emphasis" title="Правило листа согласования такую запись не находит: выберите направление в «Изменить»">направление не задано</span>
@@ -299,6 +303,7 @@ else
     private string newcomerShort = "", newcomerFull = "";
     private string surname = "", roleFilter = "";
     private bool showInactive, busy, messageIsError;
+    private bool offline; // последний запрос списка не получил ответа
     private string? message;
     private readonly CancellationTokenSource polling = new();
 
@@ -316,6 +321,10 @@ else
         {
             e.Redirect();
         }
+        catch (HttpRequestException e) when (ConnectionLoss.Is(e))
+        {
+            LoseConnection();
+        }
     }
 
     private async Task LoadAsync()
@@ -324,11 +333,28 @@ else
         try
         {
             records = await Http.GetFromJsonAsync<List<Entry>>(query);
+            RestoreConnection();
         }
         catch (AccessTokenNotAvailableException e)
         {
             e.Redirect();
         }
+        catch (HttpRequestException e) when (ConnectionLoss.Is(e))
+        {
+            LoseConnection();
+        }
+    }
+
+    // Сервер остановлен или не отвечает при открытой странице: причина — в сообщении (вместо вечной «Загрузки…» и
+    // полосы необработанной ошибки); прежний список, если он был, остаётся на экране.
+    private void LoseConnection() => (offline, messageIsError, message) = (true, true, ConnectionLoss.Message);
+
+    // Список получен — связь есть: сообщение об обрыве больше неверно. Сообщения о действиях (добавлена, сохранена) не трогаем.
+    private void RestoreConnection()
+    {
+        if (!offline) return;
+        offline = false;
+        if (message == ConnectionLoss.Message) message = null;
     }
 
     private async Task FilterKeyAsync(KeyboardEventArgs e)

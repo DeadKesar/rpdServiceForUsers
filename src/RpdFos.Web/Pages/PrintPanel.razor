@@ -115,10 +115,16 @@
         try
         {
             items = await Http.GetFromJsonAsync<List<GenerationItem>>($"api/documents/{DocumentId}/generations") ?? [];
+            if (message == ConnectionLoss.Message) message = null; // связь вернулась: прежнее сообщение уже неверно
         }
         catch (AccessTokenNotAvailableException e)
         {
             e.Redirect();
+        }
+        catch (HttpRequestException e) when (ConnectionLoss.Is(e))
+        {
+            // Сервер перестал отвечать при открытой странице: список остаётся прежним, причина — в сообщении панели.
+            message = ConnectionLoss.Message;
         }
     }
 
@@ -154,15 +160,28 @@
         {
             // Ушли со страницы — опрос больше не нужен.
         }
+        catch (HttpRequestException e) when (ConnectionLoss.Is(e))
+        {
+            // Связь пропала при постановке в очередь или в опросе: опрос прекращается (кнопки снова доступны), а формирование
+            // на сервере идёт своим ходом — его результат появится в списке, когда связь вернётся.
+            (message, current) = (ConnectionLoss.Message, null);
+        }
     }
 
     private async Task<byte[]?> FileAsync(GenerationItem item)
     {
-        var response = await Http.GetAsync($"api/documents/{DocumentId}/files/{item.FileId}");
-        if (response.IsSuccessStatusCode) return await response.Content.ReadAsByteArrayAsync();
-        message = response.StatusCode == HttpStatusCode.NotFound
-            ? "Файл удалён по сроку хранения — сформируйте документ заново."
-            : $"Файл не получен (код ответа {(int)response.StatusCode}).";
+        try
+        {
+            var response = await Http.GetAsync($"api/documents/{DocumentId}/files/{item.FileId}");
+            if (response.IsSuccessStatusCode) return await response.Content.ReadAsByteArrayAsync();
+            message = response.StatusCode == HttpStatusCode.NotFound
+                ? "Файл удалён по сроку хранения — сформируйте документ заново."
+                : $"Файл не получен (код ответа {(int)response.StatusCode}).";
+        }
+        catch (HttpRequestException e) when (ConnectionLoss.Is(e))
+        {
+            message = ConnectionLoss.Message;
+        }
         return null;
     }
 

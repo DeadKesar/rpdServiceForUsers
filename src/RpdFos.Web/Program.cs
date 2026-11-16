@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Components.Web;
 using Microsoft.AspNetCore.Components.WebAssembly.Authentication;
 using Microsoft.AspNetCore.Components.WebAssembly.Hosting;
+using Microsoft.Extensions.Logging;
 using Radzen;
 using RpdFos.Web;
 using RpdFos.Web.Auth;
@@ -9,6 +10,10 @@ using RpdFos.Web.Notifications;
 var builder = WebAssemblyHostBuilder.CreateDefault(args);
 builder.RootComponents.Add<App>("#app");
 builder.RootComponents.Add<HeadOutlet>("head::after");
+
+// Консоль браузера — только предупреждения и ошибки: иначе в ней по восемь info-строк на каждый запрос HttpClient
+// (опрос колокольчика — два запроса в минуту) и «Authorization failed» от каждой проверки ролей в меню.
+builder.Logging.SetMinimumLevel(LogLevel.Warning);
 
 // Запросы к API того же хоста: обработчик сам прикладывает токен доступа к каждому запросу.
 builder.Services.AddHttpClient("api", c => c.BaseAddress = new Uri(builder.HostEnvironment.BaseAddress))
