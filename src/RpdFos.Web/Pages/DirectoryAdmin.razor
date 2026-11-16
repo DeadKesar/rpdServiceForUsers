@@ -128,8 +128,9 @@
                         }
                     </select>
                 </div>
-                @* Оргструктура по категории (как ck_users_signatory_scope): заведующий — кафедра, директор — институт,
-                   подписанты уровня университета — без подразделения. *@
+                @* Оргструктура по категории (как ck_users_signatory_scope и ck_users_direction_scope): заведующий — кафедра,
+                   директор — институт, председатель УМК — направление подготовки (обязательное), подписанты уровня
+                   университета — без подразделения. *@
                 @if (UnitOf(editing.SignatoryRole) is "department" or "")
                 {
                     <div class="col-md-6">
@@ -154,6 +155,20 @@
                                 <option value="@i.Id">@i.Name</option>
                             }
                         </select>
+                    </div>
+                }
+                @if (UnitOf(editing.SignatoryRole) == "direction")
+                {
+                    <div class="col-md-6">
+                        <label class="form-label small mb-0">Направление подготовки *</label>
+                        <select class="form-select form-select-sm" @bind="editing.DirectionId">
+                            <option value="">—</option>
+                            @foreach (var d in units?.Directions ?? [])
+                            {
+                                <option value="@d.Id">@d.Code @d.Name</option>
+                            }
+                        </select>
+                        <div class="form-text">Лист согласования РПД и ФОС этого направления подписывает председатель с этой записью.</div>
                     </div>
                 }
             </div>
@@ -229,7 +244,7 @@ else
             <thead>
                 <tr>
                     <th>Фамилия И. О.</th><th>Подпись в документах</th><th>Должность</th><th>Официальное название</th>
-                    <th>Кафедра / институт</th><th>Категория подписанта</th><th>Учётная запись</th><th>Активна</th><th></th>
+                    <th>Кафедра / институт / направление</th><th>Категория подписанта</th><th>Учётная запись</th><th>Активна</th><th></th>
                 </tr>
             </thead>
             <tbody>
@@ -240,7 +255,17 @@ else
                         <td>@e.NameForDocument</td>
                         <td>@e.Position</td>
                         <td>@e.OfficialDesignation</td>
-                        <td>@e.Unit</td>
+                        <td>
+                            @* Председатель УМК без направления (из файла должностей) документов не подписывает. *@
+                            @if (e.SignatoryRole == "umk_chair" && e.DirectionId is null)
+                            {
+                                <span class="text-warning-emphasis" title="Правило листа согласования такую запись не находит: выберите направление в «Изменить»">направление не задано</span>
+                            }
+                            else
+                            {
+                                @e.Unit
+                            }
+                        </td>
                         <td>@e.SignatoryRoleTitle</td>
                         <td>@e.Account</td>
                         <td>@(e.IsActive ? "да" : "нет")</td>
@@ -319,7 +344,7 @@ else
         Id = e.Id, ShortName = e.ShortName, NameForDocument = e.NameForDocument, FullName = e.FullName, Email = e.Email,
         Position = e.Position, AcademicDegree = e.AcademicDegree, OfficialDesignation = e.OfficialDesignation,
         SignatoryRole = e.SignatoryRole ?? "", DepartmentId = e.DepartmentId?.ToString() ?? "", InstituteId = e.InstituteId?.ToString() ?? "",
-        Account = e.Account
+        DirectionId = e.DirectionId?.ToString() ?? "", Account = e.Account
     }, null, null);
 
     private void StartReplace(Entry e) => (replacing, editing, newcomer, successorId, newcomerShort, newcomerFull, message) =
@@ -334,7 +359,9 @@ else
             f.ShortName, f.NameForDocument, f.FullName, f.Email, f.Position, f.AcademicDegree, f.OfficialDesignation,
             SignatoryRole = string.IsNullOrEmpty(f.SignatoryRole) ? null : f.SignatoryRole,
             DepartmentId = unit is "department" or "" && Guid.TryParse(f.DepartmentId, out var d) ? d : (Guid?)null,
-            InstituteId = unit == "institute" && Guid.TryParse(f.InstituteId, out var i) ? i : (Guid?)null
+            InstituteId = unit == "institute" && Guid.TryParse(f.InstituteId, out var i) ? i : (Guid?)null,
+            // Направление уходит только с категорией председателя УМК: выбранное и забытое при смене категории не передаётся.
+            DirectionId = unit == "direction" && Guid.TryParse(f.DirectionId, out var direction) ? direction : (Guid?)null
         };
         await RunAsync(() => f.Id is Guid id
                 ? Http.PutAsJsonAsync($"api/admin/directory/records/{id}", body)
@@ -466,17 +493,19 @@ else
         public string SignatoryRole { get; set; } = "";
         public string DepartmentId { get; set; } = "";
         public string InstituteId { get; set; } = "";
+        public string DirectionId { get; set; } = "";
         public string? Account { get; set; }
     }
 
     private sealed record Entry(
         Guid Id, string ShortName, string NameForDocument, string? FullName, string? Email, string? Position, string? AcademicDegree,
         string? OfficialDesignation, string? SignatoryRole, string? SignatoryRoleTitle, Guid? DepartmentId, Guid? InstituteId,
-        string? Unit, string? Account, bool IsActive);
+        string? Unit, string? Account, bool IsActive, Guid? DirectionId);
 
     private sealed record UnitItem(Guid Id, string Name, string ShortName);
+    private sealed record DirectionItem(Guid Id, string Code, string Name);
     private sealed record RoleItem(string Code, string Title, string Unit);
-    private sealed record Units(List<UnitItem> Departments, List<UnitItem> Institutes, List<RoleItem> Roles);
+    private sealed record Units(List<UnitItem> Departments, List<UnitItem> Institutes, List<RoleItem> Roles, List<DirectionItem> Directions);
     private sealed record Issue(string Severity, string File, string? Sheet, int? Row, string Message);
     private sealed record ImportRun(
         Guid Id, string FileName, string Status, DateTimeOffset StartedAt, DateTimeOffset? CompletedAt, int Rows, int Added,

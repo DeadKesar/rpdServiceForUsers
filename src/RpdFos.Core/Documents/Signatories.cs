@@ -20,8 +20,8 @@ public sealed record SignatoryReport(IReadOnlyList<ResolvedSignatory> Seats, IRe
     public ResolvedSignatory? Seat(string id) => Seats.FirstOrDefault(s => s.SeatId == id);
 }
 
-/// <summary>Что известно резолверу: база и кафедра дисциплины документа.</summary>
-public sealed record SignatoryContext(AppDbContext Db, Department? Department);
+/// <summary>Что известно резолверу: база, кафедра дисциплины документа и направление подготовки её учебного плана.</summary>
+public sealed record SignatoryContext(AppDbContext Db, Department? Department, Guid? DirectionId = null);
 
 /// <summary>
 /// Звено цепочки ответственности (FR-REV-12): правило определения подписанта из <c>signatures_config</c>
@@ -92,22 +92,46 @@ public sealed class InstituteDirectorResolver : SignatoryResolver
 }
 
 /// <summary>
-/// Подписанты документа по листу согласования шаблона. Председатель УМК по направлению пока определяется
-/// по категории (<c>lookup.role:umk_chair</c>); связь с направлением — этап 6, шаг B5. Электронные места и ручное
-/// назначение (FR-REV-13) — <see cref="DocumentApproval"/>.
+/// <c>discipline.direction.umk_chair</c> — председатель УМК направления подготовки учебного плана дисциплины: активная
+/// запись справочника с категорией «председатель УМК» и этим направлением (FR-REV-12, этап 6.1, шаг C6).
+/// Прежнее имя правила <c>lookup.role:umk_chair</c> — его синоним: лист согласования новой редакции шаблона копируется
+/// из прежней, и в действующих шаблонах осталось оно. Поиск по одной категории без направления подписал бы документ
+/// председателем чужого направления, поэтому прежнее имя ищет так же, как новое. Записи без направления правило не находит.
+/// </summary>
+public sealed class UmkChairResolver : SignatoryResolver
+{
+    public const string Rule = "discipline.direction.umk_chair";
+    public const string LegacyRule = LookupRoleResolver.Prefix + SignatoryRoles.UmkChair;
+
+    protected override bool Handles(string rule) => rule is Rule or LegacyRule;
+
+    protected override Task<Employee?> FindAsync(string rule, SignatoryContext context, CancellationToken ct) =>
+        context.DirectionId is not Guid directionId
+            ? Task.FromResult<Employee?>(null)
+            : FirstAsync(context.Db.Employees.Where(e => e.SignatoryRole == SignatoryRoles.UmkChair && e.DirectionId == directionId), ct);
+}
+
+/// <summary>
+/// Подписанты документа по листу согласования шаблона. Электронные места и ручное назначение (FR-REV-13) —
+/// <see cref="DocumentApproval"/>.
 /// </summary>
 public sealed class SignatoryResolution(AppDbContext db)
 {
-    private static readonly SignatoryResolver Chain = new LookupRoleResolver
+    // Правило председателя УМК — первым: оно же перехватывает прежнее имя lookup.role:umk_chair, которое иначе
+    // обработал бы общий поиск по категории.
+    private static readonly SignatoryResolver Chain = new UmkChairResolver
     {
-        Next = new DepartmentHeadResolver { Next = new InstituteDirectorResolver() }
+        Next = new LookupRoleResolver { Next = new DepartmentHeadResolver { Next = new InstituteDirectorResolver() } }
     };
 
     public async Task<SignatoryReport> ResolveAsync(IReadOnlyList<SignatureSeat> seats, Guid disciplineId, CancellationToken ct = default)
     {
-        var departmentId = await db.Disciplines.Where(d => d.Id == disciplineId).Select(d => d.DepartmentId).SingleAsync(ct);
-        var department = departmentId is Guid id ? await db.Departments.AsNoTracking().SingleOrDefaultAsync(d => d.Id == id, ct) : null;
-        var context = new SignatoryContext(db, department);
+        // Кафедра — у дисциплины, направление подготовки — у её учебного плана.
+        var origin = await db.Disciplines.Where(d => d.Id == disciplineId)
+            .Join(db.CurriculumPlans, d => d.CurriculumPlanId, p => p.Id, (d, p) => new { d.DepartmentId, p.DirectionId })
+            .SingleAsync(ct);
+        var department = origin.DepartmentId is Guid id ? await db.Departments.AsNoTracking().SingleOrDefaultAsync(d => d.Id == id, ct) : null;
+        var context = new SignatoryContext(db, department, origin.DirectionId);
 
         var resolved = new List<ResolvedSignatory>();
         var warnings = new List<string>();

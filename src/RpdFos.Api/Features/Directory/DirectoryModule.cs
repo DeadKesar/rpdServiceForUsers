@@ -73,13 +73,15 @@ public class DirectoryModule : ICarterModule
         return await DirectoryEntry.ListAsync(query.OrderBy(e => e.ShortName), db, ct);
     }
 
-    // Для формы: кафедры, институты и категории подписантов с русскими названиями.
+    // Для формы: кафедры, институты, направления подготовки и категории подписантов с русскими названиями.
     private static async Task<DirectoryUnits> Units(AppDbContext db, CancellationToken ct) => new(
         await db.Departments.OrderBy(d => d.Name).Select(d => new UnitItem(d.Id, d.Name, d.ShortName)).ToListAsync(ct),
         await db.Institutes.OrderBy(i => i.Name).Select(i => new UnitItem(i.Id, i.Name, i.ShortName ?? i.Code)).ToListAsync(ct),
         SignatoryRoles.All.Select(r => new RoleItem(r, SignatoryRoles.Title(r),
             r is SignatoryRoles.DepartmentHead or SignatoryRoles.DepartmentHeadActing ? "department"
-            : r == SignatoryRoles.InstituteDirector ? "institute" : "none")).ToList());
+            : r == SignatoryRoles.InstituteDirector ? "institute"
+            : r == SignatoryRoles.UmkChair ? "direction" : "none")).ToList(),
+        await db.StudyDirections.OrderBy(d => d.Code).Select(d => new DirectionItem(d.Id, d.Code, d.Name)).ToListAsync(ct));
 
     private static async Task<IResult> Create(EmployeeRequest rq, HttpContext http, AppDbContext db, DirectoryAccounts accounts,
         EmployeeDirectory directory, CancellationToken ct)
@@ -217,30 +219,32 @@ public record DirectoryPersonItem(Guid Id, string ShortName, string NameForDocum
 
 /// <summary>
 /// Запись справочника для страницы администратора: «Фамилия И. О.», подпись, должность, официальное название,
-/// подразделение, категория подписанта (код и название), учётная запись (email), «активна».
+/// подразделение или направление подготовки (председатель УМК), категория подписанта (код и название),
+/// учётная запись (email), «активна».
 /// </summary>
 public record DirectoryEntry(
     Guid Id, string ShortName, string NameForDocument, string? FullName, string? Email, string? Position, string? AcademicDegree,
     string? OfficialDesignation, string? SignatoryRole, string? SignatoryRoleTitle, Guid? DepartmentId, Guid? InstituteId,
-    string? Unit, string? Account, bool IsActive)
+    string? Unit, string? Account, bool IsActive, Guid? DirectionId = null)
 {
     public static async Task<List<DirectoryEntry>> ListAsync(IQueryable<Employee> query, AppDbContext db, CancellationToken ct) =>
         (await query.Select(e => new DirectoryEntry(
             e.Id, e.ShortName, e.NameForDocument, e.FullName, e.Email, e.Position, e.AcademicDegree, e.OfficialDesignation,
             e.SignatoryRole, null, e.DepartmentId, e.InstituteId,
             db.Departments.Where(d => d.Id == e.DepartmentId).Select(d => d.ShortName).FirstOrDefault()
-                ?? db.Institutes.Where(i => i.Id == e.InstituteId).Select(i => i.ShortName ?? i.Code).FirstOrDefault(),
-            e.IdentitySubject == null ? null : e.Email, e.IsActive)).ToListAsync(ct))
+                ?? db.Institutes.Where(i => i.Id == e.InstituteId).Select(i => i.ShortName ?? i.Code).FirstOrDefault()
+                ?? db.StudyDirections.Where(s => s.Id == e.DirectionId).Select(s => s.Code + " " + s.Name).FirstOrDefault(),
+            e.IdentitySubject == null ? null : e.Email, e.IsActive, e.DirectionId)).ToListAsync(ct))
         .Select(x => x with { SignatoryRoleTitle = x.SignatoryRole is { } r ? SignatoryRoles.Title(r) : null }).ToList();
 }
 
-/// <summary>Поля записи справочника в запросе страницы администратора.</summary>
+/// <summary>Поля записи справочника в запросе страницы администратора; направление — только у председателя УМК.</summary>
 public record EmployeeRequest(
     string ShortName, string? NameForDocument, string? FullName, string? Email, string? Position, string? AcademicDegree,
-    string? OfficialDesignation, string? SignatoryRole, Guid? DepartmentId, Guid? InstituteId)
+    string? OfficialDesignation, string? SignatoryRole, Guid? DepartmentId, Guid? InstituteId, Guid? DirectionId = null)
 {
     public EmployeeData ToData() => new(ShortName ?? "", NameForDocument, FullName, Email, Position, AcademicDegree,
-        OfficialDesignation, string.IsNullOrEmpty(SignatoryRole) ? null : SignatoryRole, DepartmentId, InstituteId);
+        OfficialDesignation, string.IsNullOrEmpty(SignatoryRole) ? null : SignatoryRole, DepartmentId, InstituteId, DirectionId);
 }
 
 /// <summary>Смена человека на должности: выбранная запись (<paramref name="SuccessorId"/>) или новый сотрудник.</summary>
@@ -248,10 +252,15 @@ public record ReplaceRequest(Guid? SuccessorId, EmployeeRequest? Newcomer);
 
 public record UnitItem(Guid Id, string Name, string ShortName);
 
-/// <summary>Категория подписанта: код, название и подразделение — кафедра, институт или нет (none).</summary>
+/// <summary>Направление подготовки для выбора у председателя УМК: код («09.04.04») и наименование.</summary>
+public record DirectionItem(Guid Id, string Code, string Name);
+
+/// <summary>Категория подписанта: код, название и привязка — кафедра, институт, направление подготовки или нет (none).</summary>
 public record RoleItem(string Code, string Title, string Unit);
 
-public record DirectoryUnits(IReadOnlyList<UnitItem> Departments, IReadOnlyList<UnitItem> Institutes, IReadOnlyList<RoleItem> Roles);
+public record DirectoryUnits(
+    IReadOnlyList<UnitItem> Departments, IReadOnlyList<UnitItem> Institutes, IReadOnlyList<RoleItem> Roles,
+    IReadOnlyList<DirectionItem> Directions);
 
 /// <summary>Загрузка файла должностей: файл, когда, статус, записей в файле, счётчики, замечания.</summary>
 public record ImportItem(

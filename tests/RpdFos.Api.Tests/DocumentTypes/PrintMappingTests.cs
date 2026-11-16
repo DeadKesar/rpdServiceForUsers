@@ -67,6 +67,18 @@ public class PrintMappingTests
     }
 
     [Fact]
+    public void Old_name_of_the_chair_rule_still_passes_sheet_validation()
+    {
+        // Лист согласования новой редакции шаблона копируется из прежней, и в действующих шаблонах осталось
+        // lookup.role:umk_chair: проверка перед публикацией его не отвергает.
+        var sheet = Registry.Get(DocumentTypeRegistry.Rpd).Signatures
+            .Select(s => s.Id == SignatoryRoles.UmkChair ? s with { Resolver = "lookup.role:umk_chair" } : s).ToList();
+
+        Assert.Contains(sheet, s => s.Resolver == "lookup.role:umk_chair");
+        Assert.Empty(PrintMappingValidator.ValidateSignatures(sheet));
+    }
+
+    [Fact]
     public void Role_lookups_use_directory_signatory_codes()
     {
         // Один набор кодов категорий: lookup.role:<код> ищет по users.signatory_role.

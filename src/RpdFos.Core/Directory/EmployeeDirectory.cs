@@ -6,10 +6,10 @@ using RpdFos.Core.Data.Entities;
 
 namespace RpdFos.Core.Directory;
 
-/// <summary>Поля записи справочника, которые ведёт администратор.</summary>
+/// <summary>Поля записи справочника, которые ведёт администратор; направление — только у председателя УМК.</summary>
 public sealed record EmployeeData(
     string ShortName, string? NameForDocument, string? FullName, string? Email, string? Position, string? AcademicDegree,
-    string? OfficialDesignation, string? SignatoryRole, Guid? DepartmentId, Guid? InstituteId);
+    string? OfficialDesignation, string? SignatoryRole, Guid? DepartmentId, Guid? InstituteId, Guid? DirectionId = null);
 
 public enum DirectoryProblemKind { NotFound, Invalid, Conflict }
 
@@ -18,10 +18,11 @@ public sealed record DirectoryProblem(DirectoryProblemKind Kind, string Title, s
 
 /// <summary>
 /// Справочник сотрудников на странице администратора (этап 5.2, S-51): правила — общие со загрузкой файла
-/// должностей. Официальное название уникально среди активных записей; место подписанта — одно на кафедру и на
-/// институт; категория согласована с оргструктурой (<c>ck_users_signatory_scope</c>); смена человека на должности
-/// освобождает прежнюю запись (<see cref="Vacate"/>). Каждое изменение — запись в журнале аудита: кто, когда, было,
-/// стало. Сохраняет вызывающий.
+/// должностей. Официальное название уникально среди активных записей; место подписанта — одно на кафедру, на
+/// институт и на направление подготовки (председатель УМК); категория согласована с оргструктурой
+/// (<c>ck_users_signatory_scope</c>, <c>ck_users_direction_scope</c>); смена человека на должности освобождает
+/// прежнюю запись (<see cref="Vacate"/>). Каждое изменение — запись в журнале аудита: кто, когда, было, стало.
+/// Сохраняет вызывающий.
 /// </summary>
 public sealed class EmployeeDirectory(AppDbContext db, TimeProvider clock)
 {
@@ -31,26 +32,30 @@ public sealed class EmployeeDirectory(AppDbContext db, TimeProvider clock)
     };
 
     /// <summary>
-    /// Место подписанта: заведующий (и исполняющий обязанности) — одно на кафедру, директор — одно на институт;
-    /// у остальных категорий единственность не проверяется. null — места нет.
+    /// Место подписанта: заведующий (и исполняющий обязанности) — одно на кафедру, директор — одно на институт,
+    /// председатель УМК — одно на направление; у остальных категорий единственность не проверяется. null — места нет
+    /// (в том числе у председателя без направления: такая запись место не занимает).
     /// </summary>
-    public static string? SeatOf(string? role, Guid? departmentId, Guid? instituteId) => role switch
+    public static string? SeatOf(string? role, Guid? departmentId, Guid? instituteId, Guid? directionId = null) => role switch
     {
         SignatoryRoles.DepartmentHead or SignatoryRoles.DepartmentHeadActing when departmentId is not null => $"{role}:{departmentId}",
         SignatoryRoles.InstituteDirector => $"{role}:{instituteId}",
+        SignatoryRoles.UmkChair when directionId is not null => $"{role}:{directionId}",
         _ => null
     };
 
     /// <summary>
-    /// Прежний сотрудник на должности: место (официальное название и категория подписанта) снимается, а не
-    /// переписывается человек — на запись ссылаются прошлые согласования. Справочная запись без учётной записи больше
-    /// не нужна — неактивна; с учётной записью остаётся активной: бывший заведующий, оставшийся преподавателем, не
-    /// теряет доступ.
+    /// Прежний сотрудник на должности: место (официальное название, категория подписанта и направление председателя
+    /// УМК) снимается, а не переписывается человек — на запись ссылаются прошлые согласования. Справочная запись без
+    /// учётной записи больше не нужна — неактивна; с учётной записью остаётся активной: бывший заведующий, оставшийся
+    /// преподавателем, не теряет доступ.
     /// </summary>
     public static void Vacate(Employee previous, DateTimeOffset now)
     {
         previous.OfficialDesignation = null;
         previous.SignatoryRole = null;
+        // Направление бывает только у председателя УМК (ck_users_direction_scope): без категории его быть не может.
+        previous.DirectionId = null;
         if (previous.IdentitySubject is null) previous.IsActive = false;
         previous.UpdatedAt = now;
     }
@@ -85,7 +90,7 @@ public sealed class EmployeeDirectory(AppDbContext db, TimeProvider clock)
         if (employee.IsActive == active) return (employee, null);
         var before = Snapshot(employee);
         if (active && await ConflictAsync(employee.Id, employee.OfficialDesignation, employee.SignatoryRole, employee.DepartmentId,
-                employee.InstituteId, ct) is { } conflict)
+                employee.InstituteId, employee.DirectionId, ct) is { } conflict)
             return (null, conflict);
         employee.IsActive = active;
         employee.UpdatedAt = clock.GetUtcNow();
@@ -95,8 +100,8 @@ public sealed class EmployeeDirectory(AppDbContext db, TimeProvider clock)
 
     /// <summary>
     /// «Сменить сотрудника на должности»: место (официальное название, должность, категория подписанта и его
-    /// подразделение) переходит к выбранной активной записи или к новой (<paramref name="newcomer"/>); прежняя
-    /// запись освобождается по правилам импорта (<see cref="Vacate"/>).
+    /// подразделение или направление) переходит к выбранной активной записи или к новой (<paramref name="newcomer"/>);
+    /// прежняя запись освобождается по правилам импорта (<see cref="Vacate"/>).
     /// </summary>
     public async Task<(Employee? Employee, DirectoryProblem? Problem)> ReplaceAsync(
         Guid holderId, Guid? successorId, EmployeeData? newcomer, Guid by, CancellationToken ct)
@@ -130,8 +135,8 @@ public sealed class EmployeeDirectory(AppDbContext db, TimeProvider clock)
         var now = clock.GetUtcNow();
         var holderBefore = Snapshot(holder);
         var successorBefore = db.Entry(successor).State == EntityState.Added ? null : Snapshot(successor);
-        (string? designation, string? position, string? role, Guid? department, Guid? institute) seat =
-            (holder.OfficialDesignation, holder.Position, holder.SignatoryRole, holder.DepartmentId, holder.InstituteId);
+        (string? designation, string? position, string? role, Guid? department, Guid? institute, Guid? direction) seat =
+            (holder.OfficialDesignation, holder.Position, holder.SignatoryRole, holder.DepartmentId, holder.InstituteId, holder.DirectionId);
         Vacate(holder, now);
         // Уникальные индексы должности и места подписанта: прежнюю запись освободить до того, как место займёт новая.
         await db.SaveChangesAsync(ct);
@@ -140,6 +145,8 @@ public sealed class EmployeeDirectory(AppDbContext db, TimeProvider clock)
         successor.Position = seat.position;
         successor.SignatoryRole = seat.role;
         if (seat.role is not null) (successor.DepartmentId, successor.InstituteId) = (seat.department, seat.institute);
+        // Направление — вместе с категорией председателя УМК: оно бывает только у неё (ck_users_direction_scope).
+        successor.DirectionId = seat.direction;
         successor.IsActive = true;
         successor.UpdatedAt = now;
         Audit(AuditEvents.EmployeeReplaced, holder.Id, by, holderBefore, Snapshot(holder));
@@ -158,26 +165,30 @@ public sealed class EmployeeDirectory(AppDbContext db, TimeProvider clock)
         if (employee.IdentitySubject is not null && email != employee.Email)
             return new(DirectoryProblemKind.Invalid, "Email учётной записи не меняется здесь",
                 "Запись связана с учётной записью: её email — адрес входа.");
-        if (employee.IsActive && await ConflictAsync(employee.Id, Trim(data.OfficialDesignation), data.SignatoryRole,
-                data.DepartmentId, data.InstituteId, ct) is { } conflict)
-            return conflict;
         if (data.DepartmentId is Guid d && !await db.Departments.AnyAsync(x => x.Id == d, ct) ||
             data.InstituteId is Guid i && !await db.Institutes.AnyAsync(x => x.Id == i, ct))
             return new(DirectoryProblemKind.Invalid, "Подразделение не найдено", "Кафедра или институт отсутствуют в справочнике.");
+        if (data.DirectionId is Guid direction && !await db.StudyDirections.AnyAsync(x => x.Id == direction, ct))
+            return new(DirectoryProblemKind.Invalid, "Направление не найдено", "Направления подготовки нет в справочнике.");
+        if (employee.IsActive && await ConflictAsync(employee.Id, Trim(data.OfficialDesignation), data.SignatoryRole,
+                data.DepartmentId, data.InstituteId, data.DirectionId, ct) is { } conflict)
+            return conflict;
         Fill(employee, data);
         return null;
     }
 
     /// <summary>
     /// Данные записи сами по себе: «Фамилия И. О.» обязательна, категория — из <see cref="SignatoryRoles"/> и согласована
-    /// с оргструктурой (как <c>ck_users_signatory_scope</c>): заведующий — с кафедрой, директор — с институтом и без
-    /// кафедры, остальные категории — без подразделения.
+    /// с оргструктурой (как <c>ck_users_signatory_scope</c> и <c>ck_users_direction_scope</c>): заведующий — с кафедрой,
+    /// директор — с институтом и без кафедры, председатель УМК — с направлением подготовки и без кафедры и института,
+    /// остальные категории — без подразделения. Направления нет ни у кого, кроме председателя УМК.
     /// </summary>
     public static DirectoryProblem? Validate(EmployeeData data)
     {
         if (string.IsNullOrWhiteSpace(data.ShortName))
             return new(DirectoryProblemKind.Invalid, "Не указаны фамилия и инициалы", "Поле «Фамилия И. О.» обязательно.");
-        if (data.SignatoryRole is not { } role) return null;
+        if (data.SignatoryRole is not { } role)
+            return data.DirectionId is null ? null : ExtraDirection("Направление указывается только у председателя УМК.");
         if (!SignatoryRoles.All.Contains(role))
             return new(DirectoryProblemKind.Invalid, "Неизвестная категория подписанта", $"Категории «{role}» нет.");
         return role switch
@@ -186,30 +197,44 @@ public sealed class EmployeeDirectory(AppDbContext db, TimeProvider clock)
                 new(DirectoryProblemKind.Invalid, "Не выбрана кафедра", $"{SignatoryRoles.Title(role)} — с кафедрой."),
             SignatoryRoles.InstituteDirector when data.InstituteId is null || data.DepartmentId is not null =>
                 new(DirectoryProblemKind.Invalid, "Не выбран институт", "Директор института — с институтом и без кафедры."),
+            SignatoryRoles.UmkChair when data.DirectionId is null =>
+                new(DirectoryProblemKind.Invalid, "Не выбрано направление", $"{SignatoryRoles.Title(role)} — с направлением подготовки."),
+            SignatoryRoles.UmkChair when data.DepartmentId is not null || data.InstituteId is not null =>
+                new(DirectoryProblemKind.Invalid, "Лишнее подразделение",
+                    $"{SignatoryRoles.Title(role)} — с направлением подготовки, без кафедры и института."),
+            _ when data.DirectionId is not null && role != SignatoryRoles.UmkChair =>
+                ExtraDirection($"{SignatoryRoles.Title(role)} — без направления: оно указывается только у председателя УМК."),
             _ when SignatoryRoles.WithoutUnit.Contains(role) && (data.DepartmentId is not null || data.InstituteId is not null) =>
                 new(DirectoryProblemKind.Invalid, "Лишнее подразделение",
                     $"{SignatoryRoles.Title(role)} — подписант уровня университета, без кафедры и института."),
             _ => null
         };
+
+        static DirectoryProblem ExtraDirection(string detail) => new(DirectoryProblemKind.Invalid, "Лишнее направление", detail);
     }
 
     // Официальное название и место подписанта — свободны среди других активных записей.
     private async Task<DirectoryProblem?> ConflictAsync(
-        Guid id, string? designation, string? role, Guid? departmentId, Guid? instituteId, CancellationToken ct)
+        Guid id, string? designation, string? role, Guid? departmentId, Guid? instituteId, Guid? directionId, CancellationToken ct)
     {
         if (designation is not null &&
             await db.Employees.Where(e => e.Id != id && e.IsActive && e.OfficialDesignation == designation)
                 .Select(e => e.ShortName).FirstOrDefaultAsync(ct) is { } holder)
             return new(DirectoryProblemKind.Conflict, "Официальное название занято",
                 $"«{designation}» уже у активной записи «{holder}». Чтобы передать должность, используйте «Сменить сотрудника на должности».");
-        if (SeatOf(role, departmentId, instituteId) is not null)
+        if (SeatOf(role, departmentId, instituteId, directionId) is not null)
         {
-            var other = await db.Employees.Where(e => e.Id != id && e.IsActive && e.SignatoryRole == role &&
-                    (role == SignatoryRoles.InstituteDirector ? e.InstituteId == instituteId : e.DepartmentId == departmentId))
-                .Select(e => e.ShortName).FirstOrDefaultAsync(ct);
+            var sameRole = db.Employees.Where(e => e.Id != id && e.IsActive && e.SignatoryRole == role);
+            var other = await (role switch
+            {
+                SignatoryRoles.InstituteDirector => sameRole.Where(e => e.InstituteId == instituteId),
+                SignatoryRoles.UmkChair => sameRole.Where(e => e.DirectionId == directionId),
+                _ => sameRole.Where(e => e.DepartmentId == departmentId)
+            }).Select(e => e.ShortName).FirstOrDefaultAsync(ct);
             if (other is not null)
-                return new(DirectoryProblemKind.Conflict, "Место подписанта занято",
-                    $"{SignatoryRoles.Title(role!)} этого подразделения — «{other}». Одно место подписанта на кафедру и на институт.");
+                return new(DirectoryProblemKind.Conflict, "Место подписанта занято", role == SignatoryRoles.UmkChair
+                    ? $"{SignatoryRoles.Title(role)} этого направления — «{other}». Один действующий председатель на направление подготовки."
+                    : $"{SignatoryRoles.Title(role!)} этого подразделения — «{other}». Одно место подписанта на кафедру и на институт.");
         }
         return null;
     }
@@ -228,6 +253,8 @@ public sealed class EmployeeDirectory(AppDbContext db, TimeProvider clock)
         (employee.DepartmentId, employee.InstituteId) = data.SignatoryRole is { } r && SignatoryRoles.WithoutUnit.Contains(r)
             ? (null, null)
             : (data.DepartmentId, data.SignatoryRole == SignatoryRoles.InstituteDirector ? data.InstituteId : data.DepartmentId is null ? data.InstituteId : null);
+        // Смена категории с председателя УМК на другую (или на «не подписант») снимает и направление.
+        employee.DirectionId = data.SignatoryRole == SignatoryRoles.UmkChair ? data.DirectionId : null;
     }
 
     private static string? Trim(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
@@ -238,7 +265,7 @@ public sealed class EmployeeDirectory(AppDbContext db, TimeProvider clock)
     private static object Snapshot(Employee e) => new
     {
         e.ShortName, e.NameForDocument, e.FullName, e.Email, e.Position, e.AcademicDegree, e.OfficialDesignation, e.SignatoryRole,
-        e.DepartmentId, e.InstituteId, e.IsActive
+        e.DepartmentId, e.InstituteId, e.DirectionId, e.IsActive
     };
 
     private void Audit(string type, Guid employeeId, Guid by, object? before, object after) =>

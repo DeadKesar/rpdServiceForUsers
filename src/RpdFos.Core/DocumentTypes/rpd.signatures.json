@@ -25,6 +25,6 @@
   },
   {
     "id": "umk_chair", "title": "Председатель учебно-методической комиссии по направлению подготовки",
-    "role": "umk_chair", "resolver": "lookup.role:umk_chair", "electronic": false, "placement": "approval_sheet"
+    "role": "umk_chair", "resolver": "discipline.direction.umk_chair", "electronic": false, "placement": "approval_sheet"
   }
 ]

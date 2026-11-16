@@ -1623,6 +1623,10 @@ namespace RpdFos.Core.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("department_id");
 
+                    b.Property<Guid?>("DirectionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("direction_id");
+
                     b.Property<string>("Email")
                         .HasMaxLength(255)
                         .HasColumnType("character varying(255)")
@@ -1685,6 +1689,9 @@ namespace RpdFos.Core.Migrations
                     b.HasIndex("DepartmentId")
                         .HasDatabaseName("ix_users_department_id");
 
+                    b.HasIndex("DirectionId")
+                        .HasDatabaseName("ix_users_direction_id");
+
                     b.HasIndex("Email")
                         .IsUnique()
                         .HasDatabaseName("ix_users_email")
@@ -1710,6 +1717,11 @@ namespace RpdFos.Core.Migrations
                         .HasDatabaseName("ix_users_signatory_role_department_id")
                         .HasFilter("signatory_role IN ('department_head', 'department_head_acting') AND department_id IS NOT NULL AND is_active");
 
+                    b.HasIndex(new[] { "SignatoryRole", "DirectionId" }, "ux_users_direction_signatory")
+                        .IsUnique()
+                        .HasDatabaseName("ix_users_signatory_role_direction_id")
+                        .HasFilter("signatory_role = 'umk_chair' AND direction_id IS NOT NULL AND is_active");
+
                     b.HasIndex(new[] { "SignatoryRole", "InstituteId" }, "ux_users_institute_signatory")
                         .IsUnique()
                         .HasDatabaseName("ix_users_signatory_role_institute_id")
@@ -1718,6 +1730,8 @@ namespace RpdFos.Core.Migrations
                     b.ToTable("users", null, t =>
                         {
                             t.HasCheckConstraint("ck_users_can_login", "can_login = false OR (email IS NOT NULL AND identity_subject IS NOT NULL)");
+
+                            t.HasCheckConstraint("ck_users_direction_scope", "direction_id IS NULL OR (signatory_role IS NOT NULL AND signatory_role = 'umk_chair')");
 
                             t.HasCheckConstraint("ck_users_signatory_role", "signatory_role IS NULL OR signatory_role IN ('department_head', 'department_head_acting', 'institute_director', 'rector', 'vice_rector_edu', 'umu_head', 'library_director', 'it_directorate_head', 'umk_chair')");
 
@@ -2678,6 +2692,12 @@ namespace RpdFos.Core.Migrations
                         .HasForeignKey("DepartmentId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .HasConstraintName("fk_users_departments_department_id");
+
+                    b.HasOne("RpdFos.Core.Data.Entities.StudyDirection", null)
+                        .WithMany()
+                        .HasForeignKey("DirectionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_users_study_directions_direction_id");
 
                     b.HasOne("RpdFos.Core.Data.Entities.Institute", null)
                         .WithMany()

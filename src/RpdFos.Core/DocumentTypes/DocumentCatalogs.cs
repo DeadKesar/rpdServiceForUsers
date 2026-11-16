@@ -85,10 +85,13 @@ public static class SignatureResolvers
     {
         ["discipline.department.head"] = "Заведующий кафедрой дисциплины",
         ["discipline.department.institute.director"] = "Директор института кафедры дисциплины",
+        ["discipline.direction.umk_chair"] = "Председатель УМК направления подготовки дисциплины",
         ["lookup.role:vice_rector_edu"] = "Проректор по образовательной деятельности",
         ["lookup.role:umu_head"] = "Начальник учебно-методического управления",
         ["lookup.role:library_director"] = "Директор научно-технической библиотеки",
         ["lookup.role:it_directorate_head"] = "Начальник УИТП",
-        ["lookup.role:umk_chair"] = "Председатель УМК по направлению документа"
+        // Прежнее имя правила председателя УМК (этап 6.1, C6): осталось в действующих шаблонах, чей лист согласования
+        // копируется в новую редакцию, и ищет так же, как discipline.direction.umk_chair — по направлению.
+        ["lookup.role:umk_chair"] = "Председатель УМК направления подготовки дисциплины (прежнее имя правила)"
     };
 }

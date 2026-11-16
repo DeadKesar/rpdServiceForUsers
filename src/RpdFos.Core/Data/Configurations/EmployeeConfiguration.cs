@@ -27,6 +27,12 @@ internal sealed class EmployeeConfiguration : IEntityTypeConfiguration<Employee>
                 $" OR (signatory_role = '{SignatoryRoles.InstituteDirector}' AND institute_id IS NOT NULL AND department_id IS NULL)" +
                 $" OR (signatory_role IN ({List(SignatoryRoles.WithoutUnit)}) AND department_id IS NULL AND institute_id IS NULL)" +
                 " OR (signatory_role IS NULL)");
+            // Направление бывает только у председателя УМК. Само оно не обязательно: записи без направления
+            // (из файла должностей) таблицу не ломают — правило определения подписанта их просто не находит.
+            // Проверка категории на NOT NULL нужна: при пустой категории «signatory_role = …» даёт NULL, а CHECK
+            // пропускает и NULL — запись «не подписант» с направлением прошла бы.
+            t.HasCheckConstraint("ck_users_direction_scope",
+                $"direction_id IS NULL OR (signatory_role IS NOT NULL AND signatory_role = '{SignatoryRoles.UmkChair}')");
         });
 
         e.Property(x => x.Email).HasMaxLength(255);
@@ -50,11 +56,16 @@ internal sealed class EmployeeConfiguration : IEntityTypeConfiguration<Employee>
             .HasFilter($"signatory_role IN ({heads}) AND department_id IS NOT NULL AND is_active");
         e.HasIndex(x => new { x.SignatoryRole, x.InstituteId }, "ux_users_institute_signatory").IsUnique()
             .HasFilter($"signatory_role = '{SignatoryRoles.InstituteDirector}' AND is_active");
+        // На направление — один действующий председатель УМК.
+        e.HasIndex(x => new { x.SignatoryRole, x.DirectionId }, "ux_users_direction_signatory").IsUnique()
+            .HasFilter($"signatory_role = '{SignatoryRoles.UmkChair}' AND direction_id IS NOT NULL AND is_active");
         e.HasIndex(x => x.DepartmentId);
         e.HasIndex(x => x.InstituteId);
+        e.HasIndex(x => x.DirectionId);
         e.HasIndex(x => new { x.CanLogin, x.IsActive });
 
         e.HasOne<Department>().WithMany().HasForeignKey(x => x.DepartmentId).OnDelete(DeleteBehavior.Restrict);
         e.HasOne<Institute>().WithMany().HasForeignKey(x => x.InstituteId).OnDelete(DeleteBehavior.Restrict);
+        e.HasOne<StudyDirection>().WithMany().HasForeignKey(x => x.DirectionId).OnDelete(DeleteBehavior.Restrict);
     }
 }

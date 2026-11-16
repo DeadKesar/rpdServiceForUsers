@@ -27,6 +27,14 @@ public class Employee
     public string? SignatoryRole { get; set; }
     public Guid? DepartmentId { get; set; }
     public Guid? InstituteId { get; set; }
+
+    /// <summary>
+    /// Направление подготовки — только у председателя УМК (<see cref="SignatoryRoles.UmkChair"/>): по нему правило
+    /// <c>discipline.direction.umk_chair</c> находит подписанта. Записи без направления (их создаёт и загрузка файла
+    /// должностей) допустимы, но правило их не находит. Уточнение модели данных (docs/design) — этап 6.1, шаг C6.
+    /// </summary>
+    public Guid? DirectionId { get; set; }
+
     public bool CanLogin { get; set; } = true;
     public bool IsActive { get; set; } = true;
     public string? IdentitySubject { get; set; }
@@ -52,8 +60,8 @@ public static class SignatoryRoles
     ];
 
     /// <summary>
-    /// Подписанты без кафедры и без института: уровня университета и председатель УМК — его связь
-    /// с направлением подготовки появится на этапе 6.
+    /// Подписанты без кафедры и без института: уровня университета и председатель УМК — у него вместо
+    /// подразделения направление подготовки (<see cref="Employee.DirectionId"/>).
     /// </summary>
     public static readonly string[] WithoutUnit = [Rector, ViceRectorEdu, UmuHead, LibraryDirector, ItDirectorateHead, UmkChair];
 

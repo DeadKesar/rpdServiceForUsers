@@ -99,11 +99,12 @@ public sealed class EmployeeImport(AppDbContext db, DateTimeOffset now, Action<s
         // Уникальные индексы должности и места подписанта: прежнюю запись освободить до вставки новой.
         if (replaced > 0) await db.SaveChangesAsync(ct);
 
-        // Занятые места подписантов: заведующий — один на кафедру, директор — один на институт.
+        // Занятые места подписантов: заведующий — один на кафедру, директор — один на институт, председатель УМК — один
+        // на направление.
         var taken = (await db.Employees.Where(e => e.IsActive && e.SignatoryRole != null)
-                .Select(e => new { e.OfficialDesignation, e.SignatoryRole, e.DepartmentId, e.InstituteId }).ToListAsync(ct))
+                .Select(e => new { e.OfficialDesignation, e.SignatoryRole, e.DepartmentId, e.InstituteId, e.DirectionId }).ToListAsync(ct))
             .Where(x => x.OfficialDesignation is null || !designations.Contains(x.OfficialDesignation))
-            .Select(x => EmployeeDirectory.SeatOf(x.SignatoryRole, x.DepartmentId, x.InstituteId))
+            .Select(x => EmployeeDirectory.SeatOf(x.SignatoryRole, x.DepartmentId, x.InstituteId, x.DirectionId))
             .OfType<string>().ToHashSet();
 
         var (added, updated) = (0, 0);
@@ -151,6 +152,9 @@ public sealed class EmployeeImport(AppDbContext db, DateTimeOffset now, Action<s
             employee.SignatoryRole = role;
             employee.DepartmentId = departmentId;
             employee.InstituteId = instituteId;
+            // Направление есть только у председателя УМК (ck_users_direction_scope): файл категорию переопределяет,
+            // а направления в нём нет — оно остаётся лишь у записи, чья категория так и осталась председателем.
+            if (role != SignatoryRoles.UmkChair) employee.DirectionId = null;
             employee.UpdatedAt = now;
         }
         return new(added, updated, replaced);

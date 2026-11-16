@@ -346,6 +346,51 @@ public class DocxGenerationTests(DatabaseFixture app)
         await app.WithDbAsync(async db => Assert.False(await db.GeneratedFiles.AnyAsync(f => f.Id == item.FileId)));
     }
 
+    [Fact]
+    public async Task Approval_sheet_carries_the_umk_chair_of_the_documents_direction()
+    {
+        // Б1.О.13: РПД плана 09.04.04. Председатель УМК — по направлению плана документа: председатель другого направления
+        // в листе не появляется, а когда назначен свой, место заполнено его подписью и предупреждения нет.
+        var (client, _) = await DocumentData.UserAsync(app);
+        var created = await DocumentData.CreateAsync(app, client, (await DocumentData.PublishedTemplateAsync(app)).Id, "Б1.О.13");
+        await DocumentData.FillForSubmissionAsync(client, created);
+        var planId = await app.RealPlanIdAsync();
+        Employee? foreign = null, own = null;
+        await app.WithDbAsync(async db => foreign = await ChairData.AddChairAsync(db, (await ChairData.AddDirectionAsync(db)).Id));
+
+        // Председателя направления документа нет: место пустое, в отчёте — предупреждение; чужой председатель не подставляется.
+        var without = await PrintAsync(client, created);
+        using (var docx = await DownloadAsync(client, created, without))
+            Assert.DoesNotContain(foreign!.NameForDocument, docx.MainDocumentPart!.Document!.Body!.InnerText);
+        Assert.Contains(without.Warnings, w => w.Contains("Председатель учебно-методической комиссии") && w.Contains("discipline.direction.umk_chair"));
+        Assert.Contains(without.Unfilled, u => u.StartsWith("AutofillPredWay1"));
+
+        try
+        {
+            // Председатель появляется у направления документа — только на время проверки: остальные тесты исходят из того,
+            // что у направления плана 09.04.04 председателя нет.
+            await app.WithDbAsync(async db =>
+            {
+                var directionId = await db.CurriculumPlans.Where(p => p.Id == planId).Select(p => p.DirectionId).SingleAsync();
+                own = await ChairData.AddChairAsync(db, directionId);
+            });
+            var with = await PrintAsync(client, created);
+            using var docx = await DownloadAsync(client, created, with);
+            var text = docx.MainDocumentPart!.Document!.Body!.InnerText;
+
+            Assert.Contains(own!.NameForDocument, text);
+            Assert.DoesNotContain(foreign!.NameForDocument, text);
+            Assert.DoesNotContain(with.Warnings, w => w.Contains("Председатель учебно-методической комиссии"));
+            Assert.DoesNotContain(with.Unfilled, u => u.StartsWith("AutofillPredWay1"));
+            Assert.Empty(new OpenXmlValidator(FileFormatVersions.Office2019).Validate(docx));
+        }
+        finally
+        {
+            if (own is not null)
+                await app.WithDbAsync(async db => await db.Employees.Where(e => e.Id == own.Id).ExecuteDeleteAsync());
+        }
+    }
+
     /// <summary>Постановка в очередь (202) и опрос статуса, пока фоновая задача не завершится.</summary>
     private static async Task<GenerationItem> PrintAsync(HttpClient client, DocumentDetails document,
         string format = GenerationFormats.Docx, string expected = GenerationStatuses.Succeeded)
