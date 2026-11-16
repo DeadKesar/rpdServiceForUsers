@@ -9,12 +9,15 @@ ASP.NET Core Identity + OpenIddict (OpenID Connect, authorization code + PKCE), 
 ## Структура
 
 ```
-src/RpdFos.Core         прикладное ядро: сущности, AppDbContext, миграции, перехватчик версий
-src/RpdFos.Api          хост: модули Carter, сервер авторизации OpenIddict, страница входа,
-                        OpenAPI + Swagger UI; раздаёт веб-клиент
-src/RpdFos.Web          веб-клиент Blazor WebAssembly — отдельно не запускается
-tests/RpdFos.Api.Tests  тесты API и правил домена
-docs/                   проект, задания этапов, runbook-и, журнал разработки
+src/RpdFos.Core                      прикладное ядро: сущности, AppDbContext, миграции, перехватчик версий
+src/RpdFos.Api                       хост: модули Carter, сервер авторизации OpenIddict, страница входа,
+                                     OpenAPI + Swagger UI; раздаёт веб-клиент
+src/RpdFos.Web                       веб-клиент Blazor WebAssembly — отдельно не запускается
+src/DisciplineDataExtractor          библиотека разбора исходных файлов: учебный план, список и матрица
+                                     компетенций, должности сотрудников
+tests/RpdFos.Api.Tests               тесты API и правил домена
+tests/DisciplineDataExtractor.Tests  тесты разбора на реальных файлах (tests/fixtures)
+docs/                                проект, задания этапов, runbook-и, журнал разработки
 ```
 
 ## Запуск
