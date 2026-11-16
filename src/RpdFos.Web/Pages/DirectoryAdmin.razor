@@ -251,8 +251,9 @@ else
                 @foreach (var e in records)
                 {
                     <tr class="@(e.IsActive ? "" : "text-muted")">
-                        <td>@e.ShortName</td>
-                        <td>@e.NameForDocument</td>
+                        @* Инициалы не отрываются от фамилии. *@
+                        <td class="text-nowrap">@e.ShortName</td>
+                        <td class="text-nowrap">@e.NameForDocument</td>
                         <td>@e.Position</td>
                         <td>@e.OfficialDesignation</td>
                         <td>
