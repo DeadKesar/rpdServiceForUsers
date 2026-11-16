@@ -85,12 +85,16 @@ public sealed class DocumentApproval(
 
     /// <summary>
     /// «Запустить согласование» принятого документа после ручного назначения. У документа, принятого до появления
-    /// согласования, строк нет — круг начинается как при приёме.
+    /// согласования, строк нет — круг начинается как при приёме. Автору — «Согласование начато» (этап 7, A3): при приёме
+    /// об этом ему говорит «Принят», а здесь прежнее «ждёт назначения» осталось бы его последним сообщением.
     /// </summary>
     public async Task<(ApprovalProblem? Problem, ApprovalStart? Start)> StartAsync(Document document, Guid by, CancellationToken ct = default)
     {
         if (!DocumentTransitions.CanStartApproval(document.Status)) return (ApprovalProblem.WrongStatus, null);
 
+        // Нажатие кнопки — событие раньше следующих из него уведомлений согласующим: автор, он же согласующий, видит их в
+        // порядке событий («ждёт вашего согласования» выше).
+        var pressedAt = history.NextMoment();
         var rows = await RowsAsync(document, ct);
         ApprovalStart start;
         if (rows.Count == 0) start = await BeginAsync(document, by, ct);
@@ -102,32 +106,47 @@ public sealed class DocumentApproval(
             await StartRoundAsync(document, rows, seats, by, ct);
             start = new(true, []);
         }
-        if (start.Started) await history.SnapshotAsync(document, by, VersionTriggers.StatusChange, ct);
+        if (start.Started)
+        {
+            await history.SnapshotAsync(document, by, VersionTriggers.StatusChange, ct);
+            // В листе согласования шаблона нет электронных мест — документ уже «Согласован», и автору о том сказало
+            // «согласован»: начатого согласования не было.
+            if (document.Status == DocumentStatuses.Approval) await notifications.ApprovalStartedAsync(document, by, pressedAt, ct);
+        }
         return (null, start);
     }
 
     /// <summary>
     /// Назначить или заменить подписанта места — пока его отметки ждут (FR-REV-13). Замена — в журнал аудита. Круг уже
-    /// идёт — назначенный получает уведомление «ждёт вашего согласования»; в «Принят» круга ещё нет, назначенного
-    /// уведомит его старт.
+    /// идёт — назначенный получает уведомление «ждёт вашего согласования», а прежний — «Согласующий заменён» (этап 7, A3);
+    /// в «Принят» круга ещё нет, назначенного уведомит его старт, а прежнего о круге никто не уведомлял.
     /// </summary>
     public async Task<ApprovalProblem?> AssignAsync(Document document, string role, Guid employeeId, Guid by, CancellationToken ct = default)
     {
         if (!DocumentTransitions.CanAssignSignatory(document.Status)) return ApprovalProblem.WrongStatus;
-        var row = (await RowsAsync(document, ct)).SingleOrDefault(r => r.Role == role);
+        var rows = await RowsAsync(document, ct);
+        var row = rows.SingleOrDefault(r => r.Role == role);
         if (row is null) return ApprovalProblem.UnknownSeat;
         if (row.Status != SignatureStatuses.Pending) return ApprovalProblem.AlreadyMarked;
         if (!await db.Employees.AnyAsync(e => e.Id == employeeId && e.IsActive, ct)) return ApprovalProblem.UnknownEmployee;
         if (row.ResolvedUserId == employeeId) return null;
 
+        var replaced = row.ResolvedUserId;
         db.AuditLog.Add(Audit(document, by, AuditEvents.SignatoryAssigned,
             new JsonObject { ["role"] = row.Role, ["before"] = row.ResolvedUserId, ["after"] = employeeId }));
         row.Assign(employeeId);
         Touch(document);
         if (document.Status == DocumentStatuses.Approval)
+        {
+            var now = clock.GetUtcNow();
+            var seat = TitleOf(await SeatsAsync(document, ct), row.Role);
+            // Другое место прежнего в этом документе (заведующий кафедрой может занимать два) оставляет ему документ.
+            if (replaced is Guid previous)
+                await notifications.SignatoryReplacedAsync(
+                    document, previous, employeeId, seat, rows.Any(r => r.ResolvedUserId == previous), by, now, ct);
             await notifications.AwaitingMarkAsync(document, by,
-                new Dictionary<Guid, IReadOnlyList<string>> { [employeeId] = [TitleOf(await SeatsAsync(document, ct), row.Role)] },
-                clock.GetUtcNow(), ct);
+                new Dictionary<Guid, IReadOnlyList<string>> { [employeeId] = [seat] }, now, ct);
+        }
         return null;
     }
 

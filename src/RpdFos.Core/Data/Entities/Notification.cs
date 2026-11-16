@@ -28,8 +28,9 @@ public class Notification
 }
 
 /// <summary>
-/// События, о которых уведомляют (этап 6.1, C3). Из FR-REV-08 в прототип вошли смены статуса и возвраты; «приближение
-/// дедлайна» и «новый комментарий» не делаются.
+/// События, о которых уведомляют (этап 6.1, C3; этап 7, A3). Из FR-REV-08 в прототип вошли смены статуса, возвраты и
+/// события печати и согласования. «Новый комментарий» отдельным событием не делается (отступление от FR-REV-08):
+/// замечания к полям приходят вместе с возвратом — в уведомлении их число. Напоминания о сроке — этап 7, A6.
 /// </summary>
 public static class NotificationEvents
 {
@@ -56,4 +57,19 @@ public static class NotificationEvents
 
     /// <summary>Согласующему: документ ждёт его отметки — при старте круга и при назначении на идущем круге.</summary>
     public const string AwaitingMark = "approval.awaiting_mark";
+
+    /// <summary>Автору: методист запустил согласование принятого документа вручную — после назначения согласующих (этап 7, A3).</summary>
+    public const string ApprovalStarted = "approval.started";
+
+    /// <summary>
+    /// Прежнему согласующему: на идущем круге его место занял другой (этап 7, A3). Без ссылки на документ, если он ему
+    /// больше недоступен.
+    /// </summary>
+    public const string SignatoryReplaced = "approval.signatory_replaced";
+
+    /// <summary>Тому, кто запустил формирование: печатная форма готова — со ссылкой на документ (этап 7, A3).</summary>
+    public const string PrintReady = "document.print_ready";
+
+    /// <summary>Тому, кто запустил формирование: печатная форма не сформирована — с причиной (этап 7, A3).</summary>
+    public const string PrintFailed = "document.print_failed";
 }

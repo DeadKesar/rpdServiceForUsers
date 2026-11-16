@@ -10,7 +10,8 @@ namespace RpdFos.Core.Documents;
 
 /// <summary>
 /// Уведомления о событиях документа в интерфейсе (FR-REV-08, этап 6.1, C3). У каждого события свои получатели: автор,
-/// все действующие методисты или согласующие. Тому, кто совершил действие, уведомление не создаётся.
+/// все действующие методисты или согласующие. Тому, кто совершил действие, уведомление не создаётся — кроме итога
+/// печати (этап 7, A3): он идёт тому, кто запустил формирование.
 /// <para>
 /// Уведомления только добавляются в контекст: сохраняет вызывающий — тем же сохранением, что и событие, поэтому
 /// событие и уведомление о нём появляются вместе или не появляются совсем. Время уведомления — время события (для смены
@@ -19,8 +20,9 @@ namespace RpdFos.Core.Documents;
 /// </para>
 /// Готовая фраза — в <c>payload.text</c>, рядом параметры события для интерфейса: <c>title</c> (название документа),
 /// <c>discipline_code</c>, <c>discipline</c>, <c>by</c> (кто совершил действие), <c>comment</c>, <c>remarks</c>
-/// (число замечаний), <c>seats</c> (места согласования), <c>approval</c> (чем кончился приём). В фразах нет родовых
-/// форм («Принят», «Согласующий: …»): пол автора и методиста системе неизвестен.
+/// (число замечаний), <c>seats</c> (места согласования), <c>approval</c> (чем кончился приём); у печати — <c>format</c>,
+/// <c>task_id</c> и <c>reason</c> (причина сбоя), у замены согласующего — <c>signatory</c> (новый согласующий). В фразах
+/// нет родовых форм («Принят», «Согласующий: …»): пол автора и методиста системе неизвестен.
 /// </summary>
 public sealed class DocumentNotifications(AppDbContext db, DirectoryAccounts directory)
 {
@@ -148,9 +150,78 @@ public sealed class DocumentNotifications(AppDbContext db, DirectoryAccounts dir
         }
     }
 
+    /// <summary>
+    /// Автору: методист запустил согласование принятого документа вручную — после назначения согласующих (этап 7, A3;
+    /// идея этапа 6.1, C3). При приёме, который начинает круг сразу, об этом сообщает «Принят» (<see cref="AcceptedAsync"/>).
+    /// </summary>
+    public async Task ApprovalStartedAsync(Document document, Guid by, DateTimeOffset at, CancellationToken ct = default)
+    {
+        var to = Others([document.AuthorId], by);
+        if (to.Count == 0) return;
+        var who = await NameAsync(by, ct);
+        await AddAsync(NotificationEvents.ApprovalStarted, document, to, at,
+            Text($"Согласование начато: {document.Title}", $"Методист: {who}"), new JsonObject { ["by"] = who }, ct);
+    }
+
+    /// <summary>
+    /// Прежнему согласующему: на идущем круге его место занял <paramref name="replacement"/> (FR-REV-13; этап 7, A3, идея
+    /// этапа 6.1, C3). Документ ушёл из его очереди и, если других мест в нём у него нет, стал недоступен: непрочитанное
+    /// «ждёт вашего согласования» по этому документу отмечается прочитанным, а «Согласующий заменён» идёт без ссылки —
+    /// переход по ней дал бы 403. Осталось другое место (<paramref name="keepsAccess"/>) — документ ему доступен и всё ещё
+    /// ждёт его отметки: прежнее уведомление остаётся, ссылка есть.
+    /// </summary>
+    /// <param name="seat">Название места в листе согласования, которое он потерял.</param>
+    public async Task SignatoryReplacedAsync(
+        Document document, Guid replaced, Guid replacement, string seat, bool keepsAccess, Guid by, DateTimeOffset at,
+        CancellationToken ct = default)
+    {
+        if (!keepsAccess)
+            foreach (var waiting in await db.Notifications.Where(n => n.RecipientId == replaced && n.DocumentId == document.Id &&
+                             n.EventType == NotificationEvents.AwaitingMark && n.ReadAt == null).ToListAsync(ct))
+                waiting.ReadAt = at;
+
+        // Сам себя заменивший о замене знает — отмечать прочитанным нужно в любом случае, а сообщать ему не о чем.
+        var to = Others([replaced], by);
+        if (to.Count == 0) return;
+        var next = await NameAsync(replacement, ct);
+        await AddAsync(NotificationEvents.SignatoryReplaced, document, to, at,
+            Text($"Согласующий заменён: {document.Title}", $"Место в листе согласования: {seat}", $"Новый согласующий: {next}"),
+            new JsonObject { ["by"] = await NameAsync(by, ct), ["seats"] = new JsonArray(seat), ["signatory"] = next }, ct,
+            linked: keepsAccess);
+    }
+
+    /// <summary>
+    /// Тому, кто запустил формирование печатной формы: файл готов или не сформирован — тогда с причиной (этап 7, A3,
+    /// FR-GEN-04, UC-10, шаг 4). Это итог его собственного запроса, поэтому фильтра «кроме совершившего» нет.
+    /// Вызывается, когда задача уже завершена; уведомление ложится в то же сохранение, что и её завершение.
+    /// </summary>
+    public async Task PrintFinishedAsync(GenerationTask task, DateTimeOffset at, CancellationToken ct = default)
+    {
+        // Удалённый после постановки в очередь документ из выборки не исчезает: задача завершилась ошибкой, и причину
+        // нужно показать, а не оборвать завершение исключением.
+        var document = await db.Documents.IgnoreQueryFilters().AsNoTracking().SingleAsync(d => d.Id == task.DocumentId, ct);
+        var format = task.Format.ToUpperInvariant();
+        if (task.Status == GenerationStatuses.Succeeded)
+        {
+            await AddAsync(NotificationEvents.PrintReady, document, [task.RequestedBy], at,
+                Text($"Печатная форма готова: {document.Title}", $"Формат: {format}"),
+                new JsonObject { ["format"] = task.Format, ["task_id"] = task.Id }, ct);
+            return;
+        }
+
+        // Сообщение исключения бывает многострочным: в ленте оно идёт одной фразой.
+        var reason = string.Join(' ', (task.ErrorMessage ?? "").Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        if (reason.Length == 0) reason = "причина не названа";
+        await AddAsync(NotificationEvents.PrintFailed, document, [task.RequestedBy], at,
+            Text($"Печатная форма не сформирована: {document.Title}", $"Формат: {format}", $"Причина: {reason}"),
+            new JsonObject { ["format"] = task.Format, ["task_id"] = task.Id, ["reason"] = reason }, ct);
+    }
+
+    // linked: false — уведомление без ссылки на документ (document_id пуст), когда документ получателю недоступен;
+    // название документа остаётся в тексте и параметрах.
     private async Task AddAsync(
         string eventType, Document document, IReadOnlyList<Guid> recipients, DateTimeOffset at, string text, JsonObject parameters,
-        CancellationToken ct)
+        CancellationToken ct, bool linked = true)
     {
         var discipline = await db.Disciplines.AsNoTracking().Where(d => d.Id == document.DisciplineId)
             .Select(d => new { d.Code, d.Name }).SingleAsync(ct);
@@ -166,7 +237,8 @@ public sealed class DocumentNotifications(AppDbContext db, DirectoryAccounts dir
         foreach (var recipient in recipients)
             db.Notifications.Add(new Notification
             {
-                RecipientId = recipient, EventType = eventType, DocumentId = document.Id, Payload = json, CreatedAt = at
+                RecipientId = recipient, EventType = eventType, DocumentId = linked ? document.Id : null, Payload = json,
+                CreatedAt = at
             });
     }
 

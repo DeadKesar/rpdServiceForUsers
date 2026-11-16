@@ -135,9 +135,10 @@ public sealed partial class DocumentPrinting(
 
 /// <summary>
 /// Фоновая задача формирования (очередь generation): «в очереди» → «выполняется» → «готово» или «ошибка».
-/// Без зависимости от Hangfire: очередь и запуск задаёт хост.
+/// Без зависимости от Hangfire: очередь и запуск задаёт хост. Итог — «Печатная форма готова» или «не сформирована» —
+/// получает тот, кто запустил формирование (этап 7, A3, FR-GEN-04): уведомление сохраняется вместе с завершением задачи.
 /// </summary>
-public sealed class GenerationJob(AppDbContext db, DocumentPrinting printing, TimeProvider clock)
+public sealed class GenerationJob(AppDbContext db, DocumentPrinting printing, DocumentNotifications notifications, TimeProvider clock)
 {
     public async Task RunAsync(Guid taskId, CancellationToken ct)
     {
@@ -157,6 +158,9 @@ public sealed class GenerationJob(AppDbContext db, DocumentPrinting printing, Ti
             task.ErrorMessage = $"Документ не сформирован: {e.Message}";
             task.CompletedAt = clock.GetUtcNow();
         }
+        // Итог ложится в то же сохранение, что и завершение задачи: файл и уведомление о нём появляются вместе. Задача
+        // выше уже стала «готово» или «ошибка» — любым путём, в том числе после исключения.
+        await notifications.PrintFinishedAsync(task, task.CompletedAt ?? clock.GetUtcNow(), ct);
         await db.SaveChangesAsync(ct);
     }
 }

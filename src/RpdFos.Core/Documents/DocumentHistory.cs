@@ -27,9 +27,12 @@ public sealed class DocumentHistory(AppDbContext db, DocumentProjections project
         return at;
     }
 
-    // Два перехода одного сохранения (приём и старт согласования) стоят в истории в порядке событий: время второго —
-    // позже первого не меньше чем на 2 мкс, чтобы различаться и после округления до точности timestamptz.
-    private DateTimeOffset NextMoment()
+    /// <summary>
+    /// Время следующего события этого сохранения. Два перехода одного сохранения (приём и старт согласования) стоят в
+    /// истории в порядке событий: время второго — позже первого не меньше чем на 2 мкс, чтобы различаться и после
+    /// округления до точности timestamptz. Тем же порядком время получают уведомления, которые не совпадают с переходом.
+    /// </summary>
+    public DateTimeOffset NextMoment()
     {
         var now = clock.GetUtcNow();
         var earliest = lastChange.AddTicks(2 * TimeSpan.TicksPerMicrosecond);

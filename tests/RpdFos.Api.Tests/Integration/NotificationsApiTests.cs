@@ -6,6 +6,7 @@ using Microsoft.EntityFrameworkCore;
 using RpdFos.Api.Features.Approvals;
 using RpdFos.Api.Features.Documents;
 using RpdFos.Api.Features.Notifications;
+using RpdFos.Api.Features.Printing;
 using RpdFos.Api.Features.Users;
 using RpdFos.Core.Data.Entities;
 using RpdFos.Core.Documents;
@@ -14,8 +15,8 @@ using Xunit;
 namespace RpdFos.Api.Tests.Integration;
 
 /// <summary>
-/// Уведомления (этап 6.1, C3; FR-REV-08): кому и когда создаются события документа, лента, число непрочитанных и
-/// «прочитано». Получатели «всем методистам» определяются по ролям учётных записей в базе, а не по заголовку тестового
+/// Уведомления (этап 6.1, C3; этап 7, A3; FR-REV-08): кому и когда создаются события документа — в том числе итог
+/// печати, ручной запуск согласования и замена согласующего, — лента, число непрочитанных и «прочитано». Получатели «всем методистам» определяются по ролям учётных записей в базе, а не по заголовку тестового
 /// клиента, поэтому методисты здесь — настоящие учётные записи, созданные через страницу администратора. База общая
 /// для всех тестов коллекции: уведомления документа отбираются по его id, а получатели рассылки сверяются с базой.
 /// Имя у всех созданных здесь учётных записей одно — «Получатель У. О.».
@@ -103,6 +104,8 @@ public class NotificationsApiTests(DatabaseFixture app)
         var accepted = Assert.Single(await FeedAsync(author, created, NotificationEvents.Accepted));
         Assert.Equal($"Принят: {created.Document.Title}. Согласование начато. Методист: {reviewerRecord.ShortName}", accepted.Text);
         Assert.Equal(DocumentNotifications.ApprovalStarted, (await PayloadAsync(accepted)).GetProperty("approval").GetString());
+        // Приём, который начал круг сразу, сказал об этом сам: отдельного «Согласование начато» (этап 7, A3) нет.
+        Assert.Empty(await FeedAsync(author, created, NotificationEvents.ApprovalStarted));
         foreach (var methodist in new[] { reviewer, other })
         {
             Assert.Empty(await FeedAsync(methodist, created, NotificationEvents.Accepted));
@@ -346,6 +349,161 @@ public class NotificationsApiTests(DatabaseFixture app)
         await AssertCleanTextsAsync(created);
     }
 
+    /// <summary>
+    /// Этап 7, A3: ручной запуск согласования — автору «Согласование начато». Назначение подписанта этого уведомления не
+    /// даёт, а приём, который начал круг сразу, говорит о начале сам (проверено в тесте приёма выше).
+    /// </summary>
+    [Fact]
+    public async Task Manual_start_tells_the_author_that_approval_began()
+    {
+        var (author, reviewer, reviewerRecord, created, version) = await AcceptedAwaitingChairAsync("Б1.О.12");
+        var (other, _) = await AccountAsync(AppRoles.Methodist);
+        var (admin, _) = await DocumentData.UserAsync(app, AppRoles.Admin);
+        var (chair, chairRecord) = await DocumentData.UserAsync(app, AppRoles.Approver);
+        Assert.Equal([NotificationEvents.Accepted], (await FeedAsync(author, created)).Select(n => n.EventType));
+
+        version = await AssignAsync(admin, created, SignatoryRoles.UmkChair, chairRecord);
+        Assert.Empty(await FeedAsync(author, created, NotificationEvents.ApprovalStarted));
+        await ExpectAsync(reviewer.PostAsJsonAsync(Url(created, "approval/start"), new DocumentVersionRequest(version)), DocumentStatuses.Approval);
+
+        var started = Assert.Single(await FeedAsync(author, created, NotificationEvents.ApprovalStarted));
+        Assert.Equal($"Согласование начато: {created.Document.Title}. Методист: {reviewerRecord.ShortName}", started.Text);
+        Assert.Null(started.ReadAt);
+        Assert.Equal(reviewerRecord.ShortName, (await PayloadAsync(started)).GetProperty("by").GetString());
+        // Запустивший и остальные методисты о запуске не уведомляются, согласующим — своё «ждёт вашего согласования».
+        foreach (var methodist in new[] { reviewer, other })
+            Assert.Empty(await FeedAsync(methodist, created, NotificationEvents.ApprovalStarted));
+        Assert.Empty(await FeedAsync(chair, created, NotificationEvents.ApprovalStarted));
+        Assert.Single(await FeedAsync(chair, created, NotificationEvents.AwaitingMark));
+        await AssertCleanTextsAsync(created);
+    }
+
+    /// <summary>
+    /// Этап 7, A3: замена согласующего на идущем круге. Прежнему — «Согласующий заменён» без ссылки: документ ему уже
+    /// недоступен, а его непрочитанное «ждёт вашего согласования» по документу отмечается прочитанным; новому — «ждёт
+    /// вашего согласования». Пока документ «Принят», круга нет — прежнему сообщать нечего.
+    /// </summary>
+    [Fact]
+    public async Task Replaced_approver_gets_a_notice_without_a_link_and_his_waiting_notice_is_marked_read()
+    {
+        var (author, reviewer, reviewerRecord, created, version) = await AcceptedAwaitingChairAsync("Б1.О.12");
+        var (admin, _) = await DocumentData.UserAsync(app, AppRoles.Admin);
+        var (first, firstRecord) = await DocumentData.UserAsync(app, AppRoles.Approver);
+        var (second, secondRecord) = await DocumentData.UserAsync(app, AppRoles.Approver);
+        var (third, thirdRecord) = await DocumentData.UserAsync(app, AppRoles.Approver);
+
+        // «Принят»: назначенного заменяют до старта — о круге ему никто не говорил и не скажет.
+        await AssignAsync(admin, created, SignatoryRoles.UmkChair, firstRecord);
+        version = await AssignAsync(reviewer, created, SignatoryRoles.UmkChair, secondRecord);
+        Assert.Empty(await AllAsync(first));
+        await ExpectAsync(reviewer.PostAsJsonAsync(Url(created, "approval/start"), new DocumentVersionRequest(version)), DocumentStatuses.Approval);
+        Assert.Null(Assert.Single(await FeedAsync(second, created, NotificationEvents.AwaitingMark)).ReadAt);
+        Assert.Equal(1, await UnreadAsync(second));
+
+        // Круг идёт: место переходит к третьему.
+        await AssignAsync(reviewer, created, SignatoryRoles.UmkChair, thirdRecord);
+
+        var seat = (await DetailsAsync(reviewer, created)).Approval!.Seats.Single(s => s.Role == SignatoryRoles.UmkChair).Title;
+        var feed = await AllAsync(second);
+        Assert.Equal(HttpStatusCode.Forbidden, (await second.GetAsync(Url(created, ""))).StatusCode);
+        // Непрочитанной ссылки на недоступный документ нет: «ждёт» прочитано, «заменён» — без ссылки.
+        Assert.DoesNotContain(feed, n => n.DocumentId == created.Document.Id && n.ReadAt is null);
+        Assert.NotNull(Assert.Single(await FeedAsync(second, created, NotificationEvents.AwaitingMark)).ReadAt);
+        var replaced = Assert.Single(feed, n => n.EventType == NotificationEvents.SignatoryReplaced);
+        Assert.Equal($"Согласующий заменён: {created.Document.Title}. Место в листе согласования: {seat}. Новый согласующий: {thirdRecord.ShortName}",
+            replaced.Text);
+        Assert.Null(replaced.DocumentId);
+        Assert.Null(replaced.ReadAt);
+        Assert.Equal(1, await UnreadAsync(second));
+        Assert.DoesNotContain("..", replaced.Text);
+        Assert.DoesNotContain("  ", replaced.Text);
+        var payload = await PayloadAsync(replaced);
+        Assert.Equal((created.Document.Title, reviewerRecord.ShortName, thirdRecord.ShortName),
+            (payload.GetProperty("title").GetString(), payload.GetProperty("by").GetString(), payload.GetProperty("signatory").GetString()));
+        Assert.Equal([seat], payload.GetProperty("seats").EnumerateArray().Select(s => s.GetString()));
+
+        // Новый согласующий получает обычное «ждёт вашего согласования» со ссылкой; заменённых и их замены никто больше не видит.
+        var awaiting = Assert.Single(await FeedAsync(third, created));
+        Assert.Equal((NotificationEvents.AwaitingMark, true), (awaiting.EventType, awaiting.ReadAt is null));
+        foreach (var client in new[] { first, third, author, reviewer })
+            Assert.DoesNotContain(await AllAsync(client), n => n.EventType == NotificationEvents.SignatoryReplaced);
+        await AssertCleanTextsAsync(created);
+    }
+
+    /// <summary>
+    /// Этап 7, A3: у прежнего согласующего осталось другое место в документе — он по-прежнему его участник: документ ему
+    /// доступен и ждёт его отметки. Уведомление «ждёт вашего согласования» остаётся непрочитанным, «заменён» идёт со ссылкой.
+    /// </summary>
+    [Fact]
+    public async Task Approver_who_keeps_another_seat_keeps_the_waiting_notice_and_the_link()
+    {
+        var (_, reviewer, _, created, version) = await AcceptedAwaitingChairAsync("Б1.О.13");
+        var (admin, _) = await DocumentData.UserAsync(app, AppRoles.Admin);
+        var (first, firstRecord) = await DocumentData.UserAsync(app, AppRoles.Approver);
+        var (second, secondRecord) = await DocumentData.UserAsync(app, AppRoles.Approver);
+        version = await AssignAsync(admin, created, SignatoryRoles.UmkChair, firstRecord);
+        await ExpectAsync(reviewer.PostAsJsonAsync(Url(created, "approval/start"), new DocumentVersionRequest(version)), DocumentStatuses.Approval);
+
+        // Место начальника УМУ тоже достаётся первому: у него два места и два «ждёт вашего согласования».
+        await AssignAsync(reviewer, created, SignatoryRoles.UmuHead, firstRecord);
+        Assert.Equal(2, (await FeedAsync(first, created, NotificationEvents.AwaitingMark)).Count);
+
+        // Место председателя занимает второй; первому остаётся место начальника УМУ.
+        await AssignAsync(reviewer, created, SignatoryRoles.UmkChair, secondRecord);
+
+        var seat = (await DetailsAsync(reviewer, created)).Approval!.Seats.Single(s => s.Role == SignatoryRoles.UmkChair).Title;
+        var feed = await FeedAsync(first, created);
+        var replaced = Assert.Single(feed, n => n.EventType == NotificationEvents.SignatoryReplaced);
+        Assert.Equal($"Согласующий заменён: {created.Document.Title}. Место в листе согласования: {seat}. Новый согласующий: {secondRecord.ShortName}",
+            replaced.Text);
+        Assert.Equal(2, feed.Count(n => n.EventType == NotificationEvents.AwaitingMark && n.ReadAt is null));
+        Assert.Equal(HttpStatusCode.OK, (await first.GetAsync(Url(created, ""))).StatusCode);
+        Assert.Single(await FeedAsync(second, created, NotificationEvents.AwaitingMark));
+        await AssertCleanTextsAsync(created);
+    }
+
+    /// <summary>
+    /// Этап 7, A3: итог формирования печатной формы получает тот, кто его запустил, — не автор документа и не другие.
+    /// Уведомление сохраняется вместе с завершением задачи: когда опрос видит конец задачи, оно уже есть. Сбой — с причиной.
+    /// </summary>
+    [Fact]
+    public async Task Print_result_goes_to_the_one_who_started_the_generation_and_a_failure_carries_its_reason()
+    {
+        var (author, _) = await DocumentData.UserAsync(app);
+        var (reviewer, _) = await AccountAsync(AppRoles.Methodist);
+        var created = await DocumentData.CreateAsync(app, author, (await DocumentData.PublishedTemplateAsync(app)).Id, "Б1.О.11");
+        var version = await DocumentData.FillForSubmissionAsync(author, created);
+        await ExpectAsync(author.PostAsJsonAsync(Url(created, "submit"), new DocumentVersionRequest(version)), DocumentStatuses.UnderReview);
+
+        // Автор запустил DOCX: «готова» — ему, со ссылкой на документ (в ленте документа она видна по document_id).
+        var docx = await PrintAsync(author, created, GenerationFormats.Docx, GenerationStatuses.Succeeded);
+        var ready = Assert.Single(await FeedAsync(author, created, NotificationEvents.PrintReady));
+        Assert.Equal($"Печатная форма готова: {created.Document.Title}. Формат: DOCX.", ready.Text);
+        Assert.Null(ready.ReadAt);
+        var payload = await PayloadAsync(ready);
+        Assert.Equal(("docx", docx.TaskId), (payload.GetProperty("format").GetString(), payload.GetProperty("task_id").GetGuid()));
+        Assert.Empty(await FeedAsync(reviewer, created, NotificationEvents.PrintReady));
+
+        // Методист запустил PDF — «готова» ему; автор второго уведомления не получает.
+        await PrintAsync(reviewer, created, GenerationFormats.Pdf, GenerationStatuses.Succeeded);
+        Assert.Equal([$"Печатная форма готова: {created.Document.Title}. Формат: PDF."],
+            (await FeedAsync(reviewer, created, NotificationEvents.PrintReady)).Select(n => n.Text));
+        Assert.Single(await FeedAsync(author, created, NotificationEvents.PrintReady));
+
+        // Конвертер недоступен: тому, кто запустил, — «не сформирована» с причиной; «готова» не создаётся.
+        FakePdfConverter.FailNext = true;
+        var failed = await PrintAsync(reviewer, created, GenerationFormats.Pdf, GenerationStatuses.Failed);
+        var notice = Assert.Single(await FeedAsync(reviewer, created, NotificationEvents.PrintFailed));
+        Assert.Contains("Конвертер PDF недоступен", failed.ErrorMessage);
+        Assert.Equal($"Печатная форма не сформирована: {created.Document.Title}. Формат: PDF. Причина: {failed.ErrorMessage}.", notice.Text);
+        var failure = await PayloadAsync(notice);
+        Assert.Equal(("pdf", failed.ErrorMessage, failed.TaskId),
+            (failure.GetProperty("format").GetString(), failure.GetProperty("reason").GetString(), failure.GetProperty("task_id").GetGuid()));
+        Assert.Empty(await FeedAsync(author, created, NotificationEvents.PrintFailed));
+        Assert.Single(await FeedAsync(reviewer, created, NotificationEvents.PrintReady));
+        await AssertCleanTextsAsync(created);
+    }
+
     [Fact]
     public async Task Template_without_electronic_seats_tells_the_author_about_acceptance_and_approval_in_order()
     {
@@ -491,10 +649,52 @@ public class NotificationsApiTests(DatabaseFixture app)
         return recipients;
     }
 
-    // Уведомления пользователя по документу — от новых к старым, как в ленте колокольчика.
+    // Вся лента пользователя — от новых к старым, как в колокольчике; уведомления без ссылки на документ видны только здесь.
+    private static async Task<List<NotificationItem>> AllAsync(HttpClient client) =>
+        (await client.GetFromJsonAsync<List<NotificationItem>>($"/api/notifications?limit={NotificationsModule.MaxLimit}"))!;
+
+    // Уведомления пользователя по документу — со ссылкой на него.
     private static async Task<List<NotificationItem>> FeedAsync(HttpClient client, DocumentDetails document, string? eventType = null) =>
-        (await client.GetFromJsonAsync<List<NotificationItem>>($"/api/notifications?limit={NotificationsModule.MaxLimit}"))!
-            .Where(n => n.DocumentId == document.Document.Id && (eventType is null || n.EventType == eventType)).ToList();
+        (await AllAsync(client)).Where(n => n.DocumentId == document.Document.Id && (eventType is null || n.EventType == eventType)).ToList();
+
+    // Принятый документ, который ждёт назначения председателя УМК: заведующего кафедрой и начальника УМУ правила находят.
+    // Автор и методист — настоящие участники: методист — учётная запись с ролью, как у получателей рассылки.
+    private async Task<(HttpClient Author, HttpClient Reviewer, Employee ReviewerRecord, DocumentDetails Created, int Version)>
+        AcceptedAwaitingChairAsync(string code)
+    {
+        var (author, _) = await DocumentData.UserAsync(app);
+        var (reviewer, reviewerRecord) = await AccountAsync(AppRoles.Methodist);
+        var created = await DocumentData.CreateAsync(app, author,
+            (await DocumentData.PublishedTemplateAsync(app, DocumentData.SeatsWithMissingSignatory)).Id, code);
+        var version = await DocumentData.FillForSubmissionAsync(author, created);
+        version = await ExpectAsync(author.PostAsJsonAsync(Url(created, "submit"), new DocumentVersionRequest(version)), DocumentStatuses.UnderReview);
+        version = await ExpectAsync(reviewer.PostAsJsonAsync(Url(created, "accept"), new DocumentVersionRequest(version)), DocumentStatuses.Accepted);
+        return (author, reviewer, reviewerRecord, created, version);
+    }
+
+    // Назначить или заменить подписанта места; возвращает версию документа после назначения.
+    private static async Task<int> AssignAsync(HttpClient client, DocumentDetails document, string role, Employee signatory)
+    {
+        var response = await client.PostAsJsonAsync(Url(document, $"approval/seats/{role}/assign"), new AssignRequest(signatory.Id));
+        Assert.True(response.IsSuccessStatusCode, $"{(int)response.StatusCode} {await response.Content.ReadAsStringAsync()}");
+        return (await response.Content.ReadFromJsonAsync<ApprovalChanged>())!.Version;
+    }
+
+    // Печать: постановка в очередь (202) и опрос, пока фоновая задача не завершится.
+    private static async Task<GenerationItem> PrintAsync(HttpClient client, DocumentDetails document, string format, string expected)
+    {
+        var response = await client.PostAsync(Url(document, $"print/{format}"), null);
+        Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
+        var item = (await response.Content.ReadFromJsonAsync<GenerationItem>())!;
+        var deadline = DateTime.UtcNow.AddSeconds(60);
+        while (item.Status is GenerationStatuses.Queued or GenerationStatuses.Running && DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(300);
+            item = (await client.GetFromJsonAsync<GenerationItem>(response.Headers.Location!))!;
+        }
+        Assert.Equal(expected, item.Status);
+        return item;
+    }
 
     private static async Task<NotificationItem> ItemAsync(HttpClient client, Guid id) =>
         Assert.Single((await client.GetFromJsonAsync<List<NotificationItem>>("/api/notifications"))!, n => n.Id == id);
