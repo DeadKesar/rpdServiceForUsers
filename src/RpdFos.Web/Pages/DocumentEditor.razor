@@ -153,6 +153,14 @@ else
             <div class="card-body py-2">
                 <div class="small mb-1">
                     Документ вернётся методисту в «На проверке». После нового приёма согласование начнётся заново — для всех согласующих.
+                    @if (MyOpenComments > 0)
+                    {
+                        <span>Ваши замечания к полям (@MyOpenComments) методист увидит у полей.</span>
+                    }
+                    else
+                    {
+                        <span>Чтобы указать место, оставьте замечание у поля.</span>
+                    }
                 </div>
                 <textarea class="form-control form-control-sm" rows="2" placeholder="Комментарий (обязательно): его увидит методист"
                           @bind="rejectComment" @bind:event="oninput"></textarea>
@@ -170,9 +178,21 @@ else
         <div class="alert alert-warning py-2">
             <div class="fw-semibold">Возвращён с согласования</div>
             <div>@back.By, @back.At.ToLocalTime().ToString("dd.MM.yyyy HH:mm"): @back.Comment</div>
-            <div class="small mt-1">
-                Исправьте документ сами или оставьте замечание к полю и верните его автору. Новый приём начнёт согласование заново.
-            </div>
+            @* Подсказка — пока документ у методиста: на доработке решение уже принято. *@
+            @if (details.Actions.Review)
+            {
+                <div class="small mt-1">
+                    @if (OpenApprovalComments > 0)
+                    {
+                        <span>Замечаний согласующих у полей: @OpenApprovalComments. Исправьте документ и снимите их сами или верните документ автору — тогда их снимет он.</span>
+                    }
+                    else
+                    {
+                        <span>Исправьте документ сами или оставьте замечание к полю и верните его автору.</span>
+                    }
+                    Новый приём начнёт согласование заново.
+                </div>
+            }
         </div>
     }
 
@@ -208,13 +228,14 @@ else
     {
         <div class="card mb-3">
             <div class="card-body py-2 small">
-                <div class="fw-semibold mb-1">Замечания методиста: неразрешённых @OpenComments из @comments.Count</div>
+                <div class="fw-semibold mb-1">Замечания к полям: неразрешённых @OpenComments из @comments.Count</div>
                 <ul class="mb-0">
                     @foreach (var c in comments)
                     {
                         <li class="@(c.IsResolved ? "text-muted" : "")">
                             <a href="" @onclick="() => GoToAsync(c.FieldPath)" @onclick:preventDefault>@PlaceTitle(c.FieldPath)</a>:
                             @c.Text
+                            <span class="text-muted">— @c.AuthorName@(c.FromApproval ? ", согласующий" : "")</span>
                             @if (c.IsResolved)
                             {
                                 <span class="badge text-bg-success ms-1">разрешено@(c.ResolvedByName is { } by ? $" — {by}" : "")</span>
@@ -383,6 +404,12 @@ else
 
     private int OpenComments => comments.Count(c => !c.IsResolved);
 
+    // Свои неснятые замечания согласующего: с ними «Согласовать» недоступно (этап 7, A2).
+    private int MyOpenComments => comments.Count(c => !c.IsResolved && c.AuthorId == details?.ViewerId);
+
+    // Неснятые замечания согласующих — у методиста после возврата с согласования.
+    private int OpenApprovalComments => comments.Count(c => !c.IsResolved && c.FromApproval);
+
     private int OpenCommentsIn(string section) =>
         comments.Count(c => !c.IsResolved && c.FieldPath.TrimStart('/').Split('/')[0] == section);
 
@@ -416,8 +443,9 @@ else
         comments = await Http.GetFromJsonAsync<List<CommentItem>>($"api/documents/{Id}/comments") ?? [];
         context = new SchemaContext(details.Schema, payload, details.Metadata, OnChanged, OnEdited)
         {
-            Locked = !details.Editable, Comments = comments, CanComment = details.Actions.Review,
+            Locked = !details.Editable, Comments = comments, CanComment = details.Actions.Comment,
             CanResolve = details.Actions.ResolveComments, CanResolveOwn = details.Actions.ResolveOwnComments,
+            CanResolveApproval = details.Actions.ResolveApprovalComments,
             ViewerId = details.ViewerId, AddComment = AddCommentAsync, ResolveComment = ResolveCommentAsync,
             Defaults = details.TemplateDefaults is { } defaults ? JsonNode.Parse(defaults.GetRawText()) as JsonObject : null,
             CorrectPlan = details.Actions.CorrectPlan, Corrections = details.PlanCorrections ?? [],
@@ -505,9 +533,15 @@ else
         _ => $"{prefix}Согласование не запущено: не у всех мест найден подписант — назначьте согласующих в панели «Согласование»."
     };
 
-    // «Согласовать» (UC-08): отметку не отозвать — с подтверждением. Отметили все — документ «Согласован».
+    // «Согласовать» (UC-08): отметку не отозвать — с подтверждением. Отметили все — документ «Согласован». Свои
+    // неснятые замечания — несогласие: сервер откажет, спрашивать не о чем (этап 7, A2).
     private async Task ApproveAsync()
     {
+        if (MyOpenComments > 0)
+        {
+            (messageIsError, message, fieldErrors) = (true, $"Есть ваши замечания: {MyOpenComments}. Снимите свои замечания или верните документ.", []);
+            return;
+        }
         if (!await confirm.AskAsync($"Согласовать документ «{details!.Document.DisciplineName}»?", "Согласование")) return;
         await ChangeStatusAsync("approval/approve", new { }, "Согласие отмечено.", r => r.Status == "approved"
             ? "Согласие отмечено. Документ согласован всеми согласующими."

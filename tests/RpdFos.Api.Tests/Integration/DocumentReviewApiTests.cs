@@ -152,7 +152,7 @@ public class DocumentReviewApiTests(DatabaseFixture app)
         var details = (await methodist.GetFromJsonAsync<DocumentDetails>(Url(created, "")))!;
         Assert.True(details.Editable);
         Assert.Equal(new DocumentActions(Submit: false, Review: true, ResolveComments: false, Print: true, CorrectPlan: true,
-            ResolveOwnComments: true), details.Actions);
+            ResolveOwnComments: true, Comment: true, ResolveApprovalComments: true), details.Actions);
 
         var edited = await DocumentData.PatchAsync(methodist, created.Document.Id, "goals_and_objectives", version, Goals("Задача, уточнённая методистом"));
 

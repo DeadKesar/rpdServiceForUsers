@@ -548,6 +548,123 @@ public class DocumentApprovalApiTests(DatabaseFixture app)
         Assert.Null(Assert.Single(await ReviewQueueAsync(methodist), d => d.Id == id).FromApproval);
     }
 
+    /// <summary>
+    /// Этап 7, A2: согласующий со строкой оставляет замечания к полям, пока документ на согласовании и его отметка ждёт;
+    /// видят их все, кто видит документ. Согласовать при своём неснятом замечании нельзя, а снять его может только он сам.
+    /// </summary>
+    [Fact]
+    public async Task Approver_comments_fields_while_awaiting_mark_and_approves_only_without_own_open_comments()
+    {
+        var (author, methodist, created, version) = await UnderReviewAsync("Б1.О.10");
+        var (head, _) = await DocumentData.SignatoryAsync(app, created.Document.DisciplineId, SignatoryRoles.DepartmentHead);
+        var (umu, umuRecord) = await DocumentData.SignatoryAsync(app, created.Document.DisciplineId, SignatoryRoles.UmuHead);
+        var (stranger, _) = await DocumentData.UserAsync(app, AppRoles.Approver);
+        await ExpectAsync(methodist.PostAsJsonAsync(Url(created, "accept"), new DocumentVersionRequest(version)), DocumentStatuses.Approval);
+
+        // Утверждающий без строки — 403; методист на согласовании замечаний не оставляет — 409; автору не даёт политика.
+        Assert.Equal(HttpStatusCode.Forbidden, (await CommentAsync(stranger, created, "/thematic_plan", "Не согласен")).StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, (await CommentAsync(methodist, created, "/thematic_plan", "Уточните темы")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await CommentAsync(author, created, "/thematic_plan", "Своё")).StatusCode);
+
+        var forUmu = (await DetailsAsync(umu, created)).Actions;
+        Assert.Equal((true, true, true, false), (forUmu.Comment, forUmu.ResolveOwnComments, forUmu.Approve, forUmu.ResolveApprovalComments));
+        var remark = await CreatedCommentAsync(umu, created, "/thematic_plan", "Темы раздела 2 не соответствуют плану");
+        Assert.Equal((umuRecord.ShortName, true, false), (remark.AuthorName, remark.FromApproval, remark.IsResolved));
+        foreach (var client in new[] { author, methodist, head, umu })
+            Assert.Contains(await CommentsAsync(client, created), c => c.Id == remark.Id && c.FromApproval);
+
+        // Своё неснятое замечание — согласие не проходит.
+        var refused = await umu.PostAsync(Url(created, "approval/approve"), null);
+        Assert.Equal(HttpStatusCode.Conflict, refused.StatusCode);
+        Assert.Equal("Снимите свои замечания или верните документ.", (await refused.Content.ReadFromJsonAsync<ProblemDetails>())!.Detail);
+
+        // Чужое замечание другой согласующий не снимает (403), методист и автор на согласовании — тоже (409).
+        Assert.Equal(HttpStatusCode.Forbidden, (await ResolveAsync(head, created, remark)).StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, (await ResolveAsync(methodist, created, remark)).StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, (await ResolveAsync(author, created, remark)).StatusCode);
+
+        // Снял своё — согласие проходит; после своей отметки замечаний уже не оставить.
+        var resolved = (await (await ResolveAsync(umu, created, remark)).Content.ReadFromJsonAsync<CommentItem>())!;
+        Assert.Equal((true, umuRecord.ShortName), (resolved.IsResolved, resolved.ResolvedByName));
+        await ExpectAsync(umu.PostAsync(Url(created, "approval/approve"), null), DocumentStatuses.Approval);
+        var late = await CommentAsync(umu, created, "/thematic_plan", "Ещё одно");
+        Assert.Equal(HttpStatusCode.Conflict, late.StatusCode);
+        Assert.Equal("Отметка уже поставлена", (await late.Content.ReadFromJsonAsync<ProblemDetails>())!.Title);
+        forUmu = (await DetailsAsync(umu, created)).Actions;
+        Assert.Equal((false, false, false), (forUmu.Comment, forUmu.ResolveOwnComments, forUmu.Approve));
+
+        // Согласованный документ — вне согласования: строка есть, а замечание — 409.
+        await ExpectAsync(head.PostAsync(Url(created, "approval/approve"), null), DocumentStatuses.Approved);
+        Assert.Equal(HttpStatusCode.Conflict, (await CommentAsync(head, created, "/thematic_plan", "Поздно")).StatusCode);
+    }
+
+    /// <summary>
+    /// Этап 7, A2: после возврата с согласования замечания согласующего снимает методист на проверке — как свои, —
+    /// или, вернув документ, автор на доработке. Сам согласующий их уже не снимает; приём — без неснятых замечаний.
+    /// </summary>
+    [Fact]
+    public async Task After_return_from_approval_methodist_or_author_resolves_the_approver_comments()
+    {
+        var (author, methodist, created, version) = await UnderReviewAsync("Б1.О.13");
+        var (umu, _) = await DocumentData.SignatoryAsync(app, created.Document.DisciplineId, SignatoryRoles.UmuHead);
+        var (head, _) = await DocumentData.SignatoryAsync(app, created.Document.DisciplineId, SignatoryRoles.DepartmentHead);
+        var (otherMethodist, _) = await DocumentData.UserAsync(app, AppRoles.Methodist);
+        await ExpectAsync(methodist.PostAsJsonAsync(Url(created, "accept"), new DocumentVersionRequest(version)), DocumentStatuses.Approval);
+
+        var first = await CreatedCommentAsync(umu, created, "/thematic_plan", "Темы раздела 2 не соответствуют плану");
+        var second = await CreatedCommentAsync(umu, created, "/goals_and_objectives", "Цели сформулированы слишком общо");
+        // Общий комментарий возврата по-прежнему обязателен.
+        Assert.Equal(HttpStatusCode.UnprocessableEntity,
+            (await umu.PostAsJsonAsync(Url(created, "approval/reject"), new RejectRequest(" "))).StatusCode);
+        version = await ExpectAsync(umu.PostAsJsonAsync(Url(created, "approval/reject"), new RejectRequest("Замечания у полей")),
+            DocumentStatuses.UnderReview);
+
+        // Вне согласования строка согласования замечаний не даёт: ни оставить новое, ни снять своё.
+        Assert.Equal(HttpStatusCode.Conflict, (await CommentAsync(umu, created, "/thematic_plan", "Ещё")).StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, (await CommentAsync(head, created, "/thematic_plan", "И ещё")).StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, (await ResolveAsync(umu, created, first)).StatusCode);
+
+        // Методист на проверке снимает замечание согласующего — любой методист, это не чужое замечание методиста.
+        Assert.True((await DetailsAsync(otherMethodist, created)).Actions.ResolveApprovalComments);
+        var resolved = (await (await ResolveAsync(otherMethodist, created, first)).Content.ReadFromJsonAsync<CommentItem>())!;
+        Assert.Equal((true, true), (resolved.IsResolved, resolved.FromApproval));
+        // Своё замечание методиста — не согласования: его другой методист не снимает.
+        var own = await CreatedCommentAsync(methodist, created, "/title_page", "Проверьте год утверждения");
+        Assert.False(own.FromApproval);
+        Assert.Equal(HttpStatusCode.Forbidden, (await ResolveAsync(otherMethodist, created, own)).StatusCode);
+
+        // Неснятое замечание согласующего держит приём; методист возвращает документ автору.
+        Assert.Equal(HttpStatusCode.Conflict,
+            (await methodist.PostAsJsonAsync(Url(created, "accept"), new DocumentVersionRequest(version))).StatusCode);
+        version = await ExpectAsync(methodist.PostAsJsonAsync(Url(created, "return"), new ReturnRequest(version, null)),
+            DocumentStatuses.Returned);
+
+        // Автор на доработке снимает и замечание согласующего, и методиста; новый приём начинает новый круг.
+        foreach (var comment in new[] { second, own })
+            Assert.Equal(HttpStatusCode.OK, (await ResolveAsync(author, created, comment)).StatusCode);
+        version = await ExpectAsync(author.PostAsJsonAsync(Url(created, "submit"), new DocumentVersionRequest(version)),
+            DocumentStatuses.UnderReview);
+        await ExpectAsync(methodist.PostAsJsonAsync(Url(created, "accept"), new DocumentVersionRequest(version)), DocumentStatuses.Approval);
+        // Замечания прежнего круга сняты — согласовать они не мешают.
+        await ExpectAsync(umu.PostAsync(Url(created, "approval/approve"), null), DocumentStatuses.Approval);
+    }
+
+    private static Task<HttpResponseMessage> CommentAsync(HttpClient client, DocumentDetails document, string path, string text) =>
+        client.PostAsJsonAsync(Url(document, "comments"), new CommentRequest(path, text));
+
+    private static async Task<CommentItem> CreatedCommentAsync(HttpClient client, DocumentDetails document, string path, string text)
+    {
+        var response = await CommentAsync(client, document, path, text);
+        Assert.True(response.StatusCode == HttpStatusCode.Created, $"{(int)response.StatusCode} {await response.Content.ReadAsStringAsync()}");
+        return (await response.Content.ReadFromJsonAsync<CommentItem>())!;
+    }
+
+    private static Task<HttpResponseMessage> ResolveAsync(HttpClient client, DocumentDetails document, CommentItem comment) =>
+        client.PostAsync(Url(document, $"comments/{comment.Id}/resolve"), null);
+
+    private static async Task<List<CommentItem>> CommentsAsync(HttpClient client, DocumentDetails document) =>
+        (await client.GetFromJsonAsync<List<CommentItem>>(Url(document, "comments")))!;
+
     private async Task<(HttpClient Author, HttpClient Methodist, DocumentDetails Created, int Version)> UnderReviewAsync(
         string code, IReadOnlyCollection<string>? electronicSeats = null)
     {

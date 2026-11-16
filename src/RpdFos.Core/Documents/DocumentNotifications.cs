@@ -110,16 +110,20 @@ public sealed class DocumentNotifications(AppDbContext db, DirectoryAccounts dir
             Text($"Согласован: {document.Title}"), new JsonObject { ["by"] = await NameAsync(by, ct) }, ct);
     }
 
-    /// <summary>Методистам: согласующий вернул документ с согласования; в тексте — кто и комментарий.</summary>
+    /// <summary>
+    /// Методистам: согласующий вернул документ с согласования; в тексте — кто, сколько замечаний к полям он оставил
+    /// (этап 7, A2; без замечаний — не упоминается) и комментарий.
+    /// </summary>
     public async Task ReturnedFromApprovalAsync(
-        Document document, Guid by, string comment, DateTimeOffset at, CancellationToken ct = default)
+        Document document, Guid by, string comment, int remarks, DateTimeOffset at, CancellationToken ct = default)
     {
         var to = Others(await directory.ActiveHoldersOfAsync(AppRoles.Methodist, ct), by);
         if (to.Count == 0) return;
         var who = await NameAsync(by, ct);
         await AddAsync(NotificationEvents.ReturnedFromApproval, document, to, at,
-            Text($"Возвращён с согласования: {document.Title}", $"Согласующий: {who}", $"Комментарий: {comment}"),
-            new JsonObject { ["by"] = who, ["comment"] = comment }, ct);
+            Text($"Возвращён с согласования: {document.Title}", $"Согласующий: {who}",
+                remarks > 0 ? $"Замечаний к полям: {remarks}" : null, $"Комментарий: {comment}"),
+            new JsonObject { ["by"] = who, ["remarks"] = remarks, ["comment"] = comment }, ct);
     }
 
     /// <summary>

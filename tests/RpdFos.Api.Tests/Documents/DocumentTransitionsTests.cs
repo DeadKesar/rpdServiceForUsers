@@ -179,4 +179,40 @@ public class DocumentTransitionsTests
         Assert.False(comment.Resolve(Guid.NewGuid(), at.AddHours(1)));
         Assert.Equal((true, by, at), (comment.IsResolved, comment.ResolvedBy, comment.ResolvedAt));
     }
+
+    [Theory]
+    [InlineData(S.UnderReview, true, false)]
+    [InlineData(S.Approval, false, true)]
+    [InlineData(S.Accepted, false, false)]
+    [InlineData(S.Returned, false, false)]
+    [InlineData(S.Approved, false, false)]
+    public void Comments_are_left_by_methodist_on_review_and_by_approver_awaiting_mark(string status, bool reviewer, bool approver)
+    {
+        // Этап 7, A2: согласующий — на согласовании и только пока его строка ждёт отметки.
+        Assert.Equal(reviewer, DocumentTransitions.CanComment(status, isReviewer: true, awaitingMark: false));
+        Assert.Equal(approver, DocumentTransitions.CanComment(status, isReviewer: false, awaitingMark: true));
+        Assert.False(DocumentTransitions.CanComment(status, isReviewer: false, awaitingMark: false));
+    }
+
+    [Fact]
+    public void Comments_are_resolved_by_author_on_rework_methodist_on_review_and_approver_awaiting_mark()
+    {
+        static bool Resolve(string status, bool author = false, bool reviewer = false, bool awaiting = false, bool own = false,
+            bool fromApproval = false) =>
+            DocumentTransitions.CanResolveComment(status, author, reviewer, awaiting, own, fromApproval);
+
+        // Автор на доработке — любое, в том числе согласующего; вне доработки — никакое.
+        Assert.True(Resolve(S.Returned, author: true, fromApproval: true));
+        Assert.False(Resolve(S.Approval, author: true, own: true));
+        // Методист на проверке — своё и оставленное на согласовании, но не другого методиста.
+        Assert.True(Resolve(S.UnderReview, reviewer: true, own: true));
+        Assert.True(Resolve(S.UnderReview, reviewer: true, fromApproval: true));
+        Assert.False(Resolve(S.UnderReview, reviewer: true));
+        Assert.False(Resolve(S.Returned, reviewer: true, fromApproval: true));
+        // Согласующий — своё, пока ждёт отметки; чужое и после возврата — нет.
+        Assert.True(Resolve(S.Approval, awaiting: true, own: true, fromApproval: true));
+        Assert.False(Resolve(S.Approval, awaiting: true, fromApproval: true));
+        Assert.False(Resolve(S.Approval, own: true, fromApproval: true));
+        Assert.False(Resolve(S.UnderReview, awaiting: true, own: true, fromApproval: true));
+    }
 }

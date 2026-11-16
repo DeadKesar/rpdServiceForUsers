@@ -147,9 +147,10 @@ public class ApprovalsModule : ICarterModule
     }
 
     /// <summary>
-    /// «Согласовать»: отметка в своей строке; отметили все — документ «Согласован». Версию клиента отметка не
-    /// сверяет: содержимое на согласовании не меняется, а отметки других согласующих мешать не должны — согласование
-    /// параллельное. Одновременные отметки упорядочивает версия документа, прочитанная в этом же запросе.
+    /// «Согласовать»: отметка в своей строке; отметили все — документ «Согласован». При своих неснятых замечаниях к
+    /// полям — 409 (этап 7, A2). Версию клиента отметка не сверяет: содержимое на согласовании не меняется, а отметки
+    /// других согласующих мешать не должны — согласование параллельное. Одновременные отметки упорядочивает версия
+    /// документа, прочитанная в этом же запросе.
     /// </summary>
     private static async Task<IResult> Approve(
         Guid id, HttpContext http, AppDbContext db, DirectoryAccounts directory, DocumentApproval approval, CancellationToken ct)
@@ -183,6 +184,9 @@ public class ApprovalsModule : ICarterModule
             detail: "Вы уже отметили этот документ — возможно, в другой вкладке."),
         ApprovalProblem.EmptyComment => Results.Problem(statusCode: StatusCodes.Status422UnprocessableEntity,
             title: "Не указан комментарий", detail: "Напишите, почему документ возвращается: комментарий увидит методист."),
+        // Свои замечания к полям — несогласие (этап 7, A2).
+        ApprovalProblem.OpenComments => Results.Problem(statusCode: StatusCodes.Status409Conflict, title: "Есть ваши замечания",
+            detail: "Снимите свои замечания или верните документ."),
         _ => Refused(document, action)
     };
 

@@ -40,8 +40,8 @@ public class DocumentsModule : ICarterModule
         g.MapPost("/{id:guid}/return", Return).RequireAuthorization(Policies.Reviewers);
         g.MapPost("/{id:guid}/accept", Accept).RequireAuthorization(Policies.Reviewers);
         g.MapGet("/{id:guid}/comments", Comments);
-        g.MapPost("/{id:guid}/comments", AddComment).RequireAuthorization(Policies.Reviewers);
-        g.MapPost("/{id:guid}/comments/{commentId:guid}/resolve", ResolveComment).RequireAuthorization(Policies.DocumentAuthors);
+        g.MapPost("/{id:guid}/comments", AddComment).RequireAuthorization(Policies.Commenters);
+        g.MapPost("/{id:guid}/comments/{commentId:guid}/resolve", ResolveComment).RequireAuthorization(Policies.CommentResolvers);
     }
 
     // Методист и администратор видят все документы, остальные — свои.
@@ -387,14 +387,32 @@ public class DocumentsModule : ICarterModule
         return Results.Ok(await CommentItem.Query(db, db.DocumentComments.Where(c => c.DocumentId == id)).ToListAsync(ct));
     }
 
+    /// <summary>
+    /// Замечание к полю: методист — на проверке, согласующий — на согласовании, пока его строка ждёт отметки (этап 7,
+    /// A2). Порядок отказов согласующему — как у отметки: чужой документ (403), не тот статус, отметка уже стоит (409).
+    /// </summary>
     private static async Task<IResult> AddComment(
         Guid id, CommentRequest rq, HttpContext http, AppDbContext db, DirectoryAccounts directory, DocumentReview review,
-        CancellationToken ct)
+        DocumentApproval approval, CancellationToken ct)
     {
-        var (document, reviewerId, refusal) = await ReviewedDocumentAsync(id, http, db, directory, DocumentTransitions.CommentAction, ct);
-        if (refusal is not null) return refusal;
+        var document = await db.Documents.SingleOrDefaultAsync(d => d.Id == id, ct);
+        if (document is null) return NotFound();
+        if (await directory.FindIdAsync(http.User, ct) is not Guid me) return NoDirectoryRecord();
 
-        var (comment, problem) = await review.CommentAsync(document!, reviewerId, rq.FieldPath ?? "", rq.Text ?? "", ct);
+        var isReviewer = IsReviewer(http.User);
+        var (seat, awaiting) = await SeatAsync(http.User, id, me, approval, ct);
+        if (!DocumentTransitions.CanComment(document.Status, isReviewer, awaiting))
+        {
+            if (!isReviewer && !seat)
+                return Results.Problem(statusCode: StatusCodes.Status403Forbidden, title: "Чужое согласование",
+                    detail: "На согласовании замечания оставляет тот, кто назначен в строке согласования документа.");
+            return seat && DocumentTransitions.CanSign(document.Status)
+                ? Results.Problem(statusCode: StatusCodes.Status409Conflict, title: "Отметка уже поставлена",
+                    detail: "Замечания оставляют до своей отметки: вы уже согласовали документ.")
+                : Refused(document, DocumentTransitions.CommentAction);
+        }
+
+        var (comment, problem) = await review.CommentAsync(document, me, rq.FieldPath ?? "", rq.Text ?? "", ct);
         if (problem is not null)
             return Results.Problem(statusCode: StatusCodes.Status422UnprocessableEntity,
                 title: problem == ReviewProblem.EmptyText ? "Пустое замечание" : "Поле не найдено",
@@ -408,34 +426,40 @@ public class DocumentsModule : ICarterModule
     }
 
     /// <summary>
-    /// Замечание отмечает разрешённым автор, пока документ на доработке, или методист — своё, пока документ на
-    /// проверке (этап 6, A2).
+    /// Замечание отмечает разрешённым автор, пока документ на доработке; методист на проверке — своё (этап 6, A2) и
+    /// оставленное на согласовании; согласующий — своё, пока его строка ждёт отметки (этап 7, A2).
     /// </summary>
     private static async Task<IResult> ResolveComment(
-        Guid id, Guid commentId, HttpContext http, AppDbContext db, DirectoryAccounts directory, TimeProvider clock,
-        CancellationToken ct)
+        Guid id, Guid commentId, HttpContext http, AppDbContext db, DirectoryAccounts directory, DocumentApproval approval,
+        TimeProvider clock, CancellationToken ct)
     {
         var document = await db.Documents.AsNoTracking().SingleOrDefaultAsync(d => d.Id == id, ct);
         if (document is null) return NotFound();
-        var me = await directory.FindIdAsync(http.User, ct);
-        if (me is null) return NoDirectoryRecord();
+        if (await directory.FindIdAsync(http.User, ct) is not Guid me) return NoDirectoryRecord();
         var comment = await db.DocumentComments.SingleOrDefaultAsync(c => c.Id == commentId && c.DocumentId == id, ct);
         if (comment is null)
             return Results.Problem(statusCode: StatusCodes.Status404NotFound, title: "Замечание не найдено",
                 detail: "Обновите страницу документа.");
 
-        var (isAuthor, isReviewer) = (document.AuthorId == me, IsReviewer(http.User));
-        if (!DocumentTransitions.CanResolveComment(document.Status, isAuthor, isReviewer, comment.AuthorId == me))
+        var (isAuthor, isReviewer, own) = (document.AuthorId == me, IsReviewer(http.User), comment.AuthorId == me);
+        var (seat, awaiting) = await SeatAsync(http.User, id, me, approval, ct);
+        // Чьё замечание — нужно только методисту на проверке: чужое он снимает, если оно оставлено на согласовании.
+        var fromApproval = isReviewer && !own && DocumentTransitions.CanReview(document.Status) &&
+                           await DocumentReview.FromApproval(db).ContainsAsync(commentId, ct);
+        if (!DocumentTransitions.CanResolveComment(document.Status, isAuthor, isReviewer, awaiting, own, fromApproval))
         {
             if (isReviewer && DocumentTransitions.CanReview(document.Status))
                 return Results.Problem(statusCode: StatusCodes.Status403Forbidden, title: "Чужое замечание",
-                    detail: "Методист снимает только своё замечание; чужое разрешает автор на доработке.");
-            return isAuthor || isReviewer
+                    detail: "Методист снимает свои замечания и замечания согласующих; замечание другого методиста разрешает автор на доработке.");
+            if (seat && !own && DocumentTransitions.CanSign(document.Status))
+                return Results.Problem(statusCode: StatusCodes.Status403Forbidden, title: "Чужое замечание",
+                    detail: "Согласующий снимает только свои замечания.");
+            return isAuthor || isReviewer || seat
                 ? Refused(document, DocumentTransitions.ResolveAction)
                 : Results.Problem(statusCode: StatusCodes.Status403Forbidden, title: "Чужой документ",
-                    detail: "Замечания разрешает автор документа, а свои — методист на проверке.");
+                    detail: "Замечания разрешает автор документа, а свои — методист на проверке и согласующий на согласовании.");
         }
-        if (!comment.Resolve(me.Value, clock.GetUtcNow()))
+        if (!comment.Resolve(me, clock.GetUtcNow()))
             return Results.Problem(statusCode: StatusCodes.Status409Conflict, title: "Замечание уже разрешено",
                 detail: "Его отметили раньше — возможно, в другой вкладке.");
 
@@ -470,7 +494,13 @@ public class DocumentsModule : ICarterModule
         return (document, me.Value, null);
     }
 
-    // Возвращает, принимает и оставляет замечания методист — пока документ на проверке.
+    // Строка согласования пользователя в документе: есть ли и ждёт ли отметки. Без роли «Утверждающий» назначение
+    // согласующим ничего не даёт — как и для доступа к документу (этап 6, B1).
+    private static async Task<(bool Seat, bool Awaiting)> SeatAsync(
+        ClaimsPrincipal user, Guid documentId, Guid me, DocumentApproval approval, CancellationToken ct) =>
+        user.IsInRole(AppRoles.Approver) ? await approval.SeatOfAsync(documentId, me, ct) : (false, false);
+
+    // Возвращает и принимает методист — пока документ на проверке.
     private static async Task<(Document? Document, Guid ReviewerId, IResult? Refusal)> ReviewedDocumentAsync(
         Guid id, HttpContext http, AppDbContext db, DirectoryAccounts directory, string action, CancellationToken ct)
     {
@@ -519,6 +549,9 @@ public class DocumentsModule : ICarterModule
         var scope = DocumentTransitions.EditScope(status, isAuthor, isReviewer, isCorrector);
         var corrections = await CorrectionsAsync(db, document.Id, ct);
         var panel = await ApprovalAsync(document, viewer, approval, ct);
+        // Строка согласующего ждёт отметки: он согласует или возвращает документ и оставляет замечания (этап 7, A2).
+        var awaiting = viewer.IsSignatory && panel is not null && panel.Seats.Any(s => s.Mine && s.Status == SignatureStatuses.Pending);
+        var signs = awaiting && DocumentTransitions.CanSign(status);
 
         return new DocumentDetails(
             DocumentItem.From(document, facts.Discipline),
@@ -536,11 +569,11 @@ public class DocumentsModule : ICarterModule
                 Print: DocumentTransitions.CanPrint(status, isAuthor, isReviewer, viewer.IsSignatory),
                 CorrectPlan: scope is DocumentEditScope.ContentAndPlan or DocumentEditScope.PlanOnly,
                 TakeForReview: isReviewer && DocumentTransitions.CanTakeForReview(status),
-                ResolveOwnComments: isReviewer && DocumentTransitions.CanReview(status),
+                ResolveOwnComments: isReviewer && DocumentTransitions.CanReview(status) || signs,
                 Delete: isAuthor && DocumentTransitions.CanDelete(status),
-                // Согласовать или вернуть — тот, чья строка согласования ждёт отметки.
-                Approve: viewer.IsSignatory && DocumentTransitions.CanSign(status) &&
-                         panel is not null && panel.Seats.Any(s => s.Mine && s.Status == SignatureStatuses.Pending)),
+                Approve: signs,
+                Comment: DocumentTransitions.CanComment(status, isReviewer, awaiting),
+                ResolveApprovalComments: isReviewer && DocumentTransitions.CanReview(status)),
             template.DefaultPayload is { } defaults ? JsonDocument.Parse(defaults).RootElement : null,
             corrections, viewer.Id, panel);
     }
@@ -661,11 +694,16 @@ public record DocumentItem(
 /// замечания, формировать печатную форму, исправлять поля из учебного плана (методист и администратор, этап 5.1).
 /// </summary>
 /// <param name="TakeForReview">Методист берёт документ на проверку из статусов автора (этап 6, A1).</param>
-/// <param name="ResolveOwnComments">Методист на проверке снимает свои замечания (этап 6, A2).</param>
+/// <param name="ResolveOwnComments">
+/// Свои замечания снимают методист на проверке (этап 6, A2) и согласующий, пока его строка ждёт отметки (этап 7, A2).
+/// </param>
 /// <param name="Delete">Автор удаляет свой черновик (этап 6, A5).</param>
 /// <param name="Approve">Согласующий отмечает согласие или возвращает документ на проверку (этап 6, B3).</param>
+/// <param name="Comment">Оставить замечание к полю: методист на проверке, согласующий до своей отметки (этап 7, A2).</param>
+/// <param name="ResolveApprovalComments">Методист на проверке снимает и замечания, оставленные на согласовании (этап 7, A2).</param>
 public record DocumentActions(bool Submit, bool Review, bool ResolveComments, bool Print, bool CorrectPlan = false,
-    bool TakeForReview = false, bool ResolveOwnComments = false, bool Delete = false, bool Approve = false);
+    bool TakeForReview = false, bool ResolveOwnComments = false, bool Delete = false, bool Approve = false,
+    bool Comment = false, bool ResolveApprovalComments = false);
 
 /// <summary>
 /// Панель «Согласование» документа (этап 6, B2–B3): места электронного согласования и что может зритель —
@@ -702,14 +740,19 @@ public record DocumentDetails(
     ApprovalPanel? Approval = null);
 
 /// <summary>Замечание к полю: кто и когда оставил, разрешено ли и кем.</summary>
+/// <param name="FromApproval">Замечание оставлено на согласовании — согласующим (этап 7, A2).</param>
 public record CommentItem(
     Guid Id, string FieldPath, string Text, Guid AuthorId, string AuthorName, DateTimeOffset CreatedAt, bool IsResolved,
-    string? ResolvedByName, DateTimeOffset? ResolvedAt)
+    string? ResolvedByName, DateTimeOffset? ResolvedAt, bool FromApproval = false)
 {
-    public static IQueryable<CommentItem> Query(AppDbContext db, IQueryable<DocumentComment> comments) =>
-        from c in comments
-        join a in db.Employees on c.AuthorId equals a.Id
-        orderby c.CreatedAt
-        select new CommentItem(c.Id, c.FieldPath, c.Text, c.AuthorId, a.ShortName, c.CreatedAt, c.IsResolved,
-            db.Employees.Where(e => e.Id == c.ResolvedBy).Select(e => e.ShortName).FirstOrDefault(), c.ResolvedAt);
+    public static IQueryable<CommentItem> Query(AppDbContext db, IQueryable<DocumentComment> comments)
+    {
+        var fromApproval = DocumentReview.FromApproval(db);
+        return from c in comments
+            join a in db.Employees on c.AuthorId equals a.Id
+            orderby c.CreatedAt
+            select new CommentItem(c.Id, c.FieldPath, c.Text, c.AuthorId, a.ShortName, c.CreatedAt, c.IsResolved,
+                db.Employees.Where(e => e.Id == c.ResolvedBy).Select(e => e.ShortName).FirstOrDefault(), c.ResolvedAt,
+                fromApproval.Contains(c.Id));
+    }
 }

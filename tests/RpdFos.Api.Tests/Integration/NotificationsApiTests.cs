@@ -209,6 +209,9 @@ public class NotificationsApiTests(DatabaseFixture app)
             Assert.EndsWith("Комментарий: Нет литературы.", back.Text);
             var payload = await PayloadAsync(back);
             Assert.Equal((umuRecord.ShortName, "Нет литературы"), (payload.GetProperty("by").GetString(), payload.GetProperty("comment").GetString()));
+            // Замечаний к полям согласующий не оставил: в тексте о них ни слова, в параметрах — ноль (этап 7, A2).
+            Assert.DoesNotContain("Замечаний", back.Text);
+            Assert.Equal(0, payload.GetProperty("remarks").GetInt32());
         }
         foreach (var client in new[] { author, head, umu })
             Assert.Empty(await FeedAsync(client, created, NotificationEvents.ReturnedFromApproval));
@@ -231,6 +234,40 @@ public class NotificationsApiTests(DatabaseFixture app)
         }
         foreach (var client in new[] { head, umu })
             Assert.Empty(await FeedAsync(client, created, NotificationEvents.Approved));
+        await AssertCleanTextsAsync(created);
+    }
+
+    /// <summary>
+    /// Этап 7, A2: возврат с замечаниями к полям — в уведомлении методистам их число: неснятые замечания согласующего,
+    /// снятое им самим не считается.
+    /// </summary>
+    [Fact]
+    public async Task Return_from_approval_tells_methodists_how_many_field_comments_the_approver_left()
+    {
+        var (author, _) = await DocumentData.UserAsync(app);
+        var (reviewer, _) = await AccountAsync(AppRoles.Methodist);
+        var created = await DocumentData.CreateAsync(app, author, (await DocumentData.PublishedTemplateAsync(app)).Id, "Б1.О.12");
+        var (umu, umuRecord) = await DocumentData.SignatoryAsync(app, created.Document.DisciplineId, SignatoryRoles.UmuHead);
+        var version = await DocumentData.FillForSubmissionAsync(author, created);
+        version = await ExpectAsync(author.PostAsJsonAsync(Url(created, "submit"), new DocumentVersionRequest(version)), DocumentStatuses.UnderReview);
+        await ExpectAsync(reviewer.PostAsJsonAsync(Url(created, "accept"), new DocumentVersionRequest(version)), DocumentStatuses.Approval);
+
+        var ids = new List<Guid>();
+        foreach (var (path, text) in new[] { ("/thematic_plan", "Темы"), ("/goals_and_objectives", "Цели"), ("/title_page", "Год") })
+        {
+            var response = await umu.PostAsJsonAsync(Url(created, "comments"), new CommentRequest(path, text));
+            Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+            ids.Add((await response.Content.ReadFromJsonAsync<CommentItem>())!.Id);
+        }
+        Assert.True((await umu.PostAsync(Url(created, $"comments/{ids[0]}/resolve"), null)).IsSuccessStatusCode);
+        await ExpectAsync(umu.PostAsJsonAsync(Url(created, "approval/reject"), new RejectRequest("Замечания у полей")),
+            DocumentStatuses.UnderReview);
+
+        var back = Assert.Single(await FeedAsync(reviewer, created, NotificationEvents.ReturnedFromApproval));
+        Assert.StartsWith($"Возвращён с согласования: {created.Document.Title}. Согласующий: {umuRecord.ShortName}", back.Text);
+        Assert.EndsWith(" Замечаний к полям: 2. Комментарий: Замечания у полей.", back.Text);
+        var payload = await PayloadAsync(back);
+        Assert.Equal((2, "Замечания у полей"), (payload.GetProperty("remarks").GetInt32(), payload.GetProperty("comment").GetString()));
         await AssertCleanTextsAsync(created);
     }
 

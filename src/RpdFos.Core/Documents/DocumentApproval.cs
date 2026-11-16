@@ -29,7 +29,10 @@ public enum ApprovalProblem
     NoSeat,
 
     /// <summary>Возврат без комментария.</summary>
-    EmptyComment
+    EmptyComment,
+
+    /// <summary>«Согласовать» при своих неснятых замечаниях к полям: их снимают или возвращают документ (этап 7, A2).</summary>
+    OpenComments
 }
 
 /// <summary>Итог старта: согласование запущено или подписанты этих мест не найдены — их назначают вручную.</summary>
@@ -130,12 +133,14 @@ public sealed class DocumentApproval(
 
     /// <summary>
     /// «Согласовать» (UC-08): отметка в своей строке; отметили все — документ «Согласован», снимок версии
-    /// <c>approved</c>.
+    /// <c>approved</c>. Свои неснятые замечания к полям — несогласие: согласующий снимает их или возвращает документ
+    /// (этап 7, A2).
     /// </summary>
     public async Task<ApprovalProblem?> ApproveAsync(Document document, Guid signatoryId, CancellationToken ct = default)
     {
         var (mine, rows, problem) = await PendingOfAsync(document, signatoryId, ct);
         if (problem is not null) return problem;
+        if (await OpenCommentsOfAsync(document, signatoryId, ct) > 0) return ApprovalProblem.OpenComments;
 
         var now = clock.GetUtcNow();
         foreach (var row in mine)
@@ -155,7 +160,8 @@ public sealed class DocumentApproval(
 
     /// <summary>
     /// «Вернуть на проверку» (UC-09): комментарий обязателен — он остаётся в строке согласования и в истории
-    /// статусов. Документ уходит методисту, круг окончен: следующий приём начнёт новый.
+    /// статусов, даже если у полей есть замечания согласующего (этап 7, A2): их число — в уведомлении методистам.
+    /// Документ уходит методисту, круг окончен: следующий приём начнёт новый.
     /// </summary>
     public async Task<ApprovalProblem?> RejectAsync(Document document, Guid signatoryId, string? comment, CancellationToken ct = default)
     {
@@ -164,6 +170,7 @@ public sealed class DocumentApproval(
         if (string.IsNullOrWhiteSpace(comment)) return ApprovalProblem.EmptyComment;
 
         var text = comment.Trim();
+        var remarks = await OpenCommentsOfAsync(document, signatoryId, ct);
         foreach (var row in mine)
         {
             row.Reject(text);
@@ -172,13 +179,24 @@ public sealed class DocumentApproval(
         }
         var returnedAt = history.StatusChanged(document, document.ReturnFromApproval(), signatoryId, text);
         await history.SnapshotAsync(document, signatoryId, VersionTriggers.StatusChange, ct);
-        await notifications.ReturnedFromApprovalAsync(document, signatoryId, text, returnedAt, ct);
+        await notifications.ReturnedFromApprovalAsync(document, signatoryId, text, remarks, returnedAt, ct);
         return null;
     }
 
     /// <summary>У сотрудника есть строка согласования в документе — он его участник.</summary>
     public Task<bool> HasSeatAsync(Guid documentId, Guid employeeId, CancellationToken ct = default) =>
         db.DocumentSignatures.AnyAsync(s => s.DocumentId == documentId && s.ResolvedUserId == employeeId, ct);
+
+    /// <summary>
+    /// Строки сотрудника в документе: есть ли они и ждёт ли какая-то его отметки — пока ждёт, он решает и оставляет
+    /// замечания к полям (этап 7, A2). Статус документа проверяет вызывающий.
+    /// </summary>
+    public async Task<(bool HasSeat, bool AwaitsMark)> SeatOfAsync(Guid documentId, Guid employeeId, CancellationToken ct = default)
+    {
+        var statuses = await db.DocumentSignatures.Where(s => s.DocumentId == documentId && s.ResolvedUserId == employeeId)
+            .Select(s => s.Status).ToListAsync(ct);
+        return (statuses.Count > 0, statuses.Contains(SignatureStatuses.Pending));
+    }
 
     /// <summary>Круг согласования документа для панели «Согласование»: места — в порядке листа согласования шаблона.</summary>
     public async Task<ApprovalState> StateAsync(Document document, CancellationToken ct = default)
@@ -286,6 +304,10 @@ public sealed class DocumentApproval(
         var pending = mine.Where(r => r.Status == SignatureStatuses.Pending).ToList();
         return pending.Count == 0 ? ([], rows, ApprovalProblem.AlreadyMarked) : (pending, rows, null);
     }
+
+    // Неснятые замечания согласующего — все этого круга: приём, который начинает круг, требует, чтобы неснятых не было.
+    private Task<int> OpenCommentsOfAsync(Document document, Guid signatoryId, CancellationToken ct) =>
+        db.DocumentComments.CountAsync(c => c.DocumentId == document.Id && c.AuthorId == signatoryId && !c.IsResolved, ct);
 
     // Кто из назначенных может поставить отметку: действующая учётная запись с ролью «Утверждающий».
     private async Task<HashSet<Guid>> ApproversAsync(IEnumerable<Employee> people, CancellationToken ct)

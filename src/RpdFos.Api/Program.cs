@@ -93,6 +93,12 @@ builder.Services.AddAuthorizationBuilder()
     .AddPolicy(Policies.Approvers, p => p
         .AddAuthenticationSchemes(OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme)
         .RequireRole(AppRoles.Approver))
+    .AddPolicy(Policies.Commenters, p => p
+        .AddAuthenticationSchemes(OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme)
+        .RequireRole(AppRoles.Methodist, AppRoles.Approver))
+    .AddPolicy(Policies.CommentResolvers, p => p
+        .AddAuthenticationSchemes(OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme)
+        .RequireRole(AppRoles.Teacher, AppRoles.Methodist, AppRoles.Admin, AppRoles.Approver))
     .AddPolicy(Policies.JobsDashboard, p => p
         .AddAuthenticationSchemes(IdentityConstants.ApplicationScheme)
         .RequireRole(AppRoles.Admin));

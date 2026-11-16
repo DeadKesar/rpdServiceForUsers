@@ -31,10 +31,10 @@ public sealed class SchemaContext(JsonElement root, JsonObject payload, Document
     /// </summary>
     public bool IsTemplate { get; set; }
 
-    /// <summary>Замечания методиста к документу — показываются у полей.</summary>
+    /// <summary>Замечания к документу — методиста и согласующих — показываются у полей.</summary>
     public List<CommentItem> Comments { get; set; } = [];
 
-    /// <summary>Методист на проверке оставляет замечания к полям.</summary>
+    /// <summary>Замечания к полям оставляют методист на проверке и согласующий до своей отметки (этап 7, A2).</summary>
     public bool CanComment { get; set; }
 
     /// <summary>Автор на доработке отмечает замечания разрешёнными.</summary>
@@ -43,13 +43,20 @@ public sealed class SchemaContext(JsonElement root, JsonObject payload, Document
     /// <summary>Добавить замечание к полю (место, текст); false — не добавлено, причину покажет страница.</summary>
     public Func<string, string, Task<bool>>? AddComment { get; set; }
 
-    /// <summary>Методист на проверке снимает свои замечания (этап 6, A2): свои — по записи справочника <see cref="ViewerId"/>.</summary>
+    /// <summary>
+    /// Свои замечания снимают методист на проверке (этап 6, A2) и согласующий до своей отметки (этап 7, A2): свои — по
+    /// записи справочника <see cref="ViewerId"/>.
+    /// </summary>
     public bool CanResolveOwn { get; set; }
+
+    /// <summary>Методист на проверке снимает и замечания, оставленные на согласовании (этап 7, A2).</summary>
+    public bool CanResolveApproval { get; set; }
 
     public Guid? ViewerId { get; set; }
 
-    /// <summary>Можно ли отметить замечание разрешённым: автор — любое, методист — своё.</summary>
-    public bool CanResolveComment(CommentItem c) => !c.IsResolved && (CanResolve || CanResolveOwn && c.AuthorId == ViewerId);
+    /// <summary>Можно ли отметить замечание разрешённым: автор — любое, методист — своё и согласующих, согласующий — своё.</summary>
+    public bool CanResolveComment(CommentItem c) =>
+        !c.IsResolved && (CanResolve || CanResolveOwn && c.AuthorId == ViewerId || CanResolveApproval && c.FromApproval);
 
     public Func<CommentItem, Task>? ResolveComment { get; set; }
 

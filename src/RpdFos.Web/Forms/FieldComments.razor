@@ -1,11 +1,12 @@
 @using RpdFos.Web.Models
 
-@* Замечания методиста у поля. Методист на проверке добавляет замечание и снимает своё, автор на доработке отмечает его разрешённым. *@
+@* Замечания у поля. Методист на проверке и согласующий до своей отметки добавляют замечание и снимают своё (этап 7, A2),
+   методист на проверке снимает и замечания согласующих, автор на доработке отмечает разрешённым любое. *@
 @foreach (var c in Context.CommentsAt(Path, Subtree))
 {
     <div class="alert @(c.IsResolved ? "alert-light text-muted" : "alert-warning") py-1 px-2 small mb-1 d-flex justify-content-between align-items-start gap-2">
         <span>
-            <span class="fw-semibold me-1">Замечание@(c.FieldPath != Path ? $" ({Context.FieldTitle(c.FieldPath)})" : ""):</span>
+            <span class="fw-semibold me-1">Замечание@(c.FromApproval ? " согласующего" : "")@(c.FieldPath != Path ? $" ({Context.FieldTitle(c.FieldPath)})" : ""):</span>
             @c.Text
             <span class="text-muted">— @c.AuthorName, @c.CreatedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</span>
             @if (c.IsResolved)

@@ -13,7 +13,7 @@ public enum ReviewProblem { NoUnresolvedComments, UnresolvedComments, UnknownFie
 
 /// <summary>
 /// Проверка документа: отправка автором с полной проверкой, возврат на доработку и приём методистом, замечания
-/// к полям. Каждая смена статуса — запись в истории и снимок версии (<c>status_change</c>). Права пользователя
+/// к полям — методиста и согласующих (этап 7, A2). Каждая смена статуса — запись в истории и снимок версии (<c>status_change</c>). Права пользователя
 /// проверяет вызывающий; сохраняет тоже он — с версией клиента. Уведомления о событиях создаются в том же сохранении
 /// (этап 6.1, C3).
 /// </summary>
@@ -108,9 +108,12 @@ public sealed class DocumentReview(
         return (null, issues, start);
     }
 
-    /// <summary>Замечание к полю: место должно быть в схеме документа, текст — непустым.</summary>
+    /// <summary>
+    /// Замечание к полю — методиста на проверке или согласующего на согласовании (этап 7, A2; кто может, проверяет
+    /// вызывающий): место должно быть в схеме документа, текст — непустым.
+    /// </summary>
     public async Task<(DocumentComment? Comment, ReviewProblem? Problem)> CommentAsync(
-        Document document, Guid reviewerId, string fieldPath, string text, CancellationToken ct = default)
+        Document document, Guid authorId, string fieldPath, string text, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(text)) return (null, ReviewProblem.EmptyText);
         var schema = JsonDocument.Parse(await SchemaAsync(document, ct)).RootElement;
@@ -119,10 +122,21 @@ public sealed class DocumentReview(
 
         var comment = db.DocumentComments.Add(new DocumentComment
         {
-            DocumentId = document.Id, AuthorId = reviewerId, FieldPath = fieldPath, Text = text.Trim(), CreatedAt = clock.GetUtcNow()
+            DocumentId = document.Id, AuthorId = authorId, FieldPath = fieldPath, Text = text.Trim(), CreatedAt = clock.GetUtcNow()
         }).Entity;
         return (comment, null);
     }
+
+    /// <summary>
+    /// Замечания, оставленные на согласовании, — согласующими (этап 7, A2): последний переход документа до замечания —
+    /// в «На согласовании». Других замечаний в этом статусе не бывает, поэтому отдельный признак в document_comments не
+    /// нужен; замечание согласующего, которого потом заменили (FR-REV-13), остаётся замечанием согласования.
+    /// </summary>
+    public static IQueryable<Guid> FromApproval(AppDbContext db) =>
+        from c in db.DocumentComments
+        where db.DocumentStatusHistory.Where(h => h.DocumentId == c.DocumentId && h.ChangedAt <= c.CreatedAt)
+            .OrderByDescending(h => h.ChangedAt).Select(h => h.ToStatus).FirstOrDefault() == DocumentStatuses.Approval
+        select c.Id;
 
     private Task<int> UnresolvedAsync(Document document, CancellationToken ct) =>
         db.DocumentComments.CountAsync(c => c.DocumentId == document.Id && !c.IsResolved, ct);

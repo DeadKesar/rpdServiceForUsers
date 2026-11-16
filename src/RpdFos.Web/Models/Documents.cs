@@ -18,9 +18,14 @@ public sealed record DocumentItem(Guid Id, string Type, string Title, string Sta
     Guid TemplateId, int TemplateRevision, Guid DisciplineId, string DisciplineCode, string DisciplineName, Guid AuthorId,
     DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, DateTimeOffset? SubmittedAt);
 
-/// <summary>Что пользователь может сделать с документом: отправить, проверить (вернуть, принять, замечания), разрешать замечания.</summary>
+/// <summary>
+/// Что пользователь может сделать с документом: отправить, проверить (вернуть, принять), оставлять и разрешать замечания.
+/// <paramref name="Comment"/> — методист на проверке и согласующий до своей отметки; <paramref name="ResolveApprovalComments"/> —
+/// методист на проверке снимает и замечания согласующих (этап 7, A2).
+/// </summary>
 public sealed record DocumentActions(bool Submit, bool Review, bool ResolveComments, bool Print, bool CorrectPlan = false,
-    bool TakeForReview = false, bool ResolveOwnComments = false, bool Delete = false, bool Approve = false);
+    bool TakeForReview = false, bool ResolveOwnComments = false, bool Delete = false, bool Approve = false,
+    bool Comment = false, bool ResolveApprovalComments = false);
 
 /// <summary>
 /// Согласование документа (этап 6, B2–B3): места электронного согласования и что может зритель — назначить или
@@ -112,9 +117,12 @@ public static class DocumentTitles
 /// </summary>
 public sealed record DocumentReviewed(int Version, string Status, string StatusTitle, List<FieldError>? Warnings = null);
 
-/// <summary>Замечание методиста к полю: кто и когда оставил, разрешено ли и кем.</summary>
+/// <summary>
+/// Замечание к полю: кто и когда оставил, разрешено ли и кем. <paramref name="FromApproval"/> — оставлено на согласовании
+/// согласующим (этап 7, A2).
+/// </summary>
 public sealed record CommentItem(Guid Id, string FieldPath, string Text, Guid AuthorId, string AuthorName, DateTimeOffset CreatedAt,
-    bool IsResolved, string? ResolvedByName, DateTimeOffset? ResolvedAt);
+    bool IsResolved, string? ResolvedByName, DateTimeOffset? ResolvedAt, bool FromApproval = false);
 
 /// <summary>Задача формирования печатной формы: статус, файл (если сформирован) и отчёт.</summary>
 public sealed record GenerationItem(Guid TaskId, string Format, string Status, string? ErrorMessage, DateTimeOffset CreatedAt,

@@ -237,11 +237,26 @@ public static class DocumentTransitions
     public static bool CanResolveComments(string status) => status is DocumentStatuses.Returned;
 
     /// <summary>
-    /// Замечание разрешает автор на доработке или методист на проверке — своё (этап 6, A2): документ, взятый с
-    /// доработки, иначе не принять.
+    /// Замечания к полям оставляют методист — на проверке — и согласующий — на согласовании, пока его строка ждёт
+    /// отметки (этап 7, A2): после отметки решение принято, и замечание уже ни на что не повлияет.
     /// </summary>
-    public static bool CanResolveComment(string status, bool isAuthor, bool isReviewer, bool ownComment) =>
-        isAuthor && CanResolveComments(status) || isReviewer && ownComment && CanReview(status);
+    /// <param name="awaitingMark">У согласующего есть строка согласования документа, ждущая его отметки.</param>
+    public static bool CanComment(string status, bool isReviewer, bool awaitingMark) =>
+        isReviewer && CanReview(status) || awaitingMark && CanSign(status);
+
+    /// <summary>
+    /// Замечание разрешает автор на доработке — любое. Методист на проверке — своё (этап 6, A2: документ, взятый с
+    /// доработки, иначе не принять) и оставленное на согласовании: после возврата он решает, учесть замечание
+    /// согласующего самому или вернуть документ автору (UC-09, 3а). Согласующий — своё, пока его строка ждёт отметки
+    /// (этап 7, A2).
+    /// </summary>
+    /// <param name="awaitingMark">У согласующего есть строка согласования документа, ждущая его отметки.</param>
+    /// <param name="fromApproval">Замечание оставлено на согласовании — согласующим.</param>
+    public static bool CanResolveComment(
+        string status, bool isAuthor, bool isReviewer, bool awaitingMark, bool ownComment, bool fromApproval) =>
+        isAuthor && CanResolveComments(status)
+        || isReviewer && (ownComment || fromApproval) && CanReview(status)
+        || awaitingMark && ownComment && CanSign(status);
 
     /// <summary>Согласование стартует из «Принят»: при приёме — само, после ручного назначения — кнопкой (этап 6, B2).</summary>
     public static bool CanStartApproval(string status) => status is DocumentStatuses.Accepted;
@@ -269,8 +284,8 @@ public static class DocumentTransitions
 }
 
 /// <summary>
-/// Замечание методиста к полю документа (таблица document_comments). Не удаляется — это история проверки;
-/// автор отмечает его разрешённым.
+/// Замечание к полю документа (таблица document_comments): методиста на проверке или согласующего на согласовании
+/// (этап 7, A2). Не удаляется — это история проверки; автор отмечает его разрешённым.
 /// </summary>
 public class DocumentComment
 {
