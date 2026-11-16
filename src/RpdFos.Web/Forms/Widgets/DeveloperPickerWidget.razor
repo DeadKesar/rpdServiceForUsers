@@ -14,6 +14,8 @@
     @{ var rows = Value as JsonArray; }
     @if ((rows?.Count ?? 0) > 0)
     {
+        @* Узкий экран: таблица прокручивается в обёртке, а не рвёт слова по буквам (общее правило — app.css). *@
+        <div class="table-responsive">
         <table class="table table-sm align-middle">
             <thead class="table-light">
                 <tr><th>№</th><th>@ColumnTitle("name_for_document")</th><th>@ColumnTitle("position")</th><th></th></tr>
@@ -44,6 +46,7 @@
                 }
             </tbody>
         </table>
+        </div>
     }
     @if (!ReadOnly)
     {

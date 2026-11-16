@@ -8,6 +8,8 @@
 <div class="mb-3">
     @if (BySemester)
     {
+        @* Узкий экран: таблица прокручивается в обёртке, а не рвёт слова по буквам (общее правило — app.css). *@
+        <div class="table-responsive">
         <table class="table table-sm table-bordered mb-2">
             <thead class="table-light">
                 <tr><th>Семестр</th><th>Вид занятий</th><th>По темам / по распределению часов</th></tr>
@@ -33,9 +35,11 @@
                 }
             </tbody>
         </table>
+        </div>
     }
     else
     {
+        <div class="table-responsive">
         <table class="table table-sm table-bordered mb-2">
             <thead class="table-light">
                 <tr><th>Вид занятий</th><th>В плане тем</th><th>По распределению часов</th></tr>
@@ -51,6 +55,7 @@
                 }
             </tbody>
         </table>
+        </div>
     }
 
     @{ var rows = Value as JsonArray; }

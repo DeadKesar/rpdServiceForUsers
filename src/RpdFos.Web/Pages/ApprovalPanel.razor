@@ -18,6 +18,8 @@
         }
         else
         {
+            @* Узкий экран: таблица прокручивается в обёртке, а не рвёт слова по буквам (общее правило — app.css). *@
+            <div class="table-responsive">
             <table class="table table-sm small align-middle mb-1">
                 <thead>
                     <tr><th>Место</th><th>Согласующий</th><th>Отметка</th><th>Время</th><th>Комментарий</th><th></th></tr>
@@ -95,6 +97,7 @@
                     }
                 </tbody>
             </table>
+            </div>
         }
         @if (State.CanStart)
         {

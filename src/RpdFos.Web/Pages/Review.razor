@@ -23,6 +23,8 @@ else if (documents.Count == 0)
 }
 else
 {
+    @* Узкий экран: таблица прокручивается в обёртке, а не рвёт слова по буквам (общее правило — app.css). *@
+    <div class="table-responsive">
     <table class="table table-sm align-middle">
         <thead>
             <tr><th>Отправлен</th><th>Дисциплина</th><th>Тип</th><th>Автор</th><th>План</th></tr>
@@ -50,6 +52,7 @@ else
             }
         </tbody>
     </table>
+    </div>
 }
 
 @code {

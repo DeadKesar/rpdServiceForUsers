@@ -29,6 +29,8 @@
         }
         @if (items.Count > 0)
         {
+            @* Узкий экран: таблица прокручивается в обёртке, а не рвёт слова по буквам (общее правило — app.css). *@
+            <div class="table-responsive">
             <table class="table table-sm small mt-2 mb-0 align-middle">
                 <tbody>
                     @foreach (var item in items)
@@ -76,6 +78,7 @@
                     }
                 </tbody>
             </table>
+            </div>
         }
         @if (previewUrl is not null)
         {

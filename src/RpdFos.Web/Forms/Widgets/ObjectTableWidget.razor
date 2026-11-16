@@ -8,6 +8,8 @@
 <div class="mb-3">
     <label class="form-label">@Title</label>
     @{ var rows = Value as JsonArray; }
+    @* Узкий экран: таблица прокручивается в обёртке, а не рвёт слова по буквам (общее правило — app.css). *@
+    <div class="table-responsive">
     <table class="table table-sm align-middle">
         <thead>
             <tr>
@@ -79,6 +81,7 @@
             </tfoot>
         }
     </table>
+    </div>
     @if (!ReadOnly)
     {
         <button class="btn btn-sm btn-outline-primary" type="button" @onclick="Add">Добавить строку</button>

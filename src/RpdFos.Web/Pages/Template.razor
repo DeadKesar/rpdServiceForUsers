@@ -177,6 +177,8 @@ else
             с особыми вхождениями: @details.Bookmarks.Count(b => b.Target?.Occurrences is { Count: > 0 }).
             Вхождение без особых указаний получает цель закладки в именительном падеже.
         </p>
+        @* Узкий экран: таблица прокручивается в обёртке, а не рвёт слова по буквам (общее правило — app.css). *@
+        <div class="table-responsive">
         <table class="table table-sm">
             <thead>
                 <tr>
@@ -213,6 +215,7 @@ else
                 }
             </tbody>
         </table>
+        </div>
     }
 
     @if (defaultsContext is not null && details.DefaultFields.Count > 0)
@@ -241,6 +244,7 @@ else
     }
 
     <h2 class="h4 mt-4">Лист согласования</h2>
+    <div class="table-responsive">
     <table class="table table-sm">
         <thead>
             <tr><th>Место</th><th>Категория</th><th>Правило определения</th><th>Согласование</th><th>Размещение</th></tr>
@@ -259,6 +263,7 @@ else
             }
         </tbody>
     </table>
+    </div>
 }
 
 @code {
