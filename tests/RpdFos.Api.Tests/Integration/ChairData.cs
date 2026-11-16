@@ -38,7 +38,7 @@ public static class ChairData
         };
     }
 
-    /// <summary>Председатель УМК направления; без направления — запись, какую создаёт и файл должностей.</summary>
+    /// <summary>Председатель УМК направления; без направления — запись, какую допускает база, но не принимает страница справочника.</summary>
     public static async Task<Employee> AddChairAsync(AppDbContext db, Guid? directionId, bool active = true)
     {
         var chair = NewEmployee(SignatoryRoles.UmkChair, directionId, active: active);

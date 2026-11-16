@@ -45,7 +45,8 @@ public class SignatoryResolutionTests(DatabaseFixture app)
 
         var chair = report.Seat(SignatoryRoles.UmkChair)!;
         Assert.Equal((false, null, null), (chair.Found, chair.Name, chair.Position));
-        Assert.Equal([ChairMissing("discipline.direction.umk_chair")], report.Warnings);
+        // Предупреждение называет направление плана дисциплины — 09.04.04 (этап 7, A1).
+        Assert.Equal([ChairMissing("discipline.direction.umk_chair", "09.04.04")], report.Warnings);
     }
 
     [Fact]
@@ -70,7 +71,9 @@ public class SignatoryResolutionTests(DatabaseFixture app)
             var missing = await resolution.ResolveAsync(RpdSeats, withoutChair.DisciplineId);
             var seat = missing.Seat(SignatoryRoles.UmkChair)!;
             Assert.Equal((false, null, null, null), (seat.Found, seat.Name, seat.Position, seat.Department));
-            Assert.Contains(ChairMissing("discipline.direction.umk_chair"), missing.Warnings);
+            Assert.Contains(ChairMissing("discipline.direction.umk_chair", withoutChair.Code), missing.Warnings);
+            // Направление называет только предупреждение о председателе: у дисциплины нет кафедры, заведующего тоже не нашли — текст прежний.
+            Assert.Contains(missing.Warnings, w => w.Contains($"(правило {DepartmentHeadResolver.Rule})") && !w.Contains("для направления"));
         });
     }
 
@@ -97,7 +100,7 @@ public class SignatoryResolutionTests(DatabaseFixture app)
 
             var missing = await resolution.ResolveAsync(legacy, other.DisciplineId);
             Assert.False(missing.Seat(SignatoryRoles.UmkChair)!.Found);
-            Assert.Contains(ChairMissing(UmkChairResolver.LegacyRule), missing.Warnings);
+            Assert.Contains(ChairMissing(UmkChairResolver.LegacyRule, other.Code), missing.Warnings);
         });
     }
 
@@ -134,8 +137,8 @@ public class SignatoryResolutionTests(DatabaseFixture app)
         Assert.Contains(UmkChairResolver.LegacyRule, SignatureResolvers.All.Keys);
     }
 
-    private static string ChairMissing(string rule) =>
-        $"Не найден подписант «Председатель учебно-методической комиссии по направлению подготовки» (правило {rule}) — место напечатано пустой строкой.";
+    private static string ChairMissing(string rule, string directionCode) =>
+        $"Не найден подписант «Председатель учебно-методической комиссии по направлению подготовки» (правило {rule}) для направления {directionCode} — место напечатано пустой строкой.";
 
     [Fact]
     public async Task Acting_head_stands_in_and_inactive_records_are_skipped()

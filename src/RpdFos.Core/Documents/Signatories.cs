@@ -20,8 +20,11 @@ public sealed record SignatoryReport(IReadOnlyList<ResolvedSignatory> Seats, IRe
     public ResolvedSignatory? Seat(string id) => Seats.FirstOrDefault(s => s.SeatId == id);
 }
 
-/// <summary>Что известно резолверу: база, кафедра дисциплины документа и направление подготовки её учебного плана.</summary>
-public sealed record SignatoryContext(AppDbContext Db, Department? Department, Guid? DirectionId = null);
+/// <summary>
+/// Что известно резолверу: база, кафедра дисциплины документа и направление подготовки её учебного плана (идентификатор
+/// и код вроде «15.05.01» — код нужен тексту предупреждения о ненайденном подписанте).
+/// </summary>
+public sealed record SignatoryContext(AppDbContext Db, Department? Department, Guid? DirectionId = null, string? DirectionCode = null);
 
 /// <summary>
 /// Звено цепочки ответственности (FR-REV-12): правило определения подписанта из <c>signatures_config</c>
@@ -37,8 +40,16 @@ public abstract class SignatoryResolver
         : Next is not null ? Next.ResolveAsync(rule, context, ct)
         : Task.FromResult<Employee?>(null);
 
+    /// <summary>
+    /// Чем ограничен поиск по правилу — для предупреждения «не найден подписант»: тому, кто правит справочник, нужно знать,
+    /// для какого направления (кафедры) подписанта нет. «для направления 15.05.01»; <c>null</c> — нечего добавить.
+    /// </summary>
+    public string? DescribeScope(string rule, SignatoryContext context) =>
+        Handles(rule) ? Scope(context) : Next?.DescribeScope(rule, context);
+
     protected abstract bool Handles(string rule);
     protected abstract Task<Employee?> FindAsync(string rule, SignatoryContext context, CancellationToken ct);
+    protected virtual string? Scope(SignatoryContext context) => null;
 
     // Подписант — только активная запись справочника; при совпадении — по алфавиту, чтобы выбор был устойчивым.
     protected static Task<Employee?> FirstAsync(IQueryable<Employee> query, CancellationToken ct) =>
@@ -109,6 +120,9 @@ public sealed class UmkChairResolver : SignatoryResolver
         context.DirectionId is not Guid directionId
             ? Task.FromResult<Employee?>(null)
             : FirstAsync(context.Db.Employees.Where(e => e.SignatoryRole == SignatoryRoles.UmkChair && e.DirectionId == directionId), ct);
+
+    protected override string? Scope(SignatoryContext context) =>
+        context.DirectionCode is { } code ? $"для направления {code}" : null;
 }
 
 /// <summary>
@@ -126,12 +140,13 @@ public sealed class SignatoryResolution(AppDbContext db)
 
     public async Task<SignatoryReport> ResolveAsync(IReadOnlyList<SignatureSeat> seats, Guid disciplineId, CancellationToken ct = default)
     {
-        // Кафедра — у дисциплины, направление подготовки — у её учебного плана.
+        // Кафедра — у дисциплины, направление подготовки (с кодом для текста предупреждения) — у её учебного плана.
         var origin = await db.Disciplines.Where(d => d.Id == disciplineId)
             .Join(db.CurriculumPlans, d => d.CurriculumPlanId, p => p.Id, (d, p) => new { d.DepartmentId, p.DirectionId })
+            .Join(db.StudyDirections, x => x.DirectionId, s => s.Id, (x, s) => new { x.DepartmentId, x.DirectionId, DirectionCode = s.Code })
             .SingleAsync(ct);
         var department = origin.DepartmentId is Guid id ? await db.Departments.AsNoTracking().SingleOrDefaultAsync(d => d.Id == id, ct) : null;
-        var context = new SignatoryContext(db, department, origin.DirectionId);
+        var context = new SignatoryContext(db, department, origin.DirectionId, origin.DirectionCode);
 
         var resolved = new List<ResolvedSignatory>();
         var warnings = new List<string>();
@@ -141,7 +156,8 @@ public sealed class SignatoryResolution(AppDbContext db)
             if (employee is null)
             {
                 resolved.Add(new ResolvedSignatory(seat.Id, seat.Title, null, null, null, null));
-                warnings.Add($"Не найден подписант «{seat.Title}» (правило {seat.Resolver}) — место напечатано пустой строкой.");
+                var scope = Chain.DescribeScope(seat.Resolver, context);
+                warnings.Add($"Не найден подписант «{seat.Title}» (правило {seat.Resolver}){(scope is null ? "" : " " + scope)} — место напечатано пустой строкой.");
                 continue;
             }
             var departmentName = employee.DepartmentId is Guid d
