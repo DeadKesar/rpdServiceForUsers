@@ -8,11 +8,20 @@ namespace RpdFos.Api.Infrastructure;
 /// без перепроверки (по умолчанию он вправе: у файла есть дата изменения, но нет <c>Cache-Control</c>), он просит
 /// файлы, которых уже нет, и страница открывается пустой. Поэтому оболочка уходит с <c>Cache-Control: no-cache</c>:
 /// браузер хранит её, но каждый раз спрашивает сервер (по ETag; не изменилась — ответ 304 без тела).
+/// <para>
+/// Так же отдаются два файла стилей без хеша в имени: <c>RpdFos.Web.styles.css</c> (стили компонентов) и
+/// <c>css/app.css</c>. Иначе после пересборки браузер берёт прежние стили из кэша, и страница открывается без оформления
+/// (этап 7, A1).
+/// </para>
 /// Остальные файлы не затрагиваются: у файла с хешем новое содержимое — новое имя, а значит, другой адрес.
 /// </summary>
 public static class ClientShell
 {
     public const string FileName = "index.html";
+
+    // Адреса стилей без хеша в имени (клиент подключает их так в index.html). Сравнение по адресу, а не по имени файла:
+    // «app.css» в другой папке — не наш файл.
+    private static readonly PathString[] UncachedStyles = ["/RpdFos.Web.styles.css", "/css/app.css"];
 
     /// <summary>
     /// Параметры раздачи статических файлов — и для <c>UseStaticFiles</c> (адрес <c>/index.html</c>), и для
@@ -23,7 +32,9 @@ public static class ClientShell
 
     private static void PrepareResponse(StaticFileResponseContext context)
     {
-        if (string.Equals(context.File.Name, FileName, StringComparison.OrdinalIgnoreCase))
+        // Оболочку узнаём по файлу: запасной маршрут отдаёт её по любому адресу страницы; стили — по адресу запроса.
+        var isShell = string.Equals(context.File.Name, FileName, StringComparison.OrdinalIgnoreCase);
+        if (isShell || UncachedStyles.Any(style => context.Context.Request.Path.Equals(style, StringComparison.OrdinalIgnoreCase)))
             context.Context.Response.Headers.CacheControl = "no-cache";
     }
 }
