@@ -6,7 +6,9 @@
     <PackageReference Include="Carter" Version="10.0.0" />
     <PackageReference Include="Hangfire.AspNetCore" Version="1.8.25" />
     <PackageReference Include="Hangfire.PostgreSql" Version="1.21.1" />
-    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.Server" Version="10.0.13" />
+    <!-- Зачем 10.0.14: в 10.0.13 отладочный прокси Blazor WebAssembly уязвим (GHSA-g27p-qf6j-c96c, NuGetAudit NU1903);
+         исправлено в 10.0.14. Остальные пакеты ASP.NET Core остаются на 10.0.13: их предупреждений нет. -->
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.Server" Version="10.0.14" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.13" />
     <PackageReference Include="OpenIddict.AspNetCore" Version="7.7.2" />
     <PackageReference Include="Swashbuckle.AspNetCore.SwaggerUI" Version="10.3.0" />

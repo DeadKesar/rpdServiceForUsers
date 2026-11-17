@@ -18,7 +18,8 @@ namespace RpdFos.Core.Documents;
 /// статуса это время записи в истории), и несколько уведомлений одного получателя из одного сохранения стоят в порядке
 /// событий.
 /// </para>
-/// Готовая фраза — в <c>payload.text</c>, рядом параметры события для интерфейса: <c>title</c> (название документа),
+/// Готовая фраза — в <c>payload.text</c>, её первое предложение — в <c>payload.subject</c> (тема письма, этап 7, A4),
+/// рядом параметры события для интерфейса: <c>title</c> (название документа),
 /// <c>discipline_code</c>, <c>discipline</c>, <c>by</c> (кто совершил действие), <c>comment</c>, <c>remarks</c>
 /// (число замечаний), <c>seats</c> (места согласования), <c>approval</c> (чем кончился приём); у печати — <c>format</c>,
 /// <c>task_id</c> и <c>reason</c> (причина сбоя), у замены согласующего — <c>signatory</c> (новый согласующий). В фразах
@@ -220,14 +221,15 @@ public sealed class DocumentNotifications(AppDbContext db, DirectoryAccounts dir
     // linked: false — уведомление без ссылки на документ (document_id пуст), когда документ получателю недоступен;
     // название документа остаётся в тексте и параметрах.
     private async Task AddAsync(
-        string eventType, Document document, IReadOnlyList<Guid> recipients, DateTimeOffset at, string text, JsonObject parameters,
+        string eventType, Document document, IReadOnlyList<Guid> recipients, DateTimeOffset at, Phrase phrase, JsonObject parameters,
         CancellationToken ct, bool linked = true)
     {
         var discipline = await db.Disciplines.AsNoTracking().Where(d => d.Id == document.DisciplineId)
             .Select(d => new { d.Code, d.Name }).SingleAsync(ct);
         var payload = new JsonObject
         {
-            ["text"] = text, ["title"] = document.Title, ["discipline_code"] = discipline.Code, ["discipline"] = discipline.Name
+            ["text"] = phrase.Text, ["subject"] = phrase.Headline, ["title"] = document.Title,
+            ["discipline_code"] = discipline.Code, ["discipline"] = discipline.Name
         };
         // Параметр без значения (нет комментария) в payload не пишется.
         foreach (var (key, value) in parameters)
@@ -248,7 +250,13 @@ public sealed class DocumentNotifications(AppDbContext db, DirectoryAccounts dir
     private async Task<string> NameAsync(Guid employeeId, CancellationToken ct) =>
         await db.Employees.AsNoTracking().Where(e => e.Id == employeeId).Select(e => e.ShortName).SingleOrDefaultAsync(ct) ?? "";
 
+    // Фраза уведомления: заголовок — первое предложение, оно же тема письма (все фразы начинаются с него и называют
+    // документ); Text — всё вместе.
+    private readonly record struct Phrase(string Headline, string Text);
+
     // Предложения через пробел; точка в конце ставится, если её нет: «Фамилия И. О.» уже кончается точкой.
-    private static string Text(params string?[] sentences) => string.Join(' ',
-        sentences.Where(s => !string.IsNullOrWhiteSpace(s)).Select(s => s!.Trim()).Select(s => s[^1] is '.' or '!' or '?' ? s : s + "."));
+    private static Phrase Text(string headline, params string?[] details) => new(
+        headline.Trim(),
+        string.Join(' ', details.Prepend(headline).Where(s => !string.IsNullOrWhiteSpace(s)).Select(s => s!.Trim())
+            .Select(s => s[^1] is '.' or '!' or '?' ? s : s + ".")));
 }

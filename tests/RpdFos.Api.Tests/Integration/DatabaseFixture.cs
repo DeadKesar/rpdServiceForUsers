@@ -12,6 +12,7 @@ using Microsoft.Extensions.DependencyInjection;
 using OpenIddict.Validation.AspNetCore;
 using RpdFos.Core.Data;
 using RpdFos.Core.Data.Entities;
+using RpdFos.Core.Mail;
 using RpdFos.Core.Printing;
 using Testcontainers.PostgreSql;
 using Xunit;
@@ -45,11 +46,18 @@ public class DatabaseFixture : WebApplicationFactory<Program>, IAsyncLifetime
         builder.UseSetting("Jobs:QueuePollSeconds", "1");
         // Сформированные файлы — во временный каталог: тесты не пишут в каталог приложения.
         builder.UseSetting("Generation:StoragePath", GeneratedFiles);
+        // Почта: письма отправляют сами тесты — вызовом задачи, а не расписанием раз в минуту: иначе фоновый запуск
+        // перехватывал бы письма и проверки «ушло один раз» зависели бы от времени. Адрес для ссылок — свой, не из appsettings.
+        builder.UseSetting("Mail:Enabled", "false");
+        builder.UseSetting("Mail:PublicUrl", "https://rpdfos.test");
 
         builder.ConfigureTestServices(services =>
         {
             // Конвертер PDF — отдельный сервис (Gotenberg); в тестах — заглушка.
             services.AddSingleton<IPdfConverter, FakePdfConverter>();
+            // Почтовый сервер — тоже отдельный; в тестах письма копятся в памяти.
+            services.AddSingleton<FakeMailSender>();
+            services.AddSingleton<IMailSender>(sp => sp.GetRequiredService<FakeMailSender>());
 
             services.AddAuthentication()
                 .AddScheme<AuthenticationSchemeOptions, TestAuthHandler>(TestAuthHandler.SchemeName, null);

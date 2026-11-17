@@ -6,6 +6,7 @@ using RpdFos.Core.Directory;
 using RpdFos.Core.Documents;
 using RpdFos.Core.DocumentTypes;
 using RpdFos.Core.Import;
+using RpdFos.Core.Mail;
 using RpdFos.Core.Printing;
 using RpdFos.Core.Templates;
 
@@ -61,6 +62,10 @@ public static class DependencyInjection
         services.AddScoped<DocumentPrinting>();
         services.AddScoped<GenerationJob>();
         services.AddScoped<GeneratedFilesCleanup>();
+        // Почта (этап 7, A4): настройки — раздел Mail; отправитель — SMTP, в тестах подменяется; письма уходят фоновой задачей.
+        services.AddOptions<MailSettings>();
+        services.AddSingleton<IMailSender, SmtpMailSender>();
+        services.AddScoped<NotificationMailJob>();
         return services;
     }
 }

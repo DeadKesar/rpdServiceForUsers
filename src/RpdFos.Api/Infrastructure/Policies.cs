@@ -45,4 +45,10 @@ public static class JobQueues
 
     /// <summary>Формирование DOCX и PDF (FR-GEN-04) и очистка сформированных файлов по сроку хранения.</summary>
     public const string Generation = "generation";
+
+    /// <summary>
+    /// Отправка уведомлений по почте (этап 7, A4) — свой исполнитель: письмо должно уйти в пределах минуты, а очередь
+    /// формирования может быть занята долгой конвертацией.
+    /// </summary>
+    public const string Mail = "mail";
 }

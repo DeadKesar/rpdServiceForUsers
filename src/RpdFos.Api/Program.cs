@@ -12,6 +12,7 @@ using RpdFos.Core;
 using RpdFos.Core.Data;
 using RpdFos.Core.Data.Entities;
 using RpdFos.Core.Documents;
+using RpdFos.Core.Mail;
 using RpdFos.Core.Printing;
 using Swashbuckle.AspNetCore.SwaggerUI;
 
@@ -27,6 +28,9 @@ builder.Services.Configure<ValidationRuleSettings>(builder.Configuration.GetSect
 builder.Services.Configure<GenerationSettings>(builder.Configuration.GetSection("Generation"));
 builder.Services.PostConfigure<GenerationSettings>(o =>
     o.StoragePath = Path.GetFullPath(o.StoragePath, builder.Environment.ContentRootPath));
+// Почта: сервер, отправитель, адрес системы для ссылок. В разработке письма уходят в ловушку из docker-compose (этап 7, A4).
+builder.Services.Configure<MailSettings>(builder.Configuration.GetSection("Mail"));
+var mailEnabled = builder.Configuration.GetValue("Mail:Enabled", true);
 
 // Учётные записи: ASP.NET Core Identity. Пароли хранятся только здесь, в виде хеша.
 builder.Services.AddIdentity<AppUser, IdentityRole<Guid>>(o =>
@@ -160,6 +164,14 @@ if (jobsEnabled)
         o.Queues = [JobQueues.Generation];
         o.WorkerCount = jobs.GetValue("GenerationWorkers", 2);
     });
+    if (mailEnabled)
+        builder.Services.AddHangfireServer(o =>
+        {
+            // Письма — одним исполнителем: порядок отправки сохраняется, а повторный запуск не перехватывает письма идущего.
+            o.ServerName = $"{Environment.MachineName}:{JobQueues.Mail}";
+            o.Queues = [JobQueues.Mail];
+            o.WorkerCount = 1;
+        });
 }
 
 // Конвертер DOCX -> PDF — отдельный сервис (docker-compose: converter); LibreOffice на большом документе небыстр.
@@ -204,8 +216,16 @@ if (jobsEnabled)
     app.MapHangfireDashboard("/hangfire", new DashboardOptions { Authorization = [], DashboardTitle = "Фоновые задачи" })
        .RequireAuthorization(Policies.JobsDashboard);
     // Сформированные файлы с истёкшим сроком хранения удаляются раз в сутки (FR-GEN-06).
-    app.Services.GetRequiredService<IRecurringJobManager>().AddOrUpdate<GeneratedFilesCleanup>(
+    var recurring = app.Services.GetRequiredService<IRecurringJobManager>();
+    recurring.AddOrUpdate<GeneratedFilesCleanup>(
         "generated-files-cleanup", JobQueues.Generation, job => job.RunAsync(CancellationToken.None), Cron.Daily());
+    // Письма о событиях уходят раз в минуту: «в пределах минуты после события» (A4). Выключенная почта снимает и
+    // расписание, оставшееся в хранилище от прежнего запуска, — иначе задача шла бы и без настройки.
+    if (mailEnabled)
+        recurring.AddOrUpdate<NotificationMailJob>(
+            "notification-mail", JobQueues.Mail, job => job.RunAsync(CancellationToken.None), Cron.Minutely());
+    else
+        recurring.RemoveIfExists("notification-mail");
 }
 app.MapFallbackToFile(ClientShell.FileName, ClientShell.CreateStaticFileOptions()); // адреса клиента: /, /documents…
 

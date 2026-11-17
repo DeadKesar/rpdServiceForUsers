@@ -2,9 +2,10 @@ namespace RpdFos.Core.Data.Entities;
 
 /// <summary>
 /// Уведомление пользователю о событии документа (таблица notifications, правка по ревизии архитектуры, FR-REV-08).
-/// В прототипе — только канал «в интерфейсе»: <see cref="EmailedAt"/> остаётся пустым (решение автора, этап 6).
 /// Создаётся в том же сохранении, что и событие, — <c>DocumentNotifications</c>; <see cref="Payload"/> — готовый текст
-/// (<c>text</c>) и параметры события: документ, дисциплина, кто, комментарий, число замечаний.
+/// (<c>text</c>), тема письма (<c>subject</c>) и параметры события: документ, дисциплина, кто, комментарий, число
+/// замечаний. В ленте интерфейса уведомление видно сразу; на почту его отправляет фоновая задача <c>NotificationMailJob</c>
+/// (этап 7, A4) — время отправки в <see cref="EmailedAt"/>.
 /// </summary>
 public class Notification
 {
@@ -24,13 +25,34 @@ public class Notification
     /// <summary>Время прочтения; null — не прочитано.</summary>
     public DateTimeOffset? ReadAt { get; set; }
 
+    /// <summary>
+    /// Время отправки по почте; null — не отправлено (почта выключена для события, у получателя нет учётной записи или
+    /// отправка ещё не прошла).
+    /// </summary>
     public DateTimeOffset? EmailedAt { get; set; }
 }
+
+/// <summary>Как событие уходит на почту получателю.</summary>
+public enum MailMode
+{
+    /// <summary>Письма нет.</summary>
+    Off,
+
+    /// <summary>Письмо уходит сразу — фоновой задачей в пределах минуты после события.</summary>
+    Immediately
+}
+
+/// <summary>Событие уведомлений и его умолчание для почты — пока пользователь не менял настройки.</summary>
+public sealed record NotificationEventInfo(string Type, MailMode DefaultMail);
 
 /// <summary>
 /// События, о которых уведомляют (этап 6.1, C3; этап 7, A3). Из FR-REV-08 в прототип вошли смены статуса, возвраты и
 /// события печати и согласования. «Новый комментарий» отдельным событием не делается (отступление от FR-REV-08):
 /// замечания к полям приходят вместе с возвратом — в уведомлении их число. Напоминания о сроке — этап 7, A6.
+/// <para>
+/// Каждое событие записывается и в <see cref="All"/> — единый перечень с умолчаниями почты (этап 7, A4); из него же
+/// строится таблица настроек уведомлений (A5). Тест сверяет перечень с константами: событие, которого в нём нет, не пройдёт.
+/// </para>
 /// </summary>
 public static class NotificationEvents
 {
@@ -72,4 +94,30 @@ public static class NotificationEvents
 
     /// <summary>Тому, кто запустил формирование: печатная форма не сформирована — с причиной (этап 7, A3).</summary>
     public const string PrintFailed = "document.print_failed";
+
+    /// <summary>
+    /// Все события с умолчаниями почты. «Сразу» — у событий, которые требуют действия получателя: документ вернулся на
+    /// доработку (в том числе после исправления данных плана), ждёт согласования, возвращён с согласования; напоминания
+    /// (A6) пополнят этот ряд. У остальных почта выключена: они сообщают, а не просят действовать, и лента интерфейса
+    /// их показывает. Настройка пользователя (A5) перекрывает умолчание.
+    /// </summary>
+    public static IReadOnlyList<NotificationEventInfo> All { get; } =
+    [
+        new(TakenForReview, MailMode.Off),
+        new(ReturnedForRework, MailMode.Immediately),
+        new(ReturnedAfterPlanCorrection, MailMode.Immediately),
+        new(Accepted, MailMode.Off),
+        new(Submitted, MailMode.Off),
+        new(ReturnedFromApproval, MailMode.Immediately),
+        new(Approved, MailMode.Off),
+        new(AwaitingMark, MailMode.Immediately),
+        new(ApprovalStarted, MailMode.Off),
+        new(SignatoryReplaced, MailMode.Off),
+        new(PrintReady, MailMode.Off),
+        new(PrintFailed, MailMode.Off)
+    ];
+
+    /// <summary>Умолчание почты для события; неизвестное событие — без почты.</summary>
+    public static MailMode DefaultMailOf(string eventType) =>
+        All.FirstOrDefault(e => e.Type == eventType)?.DefaultMail ?? MailMode.Off;
 }
