@@ -94,7 +94,7 @@ public class NotificationLetterTests
     [Fact]
     public void Every_event_is_in_the_list_with_a_default_and_only_events_that_require_action_are_mailed_at_once()
     {
-        // Все константы NotificationEvents — в перечне, без повторов: новое событие (A6 — напоминания) нельзя забыть добавить.
+        // Все константы NotificationEvents — в перечне, без повторов: новое событие нельзя забыть добавить.
         var constants = typeof(NotificationEvents).GetFields(BindingFlags.Public | BindingFlags.Static)
             .Where(f => f.IsLiteral && f.FieldType == typeof(string)).Select(f => (string)f.GetRawConstantValue()!).ToList();
         Assert.NotEmpty(constants);
@@ -104,7 +104,8 @@ public class NotificationLetterTests
             new[]
             {
                 NotificationEvents.ReturnedForRework, NotificationEvents.ReturnedAfterPlanCorrection,
-                NotificationEvents.AwaitingMark, NotificationEvents.ReturnedFromApproval
+                NotificationEvents.AwaitingMark, NotificationEvents.ReturnedFromApproval,
+                NotificationEvents.ReworkDeadlineNear, NotificationEvents.ReworkOverdue
             }.Order(),
             NotificationEvents.All.Where(e => e.DefaultMail == MailMode.Immediately).Select(e => e.Type).Order());
 

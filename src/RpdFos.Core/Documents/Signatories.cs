@@ -138,15 +138,28 @@ public sealed class SignatoryResolution(AppDbContext db)
         Next = new LookupRoleResolver { Next = new DepartmentHeadResolver { Next = new InstituteDirectorResolver() } }
     };
 
-    public async Task<SignatoryReport> ResolveAsync(IReadOnlyList<SignatureSeat> seats, Guid disciplineId, CancellationToken ct = default)
+    /// <summary>
+    /// Подписант по одному правилу для дисциплины — вне листа согласования шаблона: напоминания о сроке доработки
+    /// (этап 7, A6) ищут заведующего кафедрой дисциплины правилом <see cref="DepartmentHeadResolver.Rule"/>, тем же, что
+    /// и лист согласования. Не найден — <c>null</c>.
+    /// </summary>
+    public async Task<Employee?> FindAsync(string rule, Guid disciplineId, CancellationToken ct = default) =>
+        await Chain.ResolveAsync(rule, await ContextAsync(disciplineId, ct), ct);
+
+    // Кафедра — у дисциплины, направление подготовки (с кодом для текста предупреждения) — у её учебного плана.
+    private async Task<SignatoryContext> ContextAsync(Guid disciplineId, CancellationToken ct)
     {
-        // Кафедра — у дисциплины, направление подготовки (с кодом для текста предупреждения) — у её учебного плана.
         var origin = await db.Disciplines.Where(d => d.Id == disciplineId)
             .Join(db.CurriculumPlans, d => d.CurriculumPlanId, p => p.Id, (d, p) => new { d.DepartmentId, p.DirectionId })
             .Join(db.StudyDirections, x => x.DirectionId, s => s.Id, (x, s) => new { x.DepartmentId, x.DirectionId, DirectionCode = s.Code })
             .SingleAsync(ct);
         var department = origin.DepartmentId is Guid id ? await db.Departments.AsNoTracking().SingleOrDefaultAsync(d => d.Id == id, ct) : null;
-        var context = new SignatoryContext(db, department, origin.DirectionId, origin.DirectionCode);
+        return new SignatoryContext(db, department, origin.DirectionId, origin.DirectionCode);
+    }
+
+    public async Task<SignatoryReport> ResolveAsync(IReadOnlyList<SignatureSeat> seats, Guid disciplineId, CancellationToken ct = default)
+    {
+        var context = await ContextAsync(disciplineId, ct);
 
         var resolved = new List<ResolvedSignatory>();
         var warnings = new List<string>();

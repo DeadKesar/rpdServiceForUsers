@@ -9,6 +9,7 @@ using RpdFos.Core.Import;
 using RpdFos.Core.Mail;
 using RpdFos.Core.Notifications;
 using RpdFos.Core.Printing;
+using RpdFos.Core.Reminders;
 using RpdFos.Core.Templates;
 
 namespace RpdFos.Core;
@@ -72,6 +73,13 @@ public static class DependencyInjection
         services.AddScoped<NotificationMailJob>();
         // Настройки уведомлений пользователя: профиль (A5), лента, почта.
         services.AddScoped<NotificationSettings>();
+        // Напоминания о сроке доработки (этап 7, A6): настройки — раздел Reminders, задача раз в сутки. Неверные сроки
+        // проверяются при старте: предупреждение, которое не раньше срока, пришло бы вместе с эскалацией.
+        services.AddOptions<RemindersSettings>()
+            .Validate(s => s.ReworkDays >= 2 && s.WarnDaysBefore >= 1 && s.WarnDaysBefore < s.ReworkDays,
+                "Reminders:ReworkDays — не меньше 2 дней; Reminders:WarnDaysBefore — от 1 дня и меньше срока доработки.")
+            .ValidateOnStart();
+        services.AddScoped<ReworkReminders>();
         return services;
     }
 }

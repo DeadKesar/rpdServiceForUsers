@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -22,8 +23,10 @@ namespace RpdFos.Core.Documents;
 /// рядом параметры события для интерфейса: <c>title</c> (название документа),
 /// <c>discipline_code</c>, <c>discipline</c>, <c>by</c> (кто совершил действие), <c>comment</c>, <c>remarks</c>
 /// (число замечаний), <c>seats</c> (места согласования), <c>approval</c> (чем кончился приём); у печати — <c>format</c>,
-/// <c>task_id</c> и <c>reason</c> (причина сбоя), у замены согласующего — <c>signatory</c> (новый согласующий). В фразах
-/// нет родовых форм («Принят», «Согласующий: …»): пол автора и методиста системе неизвестен.
+/// <c>task_id</c> и <c>reason</c> (причина сбоя), у замены согласующего — <c>signatory</c> (новый согласующий), у
+/// напоминаний о доработке (этап 7, A6) — <c>document_id</c>, <c>since</c> (с какого момента документ на доработке),
+/// <c>deadline</c> (срок), <c>days</c> (срок доработки в днях) и <c>author</c>. В фразах нет родовых форм («Принят»,
+/// «Согласующий: …»): пол автора и методиста системе неизвестен.
 /// </summary>
 public sealed class DocumentNotifications(AppDbContext db, DirectoryAccounts directory)
 {
@@ -217,6 +220,52 @@ public sealed class DocumentNotifications(AppDbContext db, DirectoryAccounts dir
             Text($"Печатная форма не сформирована: {document.Title}", $"Формат: {format}", $"Причина: {reason}"),
             new JsonObject { ["format"] = task.Format, ["task_id"] = task.Id, ["reason"] = reason }, ct);
     }
+
+    /// <summary>
+    /// Автору: срок доработки истекает (этап 7, A6; FR-REV-08, «приближение дедлайна»). Создаёт ежедневная задача
+    /// напоминаний за <c>Reminders:WarnDaysBefore</c> дней до срока: <paramref name="since"/> — когда документ вернулся на
+    /// доработку, <paramref name="deadline"/> — срок. Даты в тексте — по часовому поясу сервера (<paramref name="zone"/>).
+    /// <c>document_id</c> в параметрах — по нему задача узнаёт, что напоминание по этому пребыванию на доработке уже есть.
+    /// </summary>
+    public async Task ReworkDeadlineNearAsync(
+        Document document, DateTimeOffset since, DateTimeOffset deadline, TimeZoneInfo zone, DateTimeOffset at,
+        CancellationToken ct = default) =>
+        await AddAsync(NotificationEvents.ReworkDeadlineNear, document, [document.AuthorId], at,
+            Text($"Срок доработки истекает: {document.Title}", $"На доработке с {Day(since, zone)}",
+                $"Срок доработки — до {Day(deadline, zone)}"),
+            new JsonObject { ["document_id"] = document.Id, ["since"] = since, ["deadline"] = deadline }, ct);
+
+    /// <summary>
+    /// Заведующему кафедрой дисциплины и методистам: документ на доработке больше <paramref name="days"/> дней (этап 7,
+    /// A6, FR-REV-09). Текст у всех один; <paramref name="linked"/> получают его со ссылкой на документ, а
+    /// <paramref name="unlinked"/> — без неё: документ им недоступен, и переход по ссылке дал бы 403 (правило A3).
+    /// Событие создаёт система, а не человек, поэтому фильтра «кроме совершившего» нет. Нет получателей — ничего не создаётся.
+    /// </summary>
+    public async Task ReworkOverdueAsync(
+        Document document, int days, DateTimeOffset since, IReadOnlyList<Guid> linked, IReadOnlyList<Guid> unlinked,
+        TimeZoneInfo zone, DateTimeOffset at, CancellationToken ct = default)
+    {
+        if (linked.Count + unlinked.Count == 0) return;
+        var author = await NameAsync(document.AuthorId, ct);
+        var phrase = Text($"На доработке больше {days} {DaysUnit(days)}: {document.Title}", $"Автор: {author}",
+            $"На доработке с {Day(since, zone)}");
+        var parameters = new JsonObject
+        {
+            ["document_id"] = document.Id, ["since"] = since, ["days"] = days, ["author"] = author
+        };
+        if (linked.Count > 0) await AddAsync(NotificationEvents.ReworkOverdue, document, linked, at, phrase, parameters, ct);
+        if (unlinked.Count > 0) await AddAsync(NotificationEvents.ReworkOverdue, document, unlinked, at, phrase, parameters, ct, linked: false);
+    }
+
+    /// <summary>
+    /// Слово «день» после «больше N»: родительный падеж — «больше 21 дня», но «больше 14 дней», «больше 22 дней»,
+    /// «больше 11 дней».
+    /// </summary>
+    public static string DaysUnit(int days) => days % 10 == 1 && days % 100 != 11 ? "дня" : "дней";
+
+    // Дата по часовому поясу сервера — так же, как в тексте дайджеста.
+    private static string Day(DateTimeOffset moment, TimeZoneInfo zone) =>
+        TimeZoneInfo.ConvertTime(moment, zone).ToString("dd.MM.yyyy", CultureInfo.InvariantCulture);
 
     // linked: false — уведомление без ссылки на документ (document_id пуст), когда документ получателю недоступен;
     // название документа остаётся в тексте и параметрах.

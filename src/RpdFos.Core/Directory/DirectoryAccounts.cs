@@ -134,5 +134,29 @@ public sealed class DirectoryAccounts(AppDbContext db, TimeProvider clock)
             .Select(e => e.Id).ToListAsync(ct);
     }
 
+    /// <summary>
+    /// Роли действующей учётной записи сотрудника — с тем же отбором, что у <see cref="ActiveHoldersOfAsync"/>: запись
+    /// справочника активна, вход разрешён, учётная запись не отключена администратором. <c>null</c> — войти он не может
+    /// (нет учётной записи или она отключена): уведомление ему никто не прочтёт (этап 7, A6).
+    /// </summary>
+    public async Task<IReadOnlyList<string>?> RolesOfActiveAsync(Guid employeeId, CancellationToken ct = default)
+    {
+        var account = await (
+                from e in db.Employees
+                join u in db.Users on e.IdentitySubject equals u.Id.ToString()
+                where e.Id == employeeId && e.IsActive && e.CanLogin
+                select new { u.Id, u.LockoutEnd })
+            .FirstOrDefaultAsync(ct);
+        if (account is null || account.LockoutEnd == DateTimeOffset.MaxValue) return null;
+
+        var roles = await (
+                from ur in db.UserRoles
+                join r in db.Roles on ur.RoleId equals r.Id
+                where ur.UserId == account.Id
+                select r.Name)
+            .ToListAsync(ct);
+        return roles.OfType<string>().ToList();
+    }
+
     private static string? NullIfEmpty(string text) => string.IsNullOrWhiteSpace(text) ? null : text;
 }

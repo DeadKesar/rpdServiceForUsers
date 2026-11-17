@@ -14,6 +14,7 @@ using RpdFos.Core.Data.Entities;
 using RpdFos.Core.Documents;
 using RpdFos.Core.Mail;
 using RpdFos.Core.Printing;
+using RpdFos.Core.Reminders;
 using Swashbuckle.AspNetCore.SwaggerUI;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -31,6 +32,9 @@ builder.Services.PostConfigure<GenerationSettings>(o =>
 // Почта: сервер, отправитель, адрес системы для ссылок. В разработке письма уходят в ловушку из docker-compose (этап 7, A4).
 builder.Services.Configure<MailSettings>(builder.Configuration.GetSection("Mail"));
 var mailEnabled = builder.Configuration.GetValue("Mail:Enabled", true);
+// Срок доработки и напоминания о нём: 14 дней, предупреждение за 3 (этап 7, A6).
+builder.Services.Configure<RemindersSettings>(builder.Configuration.GetSection("Reminders"));
+var remindersEnabled = builder.Configuration.GetValue("Reminders:Enabled", true);
 
 // Учётные записи: ASP.NET Core Identity. Пароли хранятся только здесь, в виде хеша.
 builder.Services.AddIdentity<AppUser, IdentityRole<Guid>>(o =>
@@ -226,6 +230,13 @@ if (jobsEnabled)
             "notification-mail", JobQueues.Mail, job => job.RunAsync(CancellationToken.None), Cron.Minutely());
     else
         recurring.RemoveIfExists("notification-mail");
+    // Напоминания о сроке доработки — раз в сутки в полночь по UTC (A6): до часа дайджеста, и письма «раз в день» о них
+    // уходят в то же утро. Очередь формирования — как у очистки файлов: в ней исполнитель есть и при выключенной почте.
+    if (remindersEnabled)
+        recurring.AddOrUpdate<ReworkReminders>(
+            "rework-reminders", JobQueues.Generation, job => job.RunAsync(CancellationToken.None), Cron.Daily());
+    else
+        recurring.RemoveIfExists("rework-reminders");
 }
 app.MapFallbackToFile(ClientShell.FileName, ClientShell.CreateStaticFileOptions()); // адреса клиента: /, /documents…
 

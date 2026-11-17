@@ -50,6 +50,9 @@ public class DatabaseFixture : WebApplicationFactory<Program>, IAsyncLifetime
         // перехватывал бы письма и проверки «ушло один раз» зависели бы от времени. Адрес для ссылок — свой, не из appsettings.
         builder.UseSetting("Mail:Enabled", "false");
         builder.UseSetting("Mail:PublicUrl", "https://rpdfos.test");
+        // Напоминания о сроке доработки — тоже вызовом задачи: тесты сдвигают дату возврата в прошлое, и ночной запуск
+        // по расписанию (полночь UTC) создал бы напоминания посреди проверки.
+        builder.UseSetting("Reminders:Enabled", "false");
 
         builder.ConfigureTestServices(services =>
         {
