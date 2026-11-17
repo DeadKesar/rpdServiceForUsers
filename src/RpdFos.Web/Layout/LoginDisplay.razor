@@ -4,8 +4,8 @@
 <AuthorizeView>
     <Authorized>
         <NotificationBell />
-        @* Утверждение name сервер заполняет ФИО из учётной записи. *@
-        @context.User.Identity?.Name
+        @* Утверждение name сервер заполняет ФИО из учётной записи; ссылка ведёт в профиль и настройки (этап 7, A5). *@
+        <a href="profile" title="Профиль и настройки">@context.User.Identity?.Name</a>
         <button class="nav-link btn btn-link" @onclick="BeginLogOut">Выйти</button>
     </Authorized>
     <NotAuthorized>

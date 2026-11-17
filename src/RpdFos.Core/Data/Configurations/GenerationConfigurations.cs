@@ -72,3 +72,16 @@ internal sealed class NotificationConfiguration : IEntityTypeConfiguration<Notif
         e.HasOne<Document>().WithMany().HasForeignKey(x => x.DocumentId).OnDelete(DeleteBehavior.Cascade);
     }
 }
+
+// Настройки уведомлений (раздел 2.4 ВКР, FR-REV-08; этап 7, A5): по модели данных — одна строка на запись справочника
+// (уникальный user_id), каскадное удаление вместе с записью.
+internal sealed class NotificationPreferenceConfiguration : IEntityTypeConfiguration<NotificationPreference>
+{
+    public void Configure(EntityTypeBuilder<NotificationPreference> e)
+    {
+        e.ToTable("notification_preferences");
+        e.Property(x => x.Preferences).HasColumnType("jsonb");
+        e.HasIndex(x => x.UserId).IsUnique();
+        e.HasOne<Employee>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+    }
+}

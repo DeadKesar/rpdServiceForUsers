@@ -1,0 +1,184 @@
+@page "/profile"
+@attribute [Authorize]
+@using System.Net.Http.Json
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.WebAssembly.Authentication
+@using RpdFos.Web.Models
+@using RpdFos.Web.Notifications
+@inject HttpClient Http
+@inject NotificationFeed Feed
+
+<PageTitle>Профиль и настройки</PageTitle>
+
+@* Профиль и настройки (S-02, FR-REV-08; этап 7, A5). Данные профиля — только для чтения: ФИО, должность и подразделение
+   берутся из справочника сотрудников, email и роли — из учётной записи (их меняет администратор). Ниже — таблица
+   настроек уведомлений: по каждому событию «в интерфейсе» (колокольчик и счётчик) и «почта» (сразу, раз в день,
+   выключено). Список событий приходит с сервера — события следующих шагов появятся в таблице сами. Без записи
+   справочника уведомлений нет, и таблицы тоже. *@
+<h1 class="h3">Профиль и настройки</h1>
+
+@if (loadMessage is not null)
+{
+    <div class="alert alert-danger py-2" role="alert">@loadMessage</div>
+}
+else if (profile is null)
+{
+    <p>Загрузка…</p>
+}
+else
+{
+    <dl class="row">
+        <dt class="col-sm-3">ФИО</dt>
+        <dd class="col-sm-9">@profile.FullName</dd>
+        <dt class="col-sm-3">Должность</dt>
+        <dd class="col-sm-9">@(profile.Position ?? "—")</dd>
+        <dt class="col-sm-3">Подразделение</dt>
+        <dd class="col-sm-9">@(profile.Unit ?? "—")</dd>
+        <dt class="col-sm-3">Email</dt>
+        <dd class="col-sm-9">@(profile.Email ?? "—")</dd>
+        <dt class="col-sm-3">Роли</dt>
+        <dd class="col-sm-9">@(profile.Roles.Count == 0 ? "—" : string.Join(", ", profile.Roles.Select(r => r.Title)))</dd>
+    </dl>
+
+    <h2 class="h5 mt-4">Уведомления</h2>
+    @if (!profile.HasDirectoryRecord)
+    {
+        <div class="alert alert-warning py-2">
+            Учётная запись не связана со справочником сотрудников: уведомления вам не создаются, настраивать нечего.
+            Обратитесь к администратору.
+        </div>
+    }
+    else if (rows is not null)
+    {
+        <p class="text-muted small">
+            «В интерфейсе» — колокольчик в шапке и число непрочитанных. «Почта» — письма на email вашей учётной записи:
+            сразу после события, одним дайджестом раз в день или не отправлять. Каналы независимы: письмо приходит и тогда,
+            когда событие скрыто в интерфейсе.
+        </p>
+
+        @* Узкий экран: таблица прокручивается в обёртке, а не рвёт слова по буквам (общее правило — app.css). *@
+        <div class="table-responsive">
+        <table class="table table-sm align-middle">
+            <thead>
+                <tr><th>Событие</th><th class="text-center">В интерфейсе</th><th>Почта</th></tr>
+            </thead>
+            <tbody>
+                @foreach (var row in rows)
+                {
+                    <tr @key="row.EventType">
+                        <td>@row.Title</td>
+                        <td class="text-center">
+                            <input type="checkbox" class="form-check-input" aria-label="@($"В интерфейсе: {row.Title}")" @bind="row.InApp" />
+                        </td>
+                        <td>
+                            <select class="form-select form-select-sm" aria-label="@($"Почта: {row.Title}")" @bind="row.Mail">
+                                <option value="immediate">Сразу</option>
+                                <option value="daily">Раз в день</option>
+                                <option value="off">Выключено</option>
+                            </select>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+        </div>
+
+        <button type="button" class="btn btn-primary" disabled="@saving" @onclick="SaveAsync">Сохранить</button>
+        @if (message is not null)
+        {
+            <div class="alert @(messageIsError ? "alert-danger" : "alert-success") py-2 mt-3" role="status">@message</div>
+        }
+    }
+}
+
+@code {
+    private ProfileItem? profile;
+    private List<SettingRow>? rows;
+    private string? loadMessage, message;
+    private bool messageIsError, saving;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var response = await Http.GetAsync("api/profile");
+            if (!response.IsSuccessStatusCode)
+            {
+                loadMessage = await ProblemTextAsync(response, "Профиль не получен");
+                return;
+            }
+            profile = await response.Content.ReadFromJsonAsync<ProfileItem>();
+
+            // Настройки есть только у записи справочника; у остальных сервер ответил бы отказом.
+            if (profile is { HasDirectoryRecord: true })
+            {
+                response = await Http.GetAsync("api/profile/notification-settings");
+                if (response.IsSuccessStatusCode) rows = await ReadRowsAsync(response);
+                else loadMessage = await ProblemTextAsync(response, "Настройки уведомлений не получены");
+            }
+        }
+        catch (AccessTokenNotAvailableException e)
+        {
+            e.Redirect();
+        }
+        catch (HttpRequestException e) when (ConnectionLoss.Is(e))
+        {
+            loadMessage = ConnectionLoss.Message;
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        if (rows is null) return;
+        saving = true;
+        message = null;
+        try
+        {
+            var body = rows.Select(r => new NotificationSettingRequest(r.EventType, r.InApp, r.Mail)).ToList();
+            var response = await Http.PutAsJsonAsync("api/profile/notification-settings", body);
+            if (response.IsSuccessStatusCode)
+            {
+                rows = await ReadRowsAsync(response);
+                (message, messageIsError) = ("Настройки сохранены.", false);
+                // Скрытые события должны сразу уйти из колокольчика и счётчика, а не через минуту опроса.
+                await Feed.RefreshAsync();
+            }
+            else
+            {
+                (message, messageIsError) = (await ProblemTextAsync(response, "Настройки не сохранены"), true);
+            }
+        }
+        catch (AccessTokenNotAvailableException e)
+        {
+            e.Redirect();
+        }
+        catch (HttpRequestException e) when (ConnectionLoss.Is(e))
+        {
+            (message, messageIsError) = (ConnectionLoss.Message, true);
+        }
+        finally
+        {
+            saving = false;
+        }
+    }
+
+    private static async Task<List<SettingRow>> ReadRowsAsync(HttpResponseMessage response) =>
+        (await response.Content.ReadFromJsonAsync<List<NotificationSettingItem>>() ?? [])
+        .Select(s => new SettingRow { EventType = s.EventType, Title = s.Title, InApp = s.InApp, Mail = s.Mail }).ToList();
+
+    private static async Task<string> ProblemTextAsync(HttpResponseMessage response, string what)
+    {
+        var problem = await response.Content.ReadFromJsonAsync<DocumentProblem>();
+        return problem?.Detail is { } detail ? $"{problem.Title}. {detail}"
+            : problem?.Title ?? $"{what} (код ответа {(int)response.StatusCode}).";
+    }
+
+    // Строка таблицы: значения правятся на месте и уходят на сервер кнопкой «Сохранить».
+    private sealed class SettingRow
+    {
+        public required string EventType { get; init; }
+        public required string Title { get; init; }
+        public bool InApp { get; set; }
+        public string Mail { get; set; } = "off";
+    }
+}

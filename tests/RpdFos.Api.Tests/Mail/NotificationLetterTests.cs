@@ -1,12 +1,13 @@
 using System.Reflection;
 using System.Text.Json;
+using RpdFos.Api.Tests.Integration;
 using RpdFos.Core.Data.Entities;
 using RpdFos.Core.Mail;
 using Xunit;
 
 namespace RpdFos.Api.Tests.Mail;
 
-/// <summary>Письмо по уведомлению и перечень событий с умолчаниями почты (этап 7, A4) — без базы и сервера.</summary>
+/// <summary>Письмо по уведомлению, дайджест и перечень событий с умолчаниями почты (этап 7, A4, A5) — без базы и сервера.</summary>
 public class NotificationLetterTests
 {
     private static readonly Guid DocumentId = Guid.Parse("11111111-2222-3333-4444-555555555555");
@@ -64,6 +65,30 @@ public class NotificationLetterTests
 
         // Нет ни темы, ни текста — письмо всё равно получает тему.
         Assert.Equal("Уведомление системы создания РПД и ФОС", NotificationLetter.Compose(Note(new { }), "a@test.local", null, "").Subject);
+    }
+
+    [Fact]
+    public void The_digest_lists_every_notification_with_its_local_time_one_line_of_text_and_the_link()
+    {
+        var zone = TestClock.ZoneWithOffset(3);
+        var first = Note(new { text = "Возвращён на доработку: РПД «Модели».\nКомментарий: исправьте\n\nдо пятницы.", subject = "Возвращён" }, DocumentId);
+        first.CreatedAt = new DateTimeOffset(2026, 11, 16, 21, 30, 0, TimeSpan.Zero);
+        // Уведомление без ссылки (документ получателю недоступен) — без строки со ссылкой; без текста — по теме.
+        var second = Note(new { subject = "Согласующий заменён: РПД «Модели»" });
+        second.CreatedAt = new DateTimeOffset(2026, 11, 17, 3, 5, 0, TimeSpan.Zero);
+
+        var letter = NotificationLetter.ComposeDigest([first, second], "teacher@test.local", "Иванов И. И.", "https://rpdfos.test/",
+            new DateTimeOffset(2026, 11, 17, 5, 0, 0, TimeSpan.Zero), zone);
+
+        // Тема — дата отправки, время уведомлений — по тому же поясу, что и дата.
+        Assert.Equal(("teacher@test.local", "Иванов И. И.", "Дайджест уведомлений от 17.11.2026"), (letter.To, letter.ToName, letter.Subject));
+        Assert.Equal(
+            "Новых уведомлений: 2.\n\n" +
+            "1. 17.11.2026 00:30 — Возвращён на доработку: РПД «Модели». Комментарий: исправьте до пятницы.\n" +
+            $"   Открыть документ: https://rpdfos.test/documents/{DocumentId}\n\n" +
+            "2. 17.11.2026 06:05 — Согласующий заменён: РПД «Модели»\n\n" +
+            "-- \nАвтоматическое сообщение системы создания РПД и ФОС.",
+            letter.Body);
     }
 
     [Fact]

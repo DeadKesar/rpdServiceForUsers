@@ -32,26 +32,33 @@ public class Notification
     public DateTimeOffset? EmailedAt { get; set; }
 }
 
-/// <summary>Как событие уходит на почту получателю.</summary>
+/// <summary>Как событие уходит на почту получателю (настройка «почта» в профиле, этап 7, A5).</summary>
 public enum MailMode
 {
     /// <summary>Письма нет.</summary>
     Off,
 
     /// <summary>Письмо уходит сразу — фоновой задачей в пределах минуты после события.</summary>
-    Immediately
+    Immediately,
+
+    /// <summary>Событие входит в ежедневный дайджест — одно письмо на получателя в час <c>Mail:DigestHour</c>.</summary>
+    Daily
 }
 
-/// <summary>Событие уведомлений и его умолчание для почты — пока пользователь не менял настройки.</summary>
-public sealed record NotificationEventInfo(string Type, MailMode DefaultMail);
+/// <summary>
+/// Событие уведомлений: название для таблицы настроек и умолчание почты — пока пользователь не менял настройки.
+/// В интерфейсе все события показываются по умолчанию.
+/// </summary>
+public sealed record NotificationEventInfo(string Type, string Title, MailMode DefaultMail);
 
 /// <summary>
 /// События, о которых уведомляют (этап 6.1, C3; этап 7, A3). Из FR-REV-08 в прототип вошли смены статуса, возвраты и
 /// события печати и согласования. «Новый комментарий» отдельным событием не делается (отступление от FR-REV-08):
 /// замечания к полям приходят вместе с возвратом — в уведомлении их число. Напоминания о сроке — этап 7, A6.
 /// <para>
-/// Каждое событие записывается и в <see cref="All"/> — единый перечень с умолчаниями почты (этап 7, A4); из него же
-/// строится таблица настроек уведомлений (A5). Тест сверяет перечень с константами: событие, которого в нём нет, не пройдёт.
+/// Каждое событие записывается и в <see cref="All"/> — единый перечень с названием и умолчанием почты (этап 7, A4);
+/// из него же строится таблица настроек уведомлений в профиле (A5): событие, которое добавили в перечень, появляется в
+/// таблице само. Тест сверяет перечень с константами: событие, которого в нём нет, не пройдёт.
 /// </para>
 /// </summary>
 public static class NotificationEvents
@@ -96,28 +103,32 @@ public static class NotificationEvents
     public const string PrintFailed = "document.print_failed";
 
     /// <summary>
-    /// Все события с умолчаниями почты. «Сразу» — у событий, которые требуют действия получателя: документ вернулся на
-    /// доработку (в том числе после исправления данных плана), ждёт согласования, возвращён с согласования; напоминания
-    /// (A6) пополнят этот ряд. У остальных почта выключена: они сообщают, а не просят действовать, и лента интерфейса
-    /// их показывает. Настройка пользователя (A5) перекрывает умолчание.
+    /// Все события с названиями и умолчаниями почты — в порядке таблицы настроек. «Сразу» — у событий, которые требуют
+    /// действия получателя: документ вернулся на доработку (в том числе после исправления данных плана), ждёт
+    /// согласования, возвращён с согласования; напоминания (A6) пополнят этот ряд. У остальных почта выключена: они
+    /// сообщают, а не просят действовать, и лента интерфейса их показывает. Настройка пользователя (A5) перекрывает
+    /// умолчание. Названия — без родовых форм и без указания адресата: пол получателя системе неизвестен, а одно событие
+    /// приходит и автору, и методистам.
     /// </summary>
     public static IReadOnlyList<NotificationEventInfo> All { get; } =
     [
-        new(TakenForReview, MailMode.Off),
-        new(ReturnedForRework, MailMode.Immediately),
-        new(ReturnedAfterPlanCorrection, MailMode.Immediately),
-        new(Accepted, MailMode.Off),
-        new(Submitted, MailMode.Off),
-        new(ReturnedFromApproval, MailMode.Immediately),
-        new(Approved, MailMode.Off),
-        new(AwaitingMark, MailMode.Immediately),
-        new(ApprovalStarted, MailMode.Off),
-        new(SignatoryReplaced, MailMode.Off),
-        new(PrintReady, MailMode.Off),
-        new(PrintFailed, MailMode.Off)
+        new(Submitted, "Документ отправлен на проверку", MailMode.Off),
+        new(TakenForReview, "Документ взят на проверку", MailMode.Off),
+        new(ReturnedForRework, "Документ возвращён на доработку", MailMode.Immediately),
+        new(ReturnedAfterPlanCorrection, "Документ возвращён после исправления данных учебного плана", MailMode.Immediately),
+        new(Accepted, "Документ принят", MailMode.Off),
+        new(ApprovalStarted, "Согласование начато", MailMode.Off),
+        new(AwaitingMark, "Документ ждёт вашего согласования", MailMode.Immediately),
+        new(SignatoryReplaced, "Согласующий заменён", MailMode.Off),
+        new(ReturnedFromApproval, "Документ возвращён с согласования", MailMode.Immediately),
+        new(Approved, "Документ согласован", MailMode.Off),
+        new(PrintReady, "Печатная форма готова", MailMode.Off),
+        new(PrintFailed, "Печатная форма не сформирована", MailMode.Off)
     ];
 
+    /// <summary>Событие по типу; неизвестное — <c>null</c>.</summary>
+    public static NotificationEventInfo? Find(string eventType) => All.FirstOrDefault(e => e.Type == eventType);
+
     /// <summary>Умолчание почты для события; неизвестное событие — без почты.</summary>
-    public static MailMode DefaultMailOf(string eventType) =>
-        All.FirstOrDefault(e => e.Type == eventType)?.DefaultMail ?? MailMode.Off;
+    public static MailMode DefaultMailOf(string eventType) => Find(eventType)?.DefaultMail ?? MailMode.Off;
 }

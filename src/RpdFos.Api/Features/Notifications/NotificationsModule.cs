@@ -3,6 +3,7 @@ using Carter;
 using Microsoft.EntityFrameworkCore;
 using RpdFos.Core.Data;
 using RpdFos.Core.Directory;
+using RpdFos.Core.Notifications;
 
 namespace RpdFos.Api.Features.Notifications;
 
@@ -10,6 +11,12 @@ namespace RpdFos.Api.Features.Notifications;
 /// Срез «Уведомления» (этап 6.1, C3; FR-REV-08): лента пользователя для колокольчика, число непрочитанных, отметки
 /// «прочитано». Уведомления создаёт ядро (<c>DocumentNotifications</c>) в одном сохранении с событием; здесь — только
 /// чтение своих. Чужое уведомление неотличимо от несуществующего: 404.
+/// <para>
+/// События, у которых пользователь выключил канал «в интерфейсе» (этап 7, A5), для ленты не существуют: их нет в списке и
+/// в счётчике, а «прочитано» и «прочитать все» их не затрагивают — у скрытого события может ждать письмо, а прочитанное
+/// письмом не отправляется. Скрывает текущая настройка, а не настройка на момент события: включённый обратно канал
+/// возвращает события в ленту.
+/// </para>
 /// </summary>
 public class NotificationsModule : ICarterModule
 {
@@ -28,11 +35,13 @@ public class NotificationsModule : ICarterModule
     /// Последние уведомления — от новых к старым. Пользователь без записи справочника (учётная запись не связана)
     /// получателем быть не может, лента у него пуста: колокольчик есть у всех и не должен отвечать им ошибкой.
     /// </summary>
-    private static async Task<IResult> Latest(int? limit, HttpContext http, AppDbContext db, DirectoryAccounts directory, CancellationToken ct)
+    private static async Task<IResult> Latest(
+        int? limit, HttpContext http, AppDbContext db, DirectoryAccounts directory, NotificationSettings settings, CancellationToken ct)
     {
         if (await directory.FindIdAsync(http.User, ct) is not Guid me) return Results.Ok(Array.Empty<NotificationItem>());
 
-        var rows = await db.Notifications.AsNoTracking().Where(n => n.RecipientId == me)
+        var hidden = await settings.HiddenInAppAsync(me, ct);
+        var rows = await db.Notifications.AsNoTracking().Where(n => n.RecipientId == me && !hidden.Contains(n.EventType))
             .OrderByDescending(n => n.CreatedAt).Take(Math.Clamp(limit ?? DefaultLimit, 1, MaxLimit))
             .Select(n => new { n.Id, n.EventType, n.DocumentId, n.Payload, n.CreatedAt, n.ReadAt })
             .ToListAsync(ct);
@@ -41,18 +50,25 @@ public class NotificationsModule : ICarterModule
     }
 
     /// <summary>Число непрочитанных — для значка на колокольчике; частичный индекс таблицы обслуживает этот запрос.</summary>
-    private static async Task<IResult> UnreadCount(HttpContext http, AppDbContext db, DirectoryAccounts directory, CancellationToken ct)
+    private static async Task<IResult> UnreadCount(
+        HttpContext http, AppDbContext db, DirectoryAccounts directory, NotificationSettings settings, CancellationToken ct)
     {
         if (await directory.FindIdAsync(http.User, ct) is not Guid me) return Results.Ok(new UnreadCount(0));
-        return Results.Ok(new UnreadCount(await db.Notifications.CountAsync(n => n.RecipientId == me && n.ReadAt == null, ct)));
+        var hidden = await settings.HiddenInAppAsync(me, ct);
+        return Results.Ok(new UnreadCount(
+            await db.Notifications.CountAsync(n => n.RecipientId == me && n.ReadAt == null && !hidden.Contains(n.EventType), ct)));
     }
 
     /// <summary>«Прочитано» для одного. Повторная отметка время прочтения не меняет.</summary>
     private static async Task<IResult> Read(
-        Guid id, HttpContext http, AppDbContext db, DirectoryAccounts directory, TimeProvider clock, CancellationToken ct)
+        Guid id, HttpContext http, AppDbContext db, DirectoryAccounts directory, NotificationSettings settings, TimeProvider clock,
+        CancellationToken ct)
     {
         var me = await directory.FindIdAsync(http.User, ct);
-        var notification = me is null ? null : await db.Notifications.SingleOrDefaultAsync(n => n.Id == id && n.RecipientId == me, ct);
+        var hidden = me is Guid recipient ? await settings.HiddenInAppAsync(recipient, ct) : [];
+        var notification = me is null
+            ? null
+            : await db.Notifications.SingleOrDefaultAsync(n => n.Id == id && n.RecipientId == me && !hidden.Contains(n.EventType), ct);
         if (notification is null)
             return Results.Problem(statusCode: StatusCodes.Status404NotFound, title: "Уведомление не найдено",
                 detail: "Обновите список уведомлений.");
@@ -62,14 +78,16 @@ public class NotificationsModule : ICarterModule
         return Results.NoContent();
     }
 
-    /// <summary>«Прочитать все»: одним запросом, уже прочитанные не затрагиваются.</summary>
+    /// <summary>«Прочитать все»: одним запросом, уже прочитанные и скрытые в интерфейсе не затрагиваются.</summary>
     private static async Task<IResult> ReadAll(
-        HttpContext http, AppDbContext db, DirectoryAccounts directory, TimeProvider clock, CancellationToken ct)
+        HttpContext http, AppDbContext db, DirectoryAccounts directory, NotificationSettings settings, TimeProvider clock,
+        CancellationToken ct)
     {
         if (await directory.FindIdAsync(http.User, ct) is Guid me)
         {
             var now = clock.GetUtcNow();
-            await db.Notifications.Where(n => n.RecipientId == me && n.ReadAt == null)
+            var hidden = await settings.HiddenInAppAsync(me, ct);
+            await db.Notifications.Where(n => n.RecipientId == me && n.ReadAt == null && !hidden.Contains(n.EventType))
                 .ExecuteUpdateAsync(s => s.SetProperty(n => n.ReadAt, now), ct);
         }
         return Results.NoContent();

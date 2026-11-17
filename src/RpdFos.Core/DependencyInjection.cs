@@ -7,6 +7,7 @@ using RpdFos.Core.Documents;
 using RpdFos.Core.DocumentTypes;
 using RpdFos.Core.Import;
 using RpdFos.Core.Mail;
+using RpdFos.Core.Notifications;
 using RpdFos.Core.Printing;
 using RpdFos.Core.Templates;
 
@@ -63,9 +64,14 @@ public static class DependencyInjection
         services.AddScoped<GenerationJob>();
         services.AddScoped<GeneratedFilesCleanup>();
         // Почта (этап 7, A4): настройки — раздел Mail; отправитель — SMTP, в тестах подменяется; письма уходят фоновой задачей.
-        services.AddOptions<MailSettings>();
+        // Час дайджеста проверяется при старте: неверный час иначе ломал бы задачу при каждом запуске.
+        services.AddOptions<MailSettings>()
+            .Validate(s => s.DigestHour is >= 0 and <= 23, "Mail:DigestHour — час от 0 до 23.")
+            .ValidateOnStart();
         services.AddSingleton<IMailSender, SmtpMailSender>();
         services.AddScoped<NotificationMailJob>();
+        // Настройки уведомлений пользователя: профиль (A5), лента, почта.
+        services.AddScoped<NotificationSettings>();
         return services;
     }
 }
