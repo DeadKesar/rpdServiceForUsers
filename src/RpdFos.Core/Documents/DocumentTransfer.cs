@@ -34,12 +34,14 @@ public sealed record TransferResult(TransferProblem? Problem);
 /// Передача — запись в журнале аудита (NFR-SEC-07) и уведомления: новому автору — со ссылкой, прежнему — со ссылкой только
 /// если документ ему остался доступен (как методисту, администратору или согласующему): иначе она привела бы его на 403.
 /// Прежнему автору без действующей учётной записи, а он обычно такой — преподаватель ушёл, уведомление не создаётся: его
-/// некому прочесть. В статусах документа передача ничего не меняет, поэтому в истории статусов её нет. Закрепление нового
-/// автора за дисциплиной, если у неё есть закрепления, — шаг A10. Всё добавляется в контекст, сохраняет вызывающий — с версией клиента.
+/// некому прочесть. В статусах документа передача ничего не меняет, поэтому в истории статусов её нет. Если у дисциплины есть
+/// закрепления, новый автор закрепляется за ней (A10): иначе он правил бы документ, но не мог бы создать по дисциплине ничего
+/// нового. Всё добавляется в контекст, сохраняет вызывающий — с версией клиента.
 /// </para>
 /// </summary>
 public sealed class DocumentTransfer(
-    AppDbContext db, DocumentHistory history, DocumentNotifications notifications, DocumentApproval approval, DirectoryAccounts directory)
+    AppDbContext db, DocumentHistory history, DocumentNotifications notifications, DocumentApproval approval, DirectoryAccounts directory,
+    DisciplineAssignments assignments)
 {
     private static readonly JsonSerializerOptions Json = new() { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
 
@@ -66,10 +68,12 @@ public sealed class DocumentTransfer(
             OccurredAt = at, Payload = new JsonObject { ["from"] = previous, ["to"] = newAuthorId, ["reason"] = text }.ToJsonString(Json)
         });
 
-        // Документ уже у нового автора: открытость для прежнего считается без права автора.
+        await assignments.EnsureAssignedAsync(document, newAuthorId, by, ct);
+
+        // Документ уже у нового автора: открытость для прежнего считается без права автора (закреплённым он остаётся, если был).
         if (await directory.RolesOfActiveAsync(previous, ct) is { } previousRoles)
             await notifications.TransferredOutAsync(document, previous, newAuthorId, by, byRole, text,
-                await DocumentVisibility.CanOpenAsync(approval, document, previous, previousRoles, ct), at, ct);
+                await DocumentVisibility.CanOpenAsync(approval, assignments, document, previous, previousRoles, ct), at, ct);
         await notifications.TransferredInAsync(document, previous, newAuthorId, by, byRole, text, at, ct);
         return new(null);
     }

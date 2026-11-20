@@ -145,3 +145,19 @@ internal sealed class DocumentSignatureConfiguration : IEntityTypeConfiguration<
         e.HasOne<Employee>().WithMany().HasForeignKey(x => x.ResolvedUserId).OnDelete(DeleteBehavior.Restrict);
     }
 }
+
+// Закрепление дисциплин за сотрудниками (этап 7, A10 — дополнение модели данных). Пара «дисциплина — сотрудник» уникальна;
+// индекс по сотруднику обслуживает «документы моих дисциплин» и проверку доступа. Строки уходят вместе с дисциплиной
+// (удаление версии плана), а на записи справочника не мешают: записи деактивируют, а не удаляют.
+internal sealed class DisciplineAssignmentConfiguration : IEntityTypeConfiguration<DisciplineAssignment>
+{
+    public void Configure(EntityTypeBuilder<DisciplineAssignment> e)
+    {
+        e.ToTable("discipline_assignments");
+        e.HasIndex(x => new { x.DisciplineId, x.EmployeeId }).IsUnique();
+        e.HasIndex(x => x.EmployeeId);
+        e.HasOne<Discipline>().WithMany().HasForeignKey(x => x.DisciplineId).OnDelete(DeleteBehavior.Cascade);
+        e.HasOne<Employee>().WithMany().HasForeignKey(x => x.EmployeeId).OnDelete(DeleteBehavior.Restrict);
+        e.HasOne<Employee>().WithMany().HasForeignKey(x => x.AssignedBy).OnDelete(DeleteBehavior.Restrict);
+    }
+}

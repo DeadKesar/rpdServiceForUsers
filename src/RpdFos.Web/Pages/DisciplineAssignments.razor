@@ -1,0 +1,387 @@
+@page "/assignments"
+@attribute [Authorize(Roles = "methodist,admin")]
+@using System.Net.Http.Json
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.WebAssembly.Authentication
+@using RpdFos.Web.Models
+@inject HttpClient Http
+
+<PageTitle>Закрепление дисциплин</PageTitle>
+
+<ConfirmDialog @ref="confirm" />
+
+<h1>Закрепление дисциплин</h1>
+
+@* Закрепление дисциплин (этап 7, A10; решение 5). Методист закрепляет сотрудников за дисциплинами версии плана: закреплённый
+   видит документы дисциплины (только для чтения) и создаёт по ней РПД и ФОС; у дисциплины с закреплениями остальные
+   преподаватели документов не создают. Правит документ по-прежнему только его автор. *@
+<p class="text-muted" style="max-width: 960px">
+    Закреплённый за дисциплиной видит её документы только для чтения и создаёт по ней РПД и ФОС, в том числе на основе чужих.
+    Пока за дисциплиной никого нет, документы по ней создаёт любой преподаватель; с первым закреплением — только закреплённые.
+    Правит документ только его автор.
+</p>
+
+@if (message is not null)
+{
+    <div class="alert @(messageIsError ? "alert-danger" : "alert-info") py-2" role="status">@message</div>
+}
+
+<div class="row g-2 mb-3" style="max-width: 960px">
+    <div class="col-md-8">
+        <label class="form-label" for="plan">Учебный план</label>
+        <select id="plan" class="form-select" @bind="planId" @bind:after="LoadPageAsync">
+            <option value="">— выберите учебный план —</option>
+            @foreach (var p in plans)
+            {
+                <option value="@p.Id">@p.Title</option>
+            }
+        </select>
+    </div>
+    @if (page is not null)
+    {
+        <div class="col-md-4">
+            <label class="form-label" for="department">Кафедра</label>
+            <select id="department" class="form-select" @bind="departmentId" @bind:after="OnDepartmentChanged">
+                <option value="">Все кафедры</option>
+                @foreach (var d in page.Departments)
+                {
+                    <option value="@d.Id" title="@d.Name">@d.ShortName</option>
+                }
+            </select>
+        </div>
+    }
+</div>
+
+@if (planId.Length == 0)
+{
+    if (plans.Count == 0 && !loadingPlans)
+    {
+        <p>Учебных планов нет — их загружает методист на странице «Импорт данных».</p>
+    }
+}
+else if (page is null)
+{
+    <p>Загрузка…</p>
+}
+else
+{
+    var rows = Visible.ToList();
+
+    <div class="card mb-3" style="max-width: 960px">
+        <div class="card-body py-2">
+            <div class="small mb-2">
+                Отмечено дисциплин: <strong>@selected.Count</strong>.
+                Чтобы закрепить сотрудника за всеми дисциплинами кафедры, выберите кафедру и отметьте все строки верхним флажком таблицы.
+            </div>
+            <div class="input-group input-group-sm mb-2" style="max-width: 420px">
+                <input class="form-control" placeholder="Фамилия сотрудника" aria-label="Фамилия сотрудника"
+                       @bind="surname" @bind:event="oninput" @onkeydown="OnSearchKeyAsync" />
+                <button class="btn btn-outline-secondary" type="button" disabled="@busy" @onclick="SearchAsync">Найти</button>
+            </div>
+            @if (candidates is { Count: 0 })
+            {
+                <div class="small text-muted">Преподавателей с действующей учётной записью и такой фамилией нет.</div>
+            }
+            else if (candidates is not null)
+            {
+                <ul class="list-group" style="max-width: 720px">
+                    @foreach (var candidate in candidates)
+                    {
+                        <li class="list-group-item py-1 d-flex justify-content-between align-items-center gap-2">
+                            <span>@Describe(candidate)</span>
+                            <button class="btn btn-sm btn-primary text-nowrap" type="button" disabled="@(busy || selected.Count == 0)"
+                                    title="@(selected.Count == 0 ? "Сначала отметьте дисциплины в таблице" : null)"
+                                    @onclick="() => AssignAsync(candidate)">Закрепить</button>
+                        </li>
+                    }
+                </ul>
+            }
+        </div>
+    </div>
+
+    @if (rows.Count == 0)
+    {
+        <p>Дисциплин, для которых создаётся документ, в плане нет.</p>
+    }
+    else
+    {
+        @* Узкий экран: таблица прокручивается в обёртке, а не рвёт слова по буквам (общее правило — app.css). *@
+        <div class="table-responsive">
+        <table class="table table-sm align-middle">
+            <thead>
+                <tr>
+                    <th style="width: 2rem">
+                        <input class="form-check-input" type="checkbox" aria-label="Отметить все показанные дисциплины"
+                               checked="@(rows.All(r => selected.Contains(r.Id)))" @onchange="e => SelectAll(rows, e.Value is true)" />
+                    </th>
+                    <th>Индекс</th><th>Дисциплина</th><th>Кафедра</th><th>Закреплены</th><th>Документы</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var d in rows)
+                {
+                    <tr @key="d.Id" class="@(selected.Contains(d.Id) ? "table-active" : "")">
+                        <td>
+                            <input class="form-check-input" type="checkbox" aria-label="@($"Отметить {d.Code}")"
+                                   checked="@selected.Contains(d.Id)" @onchange="e => Select(d.Id, e.Value is true)" />
+                        </td>
+                        <td class="text-nowrap">@d.Code</td>
+                        <td>@d.Name</td>
+                        <td class="text-nowrap">@d.Department</td>
+                        <td>
+                            @if (d.Assigned.Count == 0)
+                            {
+                                <span class="text-muted">никого</span>
+                            }
+                            @foreach (var a in d.Assigned)
+                            {
+                                <div class="d-flex align-items-center gap-2">
+                                    <span title="@($"Закрепил: {a.AssignedBy}, {a.AssignedAt.ToLocalTime():dd.MM.yyyy}")">@a.Name</span>
+                                    <button class="btn btn-link btn-sm p-0 text-danger" type="button" disabled="@busy"
+                                            aria-label="@($"Снять закрепление: {a.Name}, {d.Code}")" @onclick="() => UnassignAsync(d, a)">Снять</button>
+                                </div>
+                            }
+                        </td>
+                        <td>
+                            @if (d.Documents.Count == 0)
+                            {
+                                <span class="text-muted">нет</span>
+                            }
+                            @foreach (var doc in d.Documents)
+                            {
+                                <div class="small">
+                                    <a href="@($"documents/{doc.Id}")">@(doc.Type == "fos" ? "ФОС" : "РПД")</a>
+                                    — @doc.AuthorName, @doc.StatusTitle
+                                    @if (doc.IsOutdated)
+                                    {
+                                        <span class="badge text-bg-warning ms-1" title="Вышла новая редакция шаблона">устарел</span>
+                                    }
+                                </div>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+        </div>
+    }
+}
+
+@code {
+    private ConfirmDialog confirm = default!;
+    private List<PlanItem> plans = [];
+    private bool loadingPlans = true;
+    private string planId = "";
+    private string departmentId = "";
+    private AssignmentPage? page;
+    private readonly HashSet<Guid> selected = [];
+    private string surname = "";
+    private List<DirectoryPerson>? candidates;
+    private bool busy;
+    private bool offline;
+    private string? message;
+    private bool messageIsError;
+
+    private IEnumerable<DisciplineRow> Visible => page is null
+        ? []
+        : page.Disciplines.Where(d => departmentId.Length == 0 || d.DepartmentId?.ToString() == departmentId);
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            plans = await Http.GetFromJsonAsync<List<PlanItem>>("api/curriculum-plans") ?? [];
+        }
+        catch (AccessTokenNotAvailableException e)
+        {
+            e.Redirect();
+        }
+        catch (HttpRequestException e) when (ConnectionLoss.Is(e))
+        {
+            LoseConnection();
+        }
+        finally
+        {
+            loadingPlans = false;
+        }
+    }
+
+    // Выбор плана: страница дисциплин загружается заново, отметки и фильтр кафедры сбрасываются — они относятся к прежнему плану.
+    private async Task LoadPageAsync()
+    {
+        page = null;
+        selected.Clear();
+        departmentId = "";
+        if (planId.Length == 0) return;
+        await ReloadAsync();
+    }
+
+    // Перечитывает дисциплины плана после действия; отметки остаются только у строк, которые ещё показаны.
+    private async Task ReloadAsync()
+    {
+        try
+        {
+            var response = await Http.GetAsync($"api/discipline-assignments?planId={planId}");
+            if (response.IsSuccessStatusCode)
+            {
+                page = await response.Content.ReadFromJsonAsync<AssignmentPage>();
+                selected.IntersectWith(page?.Disciplines.Select(d => d.Id) ?? []);
+                RestoreConnection();
+            }
+            else
+                (messageIsError, message) = (true, await ProblemTextAsync(response, "Дисциплины плана не загружены"));
+        }
+        catch (AccessTokenNotAvailableException e)
+        {
+            e.Redirect();
+        }
+        catch (HttpRequestException e) when (ConnectionLoss.Is(e))
+        {
+            LoseConnection();
+        }
+    }
+
+    // Другая кафедра — другой набор строк: отмеченные, но скрытые фильтром, не остаются в отметках (иначе «Закрепить» задело бы
+    // строки, которых на экране нет).
+    private void OnDepartmentChanged() => selected.IntersectWith(Visible.Select(d => d.Id));
+
+    private void Select(Guid id, bool on)
+    {
+        if (on) selected.Add(id);
+        else selected.Remove(id);
+    }
+
+    private void SelectAll(List<DisciplineRow> rows, bool on)
+    {
+        foreach (var row in rows) Select(row.Id, on);
+    }
+
+    private Task OnSearchKeyAsync(KeyboardEventArgs e) => e.Key == "Enter" ? SearchAsync() : Task.CompletedTask;
+
+    // Кандидаты — преподаватели с действующей учётной записью (тот же поиск, что у передачи документа): закреплённый должен
+    // уметь войти и создать документ.
+    private async Task SearchAsync()
+    {
+        try
+        {
+            var response = await Http.GetAsync($"api/directory/teachers?surname={Uri.EscapeDataString(surname.Trim())}");
+            if (response.IsSuccessStatusCode)
+            {
+                candidates = await response.Content.ReadFromJsonAsync<List<DirectoryPerson>>() ?? [];
+                RestoreConnection();
+            }
+            else
+                (messageIsError, message) = (true, await ProblemTextAsync(response, "Поиск не выполнен"));
+        }
+        catch (AccessTokenNotAvailableException e)
+        {
+            e.Redirect();
+        }
+        catch (HttpRequestException e) when (ConnectionLoss.Is(e))
+        {
+            LoseConnection();
+        }
+    }
+
+    private async Task AssignAsync(DirectoryPerson person)
+    {
+        var rows = Visible.Where(d => selected.Contains(d.Id)).ToList();
+        if (rows.Count == 0) return;
+        var what = rows.Count == 1 ? $"дисциплиной {rows[0].Code} «{rows[0].Name}»" : $"дисциплинами ({rows.Count})";
+        if (!await confirm.AskAsync($"Закрепить сотрудника {person.ShortName} за {what}? Закреплённый увидит документы дисциплины и сможет " +
+                "создавать по ней документы. Если за дисциплиной раньше никого не было, остальные преподаватели создавать по ней документы перестанут.",
+                "Закрепление дисциплин")) return;
+
+        busy = true;
+        message = null;
+        try
+        {
+            var response = await Http.PostAsJsonAsync("api/discipline-assignments",
+                new { employeeId = person.Id, disciplineIds = rows.Select(r => r.Id).ToList() });
+            if (response.IsSuccessStatusCode && await response.Content.ReadFromJsonAsync<AssignmentSummary>() is { } summary)
+            {
+                (messageIsError, message) = (false, SummaryText(person, summary));
+                selected.Clear();
+                await ReloadAsync();
+            }
+            else
+                (messageIsError, message) = (true, await ProblemTextAsync(response, "Закрепление не выполнено"));
+        }
+        catch (AccessTokenNotAvailableException e)
+        {
+            e.Redirect();
+        }
+        catch (HttpRequestException e) when (ConnectionLoss.Is(e))
+        {
+            LoseConnection();
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private static string SummaryText(DirectoryPerson person, AssignmentSummary summary) =>
+        summary.Added == 0
+            ? $"{person.ShortName}: все выбранные дисциплины уже были закреплены."
+            : $"{person.ShortName}: закреплено дисциплин — {summary.Added}" +
+              (summary.AlreadyAssigned > 0 ? $", уже были закреплены — {summary.AlreadyAssigned}." : ".");
+
+    private async Task UnassignAsync(DisciplineRow row, AssigneeItem assignee)
+    {
+        if (!await confirm.AskAsync($"Снять закрепление {assignee.Name} с дисциплины {row.Code} «{row.Name}»? Чужие документы дисциплины " +
+                "он больше не увидит и не сможет создавать по ней новые; свои документы остаются при нём.", "Снятие закрепления", danger: true)) return;
+
+        busy = true;
+        message = null;
+        try
+        {
+            var response = await Http.DeleteAsync($"api/discipline-assignments/{assignee.Id}");
+            if (response.IsSuccessStatusCode)
+                (messageIsError, message) = (false, $"Закрепление снято: {assignee.Name} — {row.Code}.");
+            else
+                (messageIsError, message) = (true, await ProblemTextAsync(response, "Закрепление не снято"));
+            await ReloadAsync();
+        }
+        catch (AccessTokenNotAvailableException e)
+        {
+            e.Redirect();
+        }
+        catch (HttpRequestException e) when (ConnectionLoss.Is(e))
+        {
+            LoseConnection();
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private static string Describe(DirectoryPerson p) =>
+        string.Join(", ", new[] { p.ShortName, p.Position, p.Department }.Where(s => !string.IsNullOrEmpty(s)));
+
+    // Заголовок и пояснение отказа API — одной строкой; без тела — код ответа.
+    private static async Task<string> ProblemTextAsync(HttpResponseMessage response, string fallback)
+    {
+        try
+        {
+            var problem = await response.Content.ReadFromJsonAsync<DocumentProblem>();
+            if (problem?.Title is { } title) return problem.Detail is { } detail ? $"{title}. {detail}" : title;
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            // Тела нет или оно не ProblemDetails — остаётся код ответа.
+        }
+        return $"{fallback} (код ответа {(int)response.StatusCode}).";
+    }
+
+    // Сервер остановлен или не отвечает при открытой странице: причина — в сообщении, прежняя таблица остаётся на экране.
+    private void LoseConnection() => (offline, messageIsError, message) = (true, true, ConnectionLoss.Message);
+
+    private void RestoreConnection()
+    {
+        if (!offline) return;
+        offline = false;
+        if (message == ConnectionLoss.Message) message = null;
+    }
+}

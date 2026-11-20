@@ -967,6 +967,45 @@ namespace RpdFos.Core.Migrations
                     b.ToTable("disciplines", (string)null);
                 });
 
+            modelBuilder.Entity("RpdFos.Core.Data.Entities.DisciplineAssignment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("AssignedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("assigned_at");
+
+                    b.Property<Guid>("AssignedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("assigned_by");
+
+                    b.Property<Guid>("DisciplineId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("discipline_id");
+
+                    b.Property<Guid>("EmployeeId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("employee_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_discipline_assignments");
+
+                    b.HasIndex("AssignedBy")
+                        .HasDatabaseName("ix_discipline_assignments_assigned_by");
+
+                    b.HasIndex("EmployeeId")
+                        .HasDatabaseName("ix_discipline_assignments_employee_id");
+
+                    b.HasIndex("DisciplineId", "EmployeeId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_discipline_assignments_discipline_id_employee_id");
+
+                    b.ToTable("discipline_assignments", (string)null);
+                });
+
             modelBuilder.Entity("RpdFos.Core.Data.Entities.DisciplineSemesterDetails", b =>
                 {
                     b.Property<Guid>("Id")
@@ -2549,6 +2588,30 @@ namespace RpdFos.Core.Migrations
                         .HasConstraintName("fk_disciplines_disciplines_parent_id");
 
                     b.Navigation("Parent");
+                });
+
+            modelBuilder.Entity("RpdFos.Core.Data.Entities.DisciplineAssignment", b =>
+                {
+                    b.HasOne("RpdFos.Core.Data.Entities.Employee", null)
+                        .WithMany()
+                        .HasForeignKey("AssignedBy")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_discipline_assignments_employees_assigned_by");
+
+                    b.HasOne("RpdFos.Core.Data.Entities.Discipline", null)
+                        .WithMany()
+                        .HasForeignKey("DisciplineId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_discipline_assignments_disciplines_discipline_id");
+
+                    b.HasOne("RpdFos.Core.Data.Entities.Employee", null)
+                        .WithMany()
+                        .HasForeignKey("EmployeeId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_discipline_assignments_employees_employee_id");
                 });
 
             modelBuilder.Entity("RpdFos.Core.Data.Entities.DisciplineSemesterDetails", b =>

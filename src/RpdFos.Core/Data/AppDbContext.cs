@@ -18,6 +18,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<DocumentStatusChange> DocumentStatusHistory => Set<DocumentStatusChange>();
     public DbSet<DocumentComment> DocumentComments => Set<DocumentComment>();
     public DbSet<DocumentSignature> DocumentSignatures => Set<DocumentSignature>();
+    public DbSet<DisciplineAssignment> DisciplineAssignments => Set<DisciplineAssignment>();
     public DbSet<GenerationTask> GenerationTasks => Set<GenerationTask>();
     public DbSet<GeneratedFile> GeneratedFiles => Set<GeneratedFile>();
 

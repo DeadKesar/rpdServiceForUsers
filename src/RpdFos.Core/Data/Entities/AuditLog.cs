@@ -46,6 +46,13 @@ public static class AuditEvents
     public const string DocumentArchived = "document.archived", DocumentTransferred = "document.transferred";
 
     /// <summary>
+    /// Закрепление дисциплины за сотрудником и его снятие (этап 7, A10; NFR-SEC-07): объект — дисциплина, в содержимом
+    /// <c>{ "employee" }</c> — закреплённый. Закрепление при передаче документа (A9) — ещё <c>"document"</c>: документ, из-за
+    /// которого оно появилось.
+    /// </summary>
+    public const string DisciplineAssigned = "discipline.assigned", DisciplineUnassigned = "discipline.unassigned";
+
+    /// <summary>
     /// Согласование (этап 6, часть B): старт круга — <c>{ "seats": [{ "role", "resolver", "signatory" }] }</c>, отметки
     /// согласующих — <c>{ "role" }</c> и <c>{ "role", "comment" }</c>, назначение или замена подписанта —
     /// <c>{ "role", "before", "after" }</c>. По ним виден и прежний круг: строки согласования новый круг сбрасывает.
@@ -64,5 +71,5 @@ public static class AuditEvents
 
 public static class AuditEntities
 {
-    public const string Document = "document", Employee = "employee", MatrixRow = "matrix_row";
+    public const string Document = "document", Employee = "employee", MatrixRow = "matrix_row", Discipline = "discipline";
 }

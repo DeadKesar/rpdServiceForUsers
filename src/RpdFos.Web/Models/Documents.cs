@@ -12,7 +12,10 @@ public sealed record DocumentListItem(Guid Id, string Title, string Type, string
 /// <summary>Кто и когда вернул документ с согласования на проверку.</summary>
 public sealed record ReturnedFromApproval(string By, DateTimeOffset At);
 
-public sealed record DisciplineOption(Guid Id, string Code, string Name, Guid? DocumentId, string? DocumentAuthor, bool CanOpen);
+/// <param name="AssignedTo">За кем дисциплина закреплена (этап 7, A10); null — ни за кем.</param>
+/// <param name="CanCreate">Пользователь может создать документ: закреплений нет, он закреплён, это методист или администратор.</param>
+public sealed record DisciplineOption(Guid Id, string Code, string Name, Guid? DocumentId, string? DocumentAuthor, bool CanOpen,
+    string? AssignedTo = null, bool CanCreate = true);
 
 public sealed record DocumentItem(Guid Id, string Type, string Title, string Status, string StatusTitle, bool IsOutdated, int Version,
     Guid TemplateId, int TemplateRevision, Guid DisciplineId, string DisciplineCode, string DisciplineName, Guid AuthorId,

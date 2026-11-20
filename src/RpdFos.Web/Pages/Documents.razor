@@ -96,12 +96,52 @@ else
     </div>
 }
 
+@* «Документы моих дисциплин» (этап 7, A10; решение 5): чужие документы дисциплин, закреплённых за пользователем, — для
+   чтения. Списка нет, пока закреплений нет; методисту и администратору он не нужен: основной список у них — все документы. *@
+@if (assignedItems is { Count: > 0 })
+{
+    <h2 class="h4 mt-4">Документы моих дисциплин</h2>
+    <p class="text-muted">Дисциплины закреплены за вами методистом: документы по ним открыты для чтения, правит их автор.</p>
+    <div class="table-responsive">
+    <table class="table table-hover">
+        <thead>
+            <tr><th>Дисциплина</th><th>Тип</th><th>Статус</th><th>Изменён</th><th>Автор</th></tr>
+        </thead>
+        <tbody>
+            @foreach (var d in assignedItems)
+            {
+                <tr role="button" @onclick="@(() => Navigation.NavigateTo($"documents/{d.Id}"))">
+                    <td>
+                        <span class="text-muted">@d.DisciplineCode</span> @d.DisciplineName
+                        @if (d.Plan is { } plan)
+                        {
+                            <div class="small text-muted">@plan.DirectionCode, набор @plan.Year, версия плана @plan.Version</div>
+                        }
+                    </td>
+                    <td>@(d.Type == "fos" ? "ФОС" : "РПД")</td>
+                    <td>
+                        @d.StatusTitle
+                        @if (d.IsOutdated)
+                        {
+                            <span class="badge text-bg-warning ms-1" title="Вышла новая редакция шаблона">устарел</span>
+                        }
+                    </td>
+                    <td class="text-nowrap">@d.UpdatedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</td>
+                    <td>@d.AuthorName</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+    </div>
+}
+
 @code {
     private ConfirmDialog confirm = default!;
     private bool deleting;
     private string? message;
     private bool messageIsError;
     private List<DocumentListItem>? items;
+    private List<DocumentListItem>? assignedItems;
 
     // Удаление своего черновика (этап 6, A5): мягкое, по дисциплине затем можно создать новый документ.
     private async Task DeleteAsync(DocumentListItem d)
@@ -154,9 +194,11 @@ else
         var query = new List<string>();
         if (status.Length > 0) query.Add($"status={status}");
         if (planId.Length > 0) query.Add($"planId={planId}");
+        var filter = query.Count > 0 ? "?" + string.Join("&", query) : "";
         try
         {
-            items = await Http.GetFromJsonAsync<List<DocumentListItem>>("api/documents" + (query.Count > 0 ? "?" + string.Join("&", query) : ""));
+            items = await Http.GetFromJsonAsync<List<DocumentListItem>>("api/documents" + filter);
+            assignedItems = await Http.GetFromJsonAsync<List<DocumentListItem>>("api/documents/assigned" + filter);
         }
         catch (AccessTokenNotAvailableException e)
         {

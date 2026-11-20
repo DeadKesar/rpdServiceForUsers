@@ -18,7 +18,9 @@ namespace RpdFos.Api.Features.Documents;
 /// замечания, возврат и приём. Приём запускает согласование — его действия в срезе «Согласование», а состояние
 /// приходит вместе с документом. Обратные переходы — возврат согласованного документа на исправление (методист) и
 /// принудительная смена статуса (администратор), этап 7, A8. Архив (автор, методист, администратор) и передача документа
-/// другому автору (методист, администратор), этап 7, A9. Правила, предзаполнение и проверки — в ядре
+/// другому автору (методист, администратор), этап 7, A9. Закреплённый за дисциплиной видит чужие документы по ней только для
+/// чтения, и они же — вторым списком «Документы моих дисциплин»; у дисциплины с закреплениями создают документы закреплённые
+/// преподаватели, этап 7, A10. Правила, предзаполнение и проверки — в ядре
 /// (<see cref="DocumentCreation"/>, <see cref="DocumentEditing"/>, <see cref="DocumentReview"/>,
 /// <see cref="DocumentApproval"/>, <see cref="DocumentReopening"/>, <see cref="DocumentArchiving"/>,
 /// <see cref="DocumentTransfer"/>, <see cref="DocumentTransitions"/>).
@@ -31,6 +33,7 @@ public class DocumentsModule : ICarterModule
 
         g.MapGet("/", List);
         g.MapGet("/disciplines", Disciplines).RequireAuthorization(Policies.DocumentAuthors);
+        g.MapGet("/assigned", Assigned);
         g.MapGet("/{id:guid}", Get);
         g.MapPost("/", Create).RequireAuthorization(Policies.DocumentAuthors);
         g.MapPatch("/{id:guid}/sections/{section}", UpdateSection).RequireAuthorization(Policies.DocumentAuthors);
@@ -68,6 +71,26 @@ public class DocumentsModule : ICarterModule
         var query = db.Documents.AsNoTracking();
         var me = await directory.FindIdAsync(http.User, ct);
         if (!SeesAll(http.User)) query = query.Where(d => d.AuthorId == me);
+        return await ListAsync(query, status, planId, me, SeesAll(http.User), db, ct);
+    }
+
+    /// <summary>
+    /// «Документы моих дисциплин» (этап 7, A10; решение 5): чужие документы дисциплин, закреплённых за пользователем, — для
+    /// чтения, с теми же фильтрами, что и основной список. Свои документы в основном списке. Методист и администратор видят
+    /// все документы уже в нём, поэтому здесь для них пусто, а не дубль.
+    /// </summary>
+    private static async Task<List<DocumentListItem>> Assigned(
+        string? status, Guid? planId, HttpContext http, AppDbContext db, DirectoryAccounts directory, CancellationToken ct)
+    {
+        if (SeesAll(http.User) || await directory.FindIdAsync(http.User, ct) is not Guid me) return [];
+        var query = db.Documents.AsNoTracking().Where(d => d.AuthorId != me &&
+            db.DisciplineAssignments.Any(a => a.EmployeeId == me && a.DisciplineId == d.DisciplineId));
+        return await ListAsync(query, status, planId, me, seesAll: false, db, ct);
+    }
+
+    private static async Task<List<DocumentListItem>> ListAsync(
+        IQueryable<Document> query, string? status, Guid? planId, Guid? me, bool seesAll, AppDbContext db, CancellationToken ct)
+    {
         if (!string.IsNullOrEmpty(status)) query = query.Where(d => d.Status == status);
 
         var rows = await (
@@ -82,7 +105,7 @@ public class DocumentsModule : ICarterModule
         var plans = await PlanItem.Query(db).Where(p => planIds.Contains(p.Id)).ToDictionaryAsync(p => p.Id, ct);
         // Пометка «с согласования» — тем, кто разбирает возвраты (методист и администратор): так же, как плашка в
         // документе, автору она не нужна (этап 6.1, C4).
-        var returned = SeesAll(http.User)
+        var returned = seesAll
             ? await ReturnsFromApprovalAsync(
                 db, rows.Where(r => r.Document.Status == DocumentStatuses.UnderReview).Select(r => r.Document.Id).ToList(), ct)
             : [];
@@ -145,16 +168,35 @@ public class DocumentsModule : ICarterModule
         var me = await directory.FindIdAsync(http.User, ct);
         var seesAll = SeesAll(http.User);
 
-        return Results.Ok(disciplines.Select(d => existing.TryGetValue(d.Id, out var doc)
-            ? new DisciplineOption(d.Id, d.Code, d.Name, doc.Id, doc.ShortName, seesAll || doc.AuthorId == me)
-            : new DisciplineOption(d.Id, d.Code, d.Name, null, null, false)).ToList());
+        // Закрепления дисциплин плана (этап 7, A10): за кем она закреплена, можно ли пользователю создать документ и открыть
+        // чужой. Создают закреплённые преподаватели; методист и администратор — по любой дисциплине (как в самом создании).
+        var holders = (await (
+                    from a in db.DisciplineAssignments.AsNoTracking()
+                    join x in db.Disciplines on a.DisciplineId equals x.Id
+                    join e in db.Employees on a.EmployeeId equals e.Id
+                    where x.CurriculumPlanId == planId
+                    orderby e.ShortName
+                    select new { a.DisciplineId, Holder = new AssignmentHolder(e.Id, e.ShortName) })
+                .ToListAsync(ct))
+            .GroupBy(x => x.DisciplineId).ToDictionary(g => g.Key, g => g.Select(x => x.Holder).ToList());
+
+        return Results.Ok(disciplines.Select(d =>
+        {
+            var assigned = holders.GetValueOrDefault(d.Id);
+            var isHolder = me is Guid employeeId && assigned?.Any(h => h.EmployeeId == employeeId) == true;
+            var (assignedTo, canCreate) = (assigned is null ? null : DisciplineAssignments.Names(assigned), seesAll || assigned is null || isHolder);
+            return existing.TryGetValue(d.Id, out var doc)
+                ? new DisciplineOption(d.Id, d.Code, d.Name, doc.Id, doc.ShortName, seesAll || doc.AuthorId == me || isHolder, assignedTo, canCreate)
+                : new DisciplineOption(d.Id, d.Code, d.Name, null, null, false, assignedTo, canCreate);
+        }).ToList());
     }
 
     private static async Task<IResult> Get(
         Guid id, HttpContext http, AppDbContext db, DirectoryAccounts directory, IDocumentValidator validator,
-        ValidationRuleSet rules, DocumentTypeRegistry registry, DocumentApproval approval, CancellationToken ct)
+        ValidationRuleSet rules, DocumentTypeRegistry registry, DocumentApproval approval, DisciplineAssignments assignments,
+        CancellationToken ct)
     {
-        var (document, viewer, refusal) = await VisibleDocumentAsync(id, http, db, directory, approval, ct);
+        var (document, viewer, refusal) = await VisibleDocumentAsync(id, http, db, directory, approval, assignments, ct);
         if (refusal is not null) return refusal;
         return Results.Ok(await DetailsAsync(document!, viewer!, db, validator, rules, registry, approval, ct));
     }
@@ -168,7 +210,8 @@ public class DocumentsModule : ICarterModule
         var authorId = await directory.FindIdAsync(http.User, ct);
         if (authorId is null) return NoDirectoryRecord();
 
-        var result = await creation.CreateAsync(rq.TemplateId, rq.DisciplineId, authorId.Value, ct);
+        // Закрепления дисциплин ограничивают преподавателей; методист и администратор создают «за кафедру» (этап 7, A10).
+        var result = await creation.CreateAsync(rq.TemplateId, rq.DisciplineId, authorId.Value, bypassAssignments: IsCorrector(http.User), ct);
         return result switch
         {
             { Document: { } document } => Results.Created($"/api/documents/{document.Id}",
@@ -182,6 +225,9 @@ public class DocumentsModule : ICarterModule
                 {
                     ["documentId"] = result.ExistingId, ["location"] = $"/api/documents/{result.ExistingId}"
                 }),
+            // Доступ, а не данные запроса: дисциплину закрепили за другими преподавателями (этап 7, A10).
+            { Problem: DocumentCreationProblem.DisciplineAssigned } => Results.Problem(statusCode: StatusCodes.Status403Forbidden,
+                title: "Дисциплина закреплена", detail: result.Detail),
             _ => Results.Problem(statusCode: StatusCodes.Status422UnprocessableEntity,
                 title: result.Problem switch
                 {
@@ -521,9 +567,10 @@ public class DocumentsModule : ICarterModule
 
     /// <summary>Замечания к документу — всем, кто его видит: от старых к новым.</summary>
     private static async Task<IResult> Comments(
-        Guid id, HttpContext http, AppDbContext db, DirectoryAccounts directory, DocumentApproval approval, CancellationToken ct)
+        Guid id, HttpContext http, AppDbContext db, DirectoryAccounts directory, DocumentApproval approval,
+        DisciplineAssignments assignments, CancellationToken ct)
     {
-        var (_, _, refusal) = await VisibleDocumentAsync(id, http, db, directory, approval, ct);
+        var (_, _, refusal) = await VisibleDocumentAsync(id, http, db, directory, approval, assignments, ct);
         if (refusal is not null) return refusal;
         return Results.Ok(await CommentItem.Query(db, db.DocumentComments.Where(c => c.DocumentId == id)).ToListAsync(ct));
     }
@@ -608,16 +655,23 @@ public class DocumentsModule : ICarterModule
         return Results.Ok(await CommentItem.Query(db, db.DocumentComments.Where(c => c.Id == commentId)).SingleAsync(ct));
     }
 
-    // Документ видят автор, методист, администратор и согласующий со строкой согласования в нём (этап 6, B1).
+    // Документ видят автор, методист, администратор, согласующий со строкой согласования в нём (этап 6, B1) и сотрудник,
+    // за которым закреплена дисциплина документа (этап 7, A10). Закреплённый — последним: запрос к базе только тем, кто
+    // иначе документа не видит.
     private static async Task<(Document? Document, DocumentViewer? Viewer, IResult? Refusal)> VisibleDocumentAsync(
-        Guid id, HttpContext http, AppDbContext db, DirectoryAccounts directory, DocumentApproval approval, CancellationToken ct)
+        Guid id, HttpContext http, AppDbContext db, DirectoryAccounts directory, DocumentApproval approval,
+        DisciplineAssignments assignments, CancellationToken ct)
     {
         var document = await db.Documents.AsNoTracking().SingleOrDefaultAsync(d => d.Id == id, ct);
         if (document is null) return (null, null, NotFound());
-        var viewer = await DocumentViewer.OfAsync(http.User, await directory.FindIdAsync(http.User, ct), document, approval, ct);
+        var me = await directory.FindIdAsync(http.User, ct);
+        var viewer = await DocumentViewer.OfAsync(http.User, me, document, approval, ct);
+        if (!viewer.Sees && me is Guid employeeId && await assignments.IsAssignedAsync(document.DisciplineId, employeeId, ct))
+            viewer = viewer with { IsAssigned = true };
         if (!viewer.Sees)
             return (null, null, Results.Problem(statusCode: StatusCodes.Status403Forbidden, title: "Чужой документ",
-                detail: "Документ видят его автор, методист, администратор и назначенные согласующие."));
+                detail: "Документ видят его автор, методист, администратор, назначенные согласующие и сотрудники, " +
+                        "за которыми закреплена дисциплина."));
         return (document, viewer, null);
     }
 
@@ -835,8 +889,14 @@ public record DocumentListItem(
 /// <summary>Кто и когда вернул документ с согласования на проверку: пометка «с согласования» в очереди «Проверка».</summary>
 public record ReturnedFromApproval(string By, DateTimeOffset At);
 
-/// <summary>Дисциплина плана для создания документа; есть документ — ссылка на него, если он доступен пользователю.</summary>
-public record DisciplineOption(Guid Id, string Code, string Name, Guid? DocumentId, string? DocumentAuthor, bool CanOpen);
+/// <summary>
+/// Дисциплина плана для создания документа; есть документ — ссылка на него, если он доступен пользователю.
+/// <paramref name="AssignedTo"/> — за кем дисциплина закреплена (этап 7, A10; null — ни за кем), <paramref name="CanCreate"/> —
+/// может ли создать документ пользователь: закреплений нет, он закреплён или это методист или администратор.
+/// </summary>
+public record DisciplineOption(
+    Guid Id, string Code, string Name, Guid? DocumentId, string? DocumentAuthor, bool CanOpen, string? AssignedTo = null,
+    bool CanCreate = true);
 
 public record DocumentItem(
     Guid Id, string Type, string Title, string Status, string StatusTitle, bool IsOutdated, int Version, Guid TemplateId,

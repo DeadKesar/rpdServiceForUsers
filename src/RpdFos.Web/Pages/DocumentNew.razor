@@ -56,7 +56,14 @@
             {
                 <tr>
                     <td>@d.Code</td>
-                    <td>@d.Name</td>
+                    <td>
+                        @d.Name
+                        @* Закрепление дисциплин (этап 7, A10): у дисциплины с закреплениями документы создают закреплённые. *@
+                        @if (d.AssignedTo is { } holders)
+                        {
+                            <div class="small text-muted">Закреплена за: @holders</div>
+                        }
+                    </td>
                     <td class="text-end">
                         @if (d.DocumentId is Guid documentId)
                         {
@@ -69,9 +76,13 @@
                                 <span class="small text-muted">РПД уже есть (автор — @d.DocumentAuthor)</span>
                             }
                         }
-                        else
+                        else if (d.CanCreate)
                         {
                             <button class="btn btn-sm btn-primary" disabled="@busy" @onclick="() => CreateAsync(d)">Создать РПД</button>
+                        }
+                        else
+                        {
+                            <span class="small text-muted">Создают закреплённые преподаватели</span>
                         }
                     </td>
                 </tr>

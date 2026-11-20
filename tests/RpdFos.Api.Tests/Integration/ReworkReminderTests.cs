@@ -338,8 +338,8 @@ public class ReworkReminderTests(DatabaseFixture app)
         var job = new ReworkReminders(
             services.GetRequiredService<AppDbContext>(), services.GetRequiredService<DocumentNotifications>(),
             services.GetRequiredService<SignatoryResolution>(), services.GetRequiredService<DirectoryAccounts>(),
-            services.GetRequiredService<DocumentApproval>(), Options.Create(terms ?? new RemindersSettings()),
-            new TestClock(now, Zone), NullLogger<ReworkReminders>.Instance);
+            services.GetRequiredService<DocumentApproval>(), services.GetRequiredService<DisciplineAssignments>(),
+            Options.Create(terms ?? new RemindersSettings()), new TestClock(now, Zone), NullLogger<ReworkReminders>.Instance);
         return await job.RunAsync(CancellationToken.None);
     }
 

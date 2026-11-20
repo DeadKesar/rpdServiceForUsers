@@ -27,7 +27,8 @@ namespace RpdFos.Core.Documents;
 /// напоминаний о доработке (этап 7, A6) — <c>document_id</c>, <c>since</c> (с какого момента документ на доработке),
 /// <c>deadline</c> (срок), <c>days</c> (срок доработки в днях) и <c>author</c>; у принудительной смены статуса (этап 7, A8) —
 /// <c>from</c> и <c>to</c> (статусы); у передачи документа (этап 7, A9) — <c>new_author</c> (прежнему автору) и
-/// <c>previous_author</c> (новому), причина — в <c>comment</c>. В фразах нет родовых форм («Принят»,
+/// <c>previous_author</c> (новому), причина — в <c>comment</c>. Уведомления о закреплении дисциплин (этап 7, A10) не о документе:
+/// в них нет <c>title</c> и ссылки, есть <c>plan</c> и <c>disciplines</c> (код и название). В фразах нет родовых форм («Принят»,
 /// «Согласующий: …»): пол автора и методиста системе неизвестен.
 /// </summary>
 public sealed class DocumentNotifications(AppDbContext db, DirectoryAccounts directory)
@@ -201,6 +202,59 @@ public sealed class DocumentNotifications(AppDbContext db, DirectoryAccounts dir
             new JsonObject { ["by"] = who, ["comment"] = reason, ["previous_author"] = oldAuthor }, ct);
     }
 
+    // Сколько дисциплин названо в уведомлении о закреплении; остальные — числом.
+    private const int ShownDisciplines = 3;
+
+    /// <summary>
+    /// Сотруднику: за ним закреплены дисциплины (этап 7, A10; решение 5). Одно уведомление на учебный план действия (обычно
+    /// он один), а не на дисциплину: методист закрепляет за кафедрой десятки строк сразу. В тексте — первые три дисциплины,
+    /// сколько осталось, план и кто закрепил. Ссылки на документ нет: документа по дисциплине может ещё не быть.
+    /// Закрепившему себя уведомления нет.
+    /// </summary>
+    public async Task DisciplinesAssignedAsync(
+        IReadOnlyList<AssignedDiscipline> disciplines, Guid employee, Guid by, string role, DateTimeOffset at,
+        CancellationToken ct = default)
+    {
+        var to = Others([employee], by);
+        if (to.Count == 0 || disciplines.Count == 0) return;
+        var who = await NameAsync(by, ct);
+        foreach (var plan in disciplines.GroupBy(d => d.PlanId))
+        {
+            var list = plan.ToList();
+            var named = string.Join("; ", list.Take(ShownDisciplines).Select(Describe));
+            AddWithoutDocument(NotificationEvents.DisciplineAssigned, to, at,
+                Text(list.Count == 1 ? "Вам закреплена дисциплина" : $"Вам закреплены дисциплины ({list.Count})",
+                    list.Count > ShownDisciplines ? $"{named} и ещё {list.Count - ShownDisciplines}" : named,
+                    $"Учебный план: {list[0].PlanTitle}", $"{AppRoles.Title(role)}: {who}"),
+                new JsonObject
+                {
+                    ["by"] = who, ["plan"] = list[0].PlanTitle,
+                    ["disciplines"] = new JsonArray(list.Select(d => (JsonNode)new JsonObject { ["code"] = d.Code, ["name"] = d.Name }).ToArray())
+                });
+        }
+    }
+
+    /// <summary>
+    /// Сотруднику: закрепление дисциплины снято (этап 7, A10) — документы дисциплины ему больше не открыты. Снявшему
+    /// закрепление с себя уведомления нет.
+    /// </summary>
+    public async Task DisciplineUnassignedAsync(
+        AssignedDiscipline discipline, Guid employee, Guid by, string role, DateTimeOffset at, CancellationToken ct = default)
+    {
+        var to = Others([employee], by);
+        if (to.Count == 0) return;
+        var who = await NameAsync(by, ct);
+        AddWithoutDocument(NotificationEvents.DisciplineUnassigned, to, at,
+            Text("Закрепление дисциплины снято", Describe(discipline), $"Учебный план: {discipline.PlanTitle}", $"{AppRoles.Title(role)}: {who}"),
+            new JsonObject
+            {
+                ["by"] = who, ["plan"] = discipline.PlanTitle,
+                ["disciplines"] = new JsonArray(new JsonObject { ["code"] = discipline.Code, ["name"] = discipline.Name })
+            });
+    }
+
+    private static string Describe(AssignedDiscipline d) => $"{d.Code} «{d.Name}»";
+
     /// <summary>
     /// Методистам: согласующий вернул документ с согласования; в тексте — кто, сколько замечаний к полям он оставил
     /// (этап 7, A2; без замечаний — не упоминается) и комментарий.
@@ -368,13 +422,26 @@ public sealed class DocumentNotifications(AppDbContext db, DirectoryAccounts dir
         // Параметр без значения (нет комментария) в payload не пишется.
         foreach (var (key, value) in parameters)
             if (value is not null) payload[key] = value.DeepClone();
-        var json = payload.ToJsonString(Json);
+        Insert(eventType, linked ? document.Id : null, recipients, at, payload);
+    }
 
+    // Уведомление не о документе (закрепление дисциплин, этап 7, A10): без документа в payload и без ссылки.
+    private void AddWithoutDocument(
+        string eventType, IReadOnlyList<Guid> recipients, DateTimeOffset at, Phrase phrase, JsonObject parameters)
+    {
+        var payload = new JsonObject { ["text"] = phrase.Text, ["subject"] = phrase.Headline };
+        foreach (var (key, value) in parameters)
+            if (value is not null) payload[key] = value.DeepClone();
+        Insert(eventType, null, recipients, at, payload);
+    }
+
+    private void Insert(string eventType, Guid? documentId, IReadOnlyList<Guid> recipients, DateTimeOffset at, JsonObject payload)
+    {
+        var json = payload.ToJsonString(Json);
         foreach (var recipient in recipients)
             db.Notifications.Add(new Notification
             {
-                RecipientId = recipient, EventType = eventType, DocumentId = linked ? document.Id : null, Payload = json,
-                CreatedAt = at
+                RecipientId = recipient, EventType = eventType, DocumentId = documentId, Payload = json, CreatedAt = at
             });
     }
 

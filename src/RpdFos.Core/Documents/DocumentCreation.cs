@@ -11,7 +11,10 @@ namespace RpdFos.Core.Documents;
 /// <summary>Почему документ не создан.</summary>
 public enum DocumentCreationProblem
 {
-    TemplateNotFound, TemplateNotPublished, TypeNotSupported, DisciplineNotFound, DisciplineNotInPlan, NotADiscipline, Duplicate
+    TemplateNotFound, TemplateNotPublished, TypeNotSupported, DisciplineNotFound, DisciplineNotInPlan, NotADiscipline, Duplicate,
+
+    /// <summary>Дисциплина закреплена за другими преподавателями (этап 7, A10): автору создавать по ней нельзя — 403.</summary>
+    DisciplineAssigned
 }
 
 public sealed record DocumentCreationResult(Document? Document, DocumentCreationProblem? Problem = null, string? Detail = null,
@@ -43,11 +46,17 @@ public static class DocumentRules
 /// Создание документа по опубликованному шаблону для дисциплины его плана: проверки, предзаполнение, нормализованные
 /// таблицы и первая запись истории статусов — одним сохранением.
 /// </summary>
-public sealed class DocumentCreation(AppDbContext db, DocumentTypeRegistry registry, DocumentProjections projections, TimeProvider clock)
+public sealed class DocumentCreation(
+    AppDbContext db, DocumentTypeRegistry registry, DocumentProjections projections, DisciplineAssignments assignments, TimeProvider clock)
 {
     private static readonly JsonSerializerOptions Json = new() { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
 
-    public async Task<DocumentCreationResult> CreateAsync(Guid templateId, Guid disciplineId, Guid authorId, CancellationToken ct = default)
+    /// <param name="bypassAssignments">
+    /// Создаёт методист или администратор — «за кафедру»: закрепления дисциплин (этап 7, A10) для них не ограничение, ограничены
+    /// ими преподаватели. Закрепления определяют, кто из преподавателей создаёт документы дисциплины, а не кто их видит.
+    /// </param>
+    public async Task<DocumentCreationResult> CreateAsync(
+        Guid templateId, Guid disciplineId, Guid authorId, bool bypassAssignments = false, CancellationToken ct = default)
     {
         var template = await db.DocumentTemplates.AsNoTracking().SingleOrDefaultAsync(t => t.Id == templateId, ct);
         if (template is null) return new(null, DocumentCreationProblem.TemplateNotFound);
@@ -63,6 +72,12 @@ public sealed class DocumentCreation(AppDbContext db, DocumentTypeRegistry regis
             return new(null, DocumentCreationProblem.DisciplineNotInPlan, "Дисциплина не из учебного плана шаблона.");
         if (DocumentRules.WhyNoDocument(facts.Discipline) is { } reason)
             return new(null, DocumentCreationProblem.NotADiscipline, reason);
+
+        // Закрепления — до проверки «документ уже есть»: чужому преподавателю закреплённая дисциплина отвечает отказом доступа,
+        // а не рассказом о документе, к которому у него нет доступа (как «в архив» чужого документа, A9).
+        if (!bypassAssignments && await assignments.HoldersAsync(disciplineId, ct) is { Count: > 0 } holders &&
+            holders.All(h => h.EmployeeId != authorId))
+            return new(null, DocumentCreationProblem.DisciplineAssigned, DisciplineAssignments.Refusal(holders));
 
         // Один неудалённый документ на дисциплину и линию редакций шаблона. Архивный дисциплину не занимает (этап 7, A9,
         // решение 3): по ней создаётся новый. Согласованный занимает её, пока новый нельзя создать на его основе (A11).
