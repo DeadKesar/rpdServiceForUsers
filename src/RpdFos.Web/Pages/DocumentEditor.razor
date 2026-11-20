@@ -76,6 +76,14 @@ else
         {
             <button class="btn btn-outline-success" disabled="@busy" @onclick="() => taking = !taking">Взять на проверку</button>
         }
+        @if (details.Actions.ReturnForCorrection)
+        {
+            <button class="btn btn-outline-warning" disabled="@busy" @onclick="() => correcting = !correcting">Вернуть на исправление</button>
+        }
+        @if (details.Actions.ForceTargets is { Count: > 0 })
+        {
+            <button class="btn btn-outline-danger" disabled="@busy" @onclick="() => forcing = !forcing">Сменить статус</button>
+        }
         @if (details.Actions.Approve)
         {
             <button class="btn btn-success" disabled="@busy" @onclick="ApproveAsync">Согласовать</button>
@@ -105,7 +113,9 @@ else
         <PrintPanel DocumentId="Id" BeforePrint="SaveSectionAsync" />
     }
 
-    @if (details.Approval is { } approval)
+    @* Согласованный документ без электронных мест, вернувшийся на исправление, мест не имеет: панель говорила бы о
+       согласовании, которого не было, — остаётся одна плашка ниже. *@
+    @if (details.Approval is { } approval && (approval.Seats.Count > 0 || approval.Corrected is null))
     {
         <ApprovalPanel DocumentId="Id" State="approval" Status="@d.Status" Busy="@(busy || conflict)" BeforeAction="SaveSectionAsync"
                        OnStart="StartApprovalAsync" OnChanged="OnApprovalChangedAsync" />
@@ -142,6 +152,52 @@ else
                 <div class="mt-2 d-flex gap-2">
                     <button class="btn btn-sm btn-success" disabled="@(busy || string.IsNullOrWhiteSpace(takeReason))" @onclick="TakeAsync">Взять</button>
                     <button class="btn btn-sm btn-link" @onclick="() => taking = false">Отмена</button>
+                </div>
+            </div>
+        </div>
+    }
+
+    @* «Вернуть на исправление» (этап 7, A8, решение 2): отмены у возврата нет — согласование придётся пройти заново. *@
+    @if (correcting && details.Actions.ReturnForCorrection)
+    {
+        <div class="card mb-3">
+            <div class="card-body py-2">
+                <div class="small mb-1">
+                    Документ вернётся в «На проверке», время согласования сбросится. Отметки согласующих останутся в журнале аудита;
+                    после нового приёма согласование начнётся заново — для всех согласующих. Автор, согласующие и остальные методисты
+                    получат уведомление.
+                </div>
+                <textarea class="form-control form-control-sm" rows="2" placeholder="Причина (обязательно): попадёт в историю статусов и в уведомление"
+                          @bind="correctionReason" @bind:event="oninput"></textarea>
+                <div class="mt-2 d-flex gap-2">
+                    <button class="btn btn-sm btn-warning" disabled="@(busy || string.IsNullOrWhiteSpace(correctionReason))" @onclick="ReturnForCorrectionAsync">Вернуть</button>
+                    <button class="btn btn-sm btn-link" @onclick="() => correcting = false">Отмена</button>
+                </div>
+            </div>
+        </div>
+    }
+
+    @* «Сменить статус» (этап 7, A8; FR-ADM-04): только назад, для нештатных ситуаций. *@
+    @if (forcing && details.Actions.ForceTargets is { Count: > 0 } forceTargets)
+    {
+        <div class="card mb-3">
+            <div class="card-body py-2">
+                <div class="small mb-1">
+                    Принудительная смена статуса — для нештатных ситуаций, только назад. Переход запишется в историю статусов и журнал
+                    аудита, автор и методисты получат уведомление. С согласования круг прерывается — как при возврате.
+                </div>
+                <select class="form-select form-select-sm mb-2" style="max-width: 320px" aria-label="Новый статус" @bind="forceStatus">
+                    <option value="">Новый статус…</option>
+                    @foreach (var target in forceTargets)
+                    {
+                        <option value="@target.Status">@target.Title</option>
+                    }
+                </select>
+                <textarea class="form-control form-control-sm" rows="2" placeholder="Комментарий (обязательно): что произошло"
+                          @bind="forceComment" @bind:event="oninput"></textarea>
+                <div class="mt-2 d-flex gap-2">
+                    <button class="btn btn-sm btn-danger" disabled="@(busy || string.IsNullOrEmpty(forceStatus) || string.IsNullOrWhiteSpace(forceComment))" @onclick="ForceStatusAsync">Сменить статус</button>
+                    <button class="btn btn-sm btn-link" @onclick="() => forcing = false">Отмена</button>
                 </div>
             </div>
         </div>
@@ -196,10 +252,27 @@ else
         </div>
     }
 
+    @* Возврат согласованного документа на исправление (этап 7, A8) — методисту и администратору: кто, когда, причина. *@
+    @if (details.Approval?.Corrected is { } corrected)
+    {
+        <div class="alert alert-warning py-2">
+            <div class="fw-semibold">Возвращён на исправление</div>
+            <div>@corrected.By, @corrected.At.ToLocalTime().ToString("dd.MM.yyyy HH:mm"): @corrected.Comment</div>
+            @if (details.Actions.Review)
+            {
+                <div class="small mt-1">Исправьте документ сами или оставьте замечание к полю и верните его автору. Новый приём начнёт согласование заново.</div>
+            }
+        </div>
+    }
+
     @if (!details.Editable)
     {
         <div class="alert alert-secondary py-2">
             @ReadOnlyReason(d.Status)
+            @if (details.Actions.ReturnForCorrection)
+            {
+                <span>Чтобы исправить документ, верните его на исправление — согласование придётся пройти заново.</span>
+            }
             @if (details.Actions.CorrectPlan)
             {
                 <span>Исправить можно поля из учебного плана — изменения сохраняются автоматически и записываются в историю.</span>
@@ -397,6 +470,12 @@ else
     private string? takeReason;
     private bool rejecting;
     private string? rejectComment;
+    // Возврат согласованного документа на исправление и принудительная смена статуса (этап 7, A8).
+    private bool correcting;
+    private string? correctionReason;
+    private bool forcing;
+    private string? forceStatus;
+    private string? forceComment;
     // Заголовок плашки конфликта: документ взял на проверку методист (этап 6, A1) — иначе «изменён в другой сессии».
     private string? conflictTitle;
     private const string TakenByReviewer = "Документ взят на проверку методистом";
@@ -459,6 +538,7 @@ else
         (dirty, conflict, copied, fieldErrors, returning, returnComment) = (false, false, null, [], false, null);
         (taking, takeReason, conflictTitle) = (false, null, null);
         (rejecting, rejectComment) = (false, null);
+        (correcting, correctionReason, forcing, forceStatus, forceComment) = (false, null, false, null, null);
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -596,6 +676,27 @@ else
 
     private async Task TakeAsync() =>
         await ChangeStatusAsync("take", new { version, reason = takeReason }, "Документ взят на проверку.");
+
+    // «Вернуть на исправление» (этап 7, A8): согласованный документ уходит методисту на проверку, отметки согласующих
+    // сбрасываются. Отзыва нет — с подтверждением.
+    private async Task ReturnForCorrectionAsync()
+    {
+        if (!await confirm.AskAsync("Согласование документа будет отменено, его придётся пройти заново. Вернуть документ на исправление?",
+                "Возврат на исправление")) return;
+        await ChangeStatusAsync("return-for-correction", new { version, reason = correctionReason },
+            "Документ возвращён на исправление: он снова на проверке.");
+    }
+
+    // «Сменить статус» администратором (этап 7, A8; FR-ADM-04): только назад, комментарий обязателен.
+    private async Task ForceStatusAsync()
+    {
+        var title = details!.Actions.ForceTargets?.FirstOrDefault(t => t.Status == forceStatus)?.Title;
+        if (title is null) return;
+        if (!await confirm.AskAsync($"Перевести документ в статус «{title}»? Переход запишется в историю статусов и журнал аудита.",
+                "Принудительная смена статуса", danger: true)) return;
+        await ChangeStatusAsync("force-status", new { version, status = forceStatus, comment = forceComment },
+            $"Статус изменён принудительно: «{title}».");
+    }
 
     private async Task ReturnAsync()
     {

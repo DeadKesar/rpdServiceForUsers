@@ -25,7 +25,8 @@ namespace RpdFos.Core.Documents;
 /// (число замечаний), <c>seats</c> (места согласования), <c>approval</c> (чем кончился приём); у печати — <c>format</c>,
 /// <c>task_id</c> и <c>reason</c> (причина сбоя), у замены согласующего — <c>signatory</c> (новый согласующий), у
 /// напоминаний о доработке (этап 7, A6) — <c>document_id</c>, <c>since</c> (с какого момента документ на доработке),
-/// <c>deadline</c> (срок), <c>days</c> (срок доработки в днях) и <c>author</c>. В фразах нет родовых форм («Принят»,
+/// <c>deadline</c> (срок), <c>days</c> (срок доработки в днях) и <c>author</c>; у принудительной смены статуса (этап 7, A8) —
+/// <c>from</c> и <c>to</c> (статусы). В фразах нет родовых форм («Принят»,
 /// «Согласующий: …»): пол автора и методиста системе неизвестен.
 /// </summary>
 public sealed class DocumentNotifications(AppDbContext db, DirectoryAccounts directory)
@@ -114,6 +115,41 @@ public sealed class DocumentNotifications(AppDbContext db, DirectoryAccounts dir
         if (to.Count == 0) return;
         await AddAsync(NotificationEvents.Approved, document, to, at,
             Text($"Согласован: {document.Title}"), new JsonObject { ["by"] = await NameAsync(by, ct) }, ct);
+    }
+
+    /// <summary>
+    /// Автору, согласующим последнего круга и остальным методистам: методист вернул согласованный документ на исправление
+    /// (этап 7, A8). Согласующие — по строкам согласования документа: строки прошедшего круга остаются в таблице до
+    /// нового приёма. В тексте — кто и причина.
+    /// </summary>
+    public async Task ReturnedForCorrectionAsync(
+        Document document, Guid by, string reason, DateTimeOffset at, CancellationToken ct = default)
+    {
+        var signatories = await db.DocumentSignatures.AsNoTracking()
+            .Where(s => s.DocumentId == document.Id && s.ResolvedUserId != null).Select(s => s.ResolvedUserId!.Value).ToListAsync(ct);
+        var to = Others((await directory.ActiveHoldersOfAsync(AppRoles.Methodist, ct)).Append(document.AuthorId).Concat(signatories), by);
+        if (to.Count == 0) return;
+        var who = await NameAsync(by, ct);
+        await AddAsync(NotificationEvents.ReturnedForCorrection, document, to, at,
+            Text($"Возвращён на исправление: {document.Title}", $"Методист: {who}", $"Причина: {reason}"),
+            new JsonObject { ["by"] = who, ["comment"] = reason }, ct);
+    }
+
+    /// <summary>
+    /// Автору и методистам: администратор принудительно сменил статус документа (этап 7, A8; FR-ADM-04) — было, стало,
+    /// комментарий. Согласующим не идёт: решать им нечего, круг прерван без их участия.
+    /// </summary>
+    public async Task StatusForcedAsync(
+        Document document, Guid by, string from, string comment, DateTimeOffset at, CancellationToken ct = default)
+    {
+        var to = Others((await directory.ActiveHoldersOfAsync(AppRoles.Methodist, ct)).Append(document.AuthorId), by);
+        if (to.Count == 0) return;
+        var who = await NameAsync(by, ct);
+        await AddAsync(NotificationEvents.StatusForced, document, to, at,
+            Text($"Статус документа изменён принудительно: {document.Title}",
+                $"Было: «{DocumentStatuses.Title(from)}», стало: «{DocumentStatuses.Title(document.Status)}»",
+                $"Администратор: {who}", $"Комментарий: {comment}"),
+            new JsonObject { ["by"] = who, ["comment"] = comment, ["from"] = from, ["to"] = document.Status }, ct);
     }
 
     /// <summary>

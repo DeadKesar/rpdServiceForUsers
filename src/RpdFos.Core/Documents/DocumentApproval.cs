@@ -50,8 +50,11 @@ public sealed record ApprovalSeatState(
 /// <summary>Возврат с согласования: кто, когда, с каким комментарием.</summary>
 public sealed record ApprovalReturn(string? By, DateTimeOffset At, string? Comment);
 
-/// <summary>Круг согласования документа; <see cref="Returned"/> — круг закончился возвратом.</summary>
-public sealed record ApprovalState(IReadOnlyList<ApprovalSeatState> Seats, ApprovalReturn? Returned);
+/// <summary>
+/// Круг согласования документа; <see cref="Returned"/> — круг закончился возвратом с согласования,
+/// <see cref="Corrected"/> — согласованный документ вернули на исправление (этап 7, A8): кто, когда, причина.
+/// </summary>
+public sealed record ApprovalState(IReadOnlyList<ApprovalSeatState> Seats, ApprovalReturn? Returned, ApprovalReturn? Corrected = null);
 
 /// <summary>
 /// Параллельное электронное согласование (UC-07 – UC-09, FR-REV-04…06, FR-REV-13). Приём запускает круг: подписанты
@@ -221,7 +224,12 @@ public sealed class DocumentApproval(
     public async Task<ApprovalState> StateAsync(Document document, CancellationToken ct = default)
     {
         var rows = await db.DocumentSignatures.AsNoTracking().Where(s => s.DocumentId == document.Id).ToListAsync(ct);
-        if (rows.Count == 0) return new([], null);
+        // Плашка «возвращён на исправление» не зависит от строк: возврат оставляет их как есть, а у шаблона без электронных
+        // мест их нет совсем. Нужна, пока документ у методиста или автора; с нового приёма о ней говорит круг.
+        var corrected = document.Status is DocumentStatuses.UnderReview or DocumentStatuses.Returned
+            ? await LastCorrectionAsync(document.Id, ct)
+            : null;
+        if (rows.Count == 0) return new([], null, corrected);
 
         var seats = await SeatsAsync(document, ct);
         var ids = rows.Select(r => r.ResolvedUserId).OfType<Guid>().Distinct().ToList();
@@ -242,7 +250,7 @@ public sealed class DocumentApproval(
                 ended && r.Status == SignatureStatuses.Pending ? SignatureStatuses.Interrupted : r.Status,
                 r.Status == SignatureStatuses.Rejected ? returned?.At : r.ApprovedAt, r.Comment,
                 person is not null && able.Contains(person.Id));
-        }).ToList(), returned);
+        }).ToList(), returned, corrected);
     }
 
     // Электронные места листа согласования — из снимка в шаблоне документа.
@@ -355,6 +363,24 @@ public sealed class DocumentApproval(
                 orderby h.ChangedAt descending
                 select new ApprovalReturn(e.ShortName, h.ChangedAt, h.Comment))
             .FirstOrDefaultAsync(ct);
+
+    // Возврат на исправление (этап 7, A8) — в истории статусов: последний переход «Согласован → На проверке», если после него
+    // приём не начал новый круг (иначе плашка говорила бы о круге, которого уже нет). Принудительная смена из «Согласован»
+    // в «На проверке» — тот же переход, и плашка у неё та же.
+    private async Task<ApprovalReturn?> LastCorrectionAsync(Guid documentId, CancellationToken ct)
+    {
+        var correction = await (
+                from h in db.DocumentStatusHistory
+                where h.DocumentId == documentId && h.FromStatus == DocumentStatuses.Approved && h.ToStatus == DocumentStatuses.UnderReview
+                join e in db.Employees on h.ChangedBy equals e.Id
+                orderby h.ChangedAt descending
+                select new ApprovalReturn(e.ShortName, h.ChangedAt, h.Comment))
+            .FirstOrDefaultAsync(ct);
+        if (correction is null) return null;
+        var restarted = await db.DocumentStatusHistory.AnyAsync(
+            h => h.DocumentId == documentId && h.ToStatus == DocumentStatuses.Accepted && h.ChangedAt > correction.At, ct);
+        return restarted ? null : correction;
+    }
 
     // Каждое действие согласования меняет документ: его версия упорядочивает одновременные отметки и назначения —
     // вторая запись получит конфликт версий (409), а не затрёт первую и не оставит документ без перехода в «Согласован».

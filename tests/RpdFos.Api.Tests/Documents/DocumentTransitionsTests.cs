@@ -215,4 +215,91 @@ public class DocumentTransitionsTests
         Assert.False(Resolve(S.Approval, own: true, fromApproval: true));
         Assert.False(Resolve(S.UnderReview, awaiting: true, own: true, fromApproval: true));
     }
+
+    [Theory]
+    [InlineData(S.Draft, false)]
+    [InlineData(S.SavedDraft, false)]
+    [InlineData(S.UnderReview, false)]
+    [InlineData(S.Returned, false)]
+    [InlineData(S.Accepted, false)]
+    [InlineData(S.Approval, false)]
+    [InlineData(S.Approved, true)]
+    [InlineData(S.Archived, false)]
+    [InlineData(S.Deleted, false)]
+    public void Only_an_approved_document_is_returned_for_correction(string status, bool allowed)
+    {
+        // Этап 7, A8, решение 2: согласованный документ на исправление возвращает методист, и только согласованный.
+        Assert.Equal(allowed, DocumentTransitions.CanReturnForCorrection(status));
+
+        var document = new Document { Status = status, ApprovedAt = DateTimeOffset.UtcNow };
+        if (!allowed)
+        {
+            Assert.Throws<InvalidOperationException>(document.ReturnForCorrection);
+            return;
+        }
+        Assert.Equal(S.Approved, document.ReturnForCorrection());
+        // Время согласования сбрасывается; снимок согласованной версии — в document_versions, документ его не хранит.
+        Assert.Equal((S.UnderReview, null), (document.Status, document.ApprovedAt));
+    }
+
+    [Theory]
+    [InlineData(S.Draft, "saved_draft,returned,under_review")]
+    [InlineData(S.SavedDraft, "returned,under_review")]
+    [InlineData(S.UnderReview, "saved_draft,returned")]
+    [InlineData(S.Returned, "saved_draft,under_review")]
+    [InlineData(S.Accepted, "saved_draft,returned,under_review")]
+    [InlineData(S.Approval, "saved_draft,returned,under_review")]
+    [InlineData(S.Approved, "saved_draft,returned,under_review")]
+    [InlineData(S.Archived, "saved_draft,returned,under_review")]
+    [InlineData(S.Deleted, "")]
+    public void Forced_status_goes_only_backwards_from_any_status_but_deleted(string from, string expected)
+    {
+        // Этап 7, A8; FR-ADM-04: из любого статуса, кроме «Удалённый», в «Сохранённый черновик», «На доработке» или «На проверке».
+        Assert.Equal(expected, string.Join(',', DocumentTransitions.ForceTargetsFrom(from)));
+
+        // В «Черновик», «Принят», «На согласовании», «Согласован», «Архивный» и «Удалённый» принудительно не переводят.
+        foreach (var forbidden in new[] { S.Draft, S.Accepted, S.Approval, S.Approved, S.Archived, S.Deleted })
+            Assert.False(DocumentTransitions.CanForceStatus(from, forbidden), $"{from} → {forbidden}");
+    }
+
+    [Fact]
+    public void Forced_status_clears_the_approval_time_and_dates_the_submission_only_when_it_is_missing()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var sent = now.AddDays(-5);
+
+        // Согласие сбрасывается, дата отправки автором остаётся прежней.
+        var approved = new Document { Status = S.Approved, ApprovedAt = now.AddDays(-1), SubmittedAt = sent };
+        Assert.Equal(S.Approved, approved.ForceStatus(S.UnderReview, now));
+        Assert.Equal((S.UnderReview, null, sent), (approved.Status, approved.ApprovedAt, approved.SubmittedAt));
+
+        // Документ, ушедший на проверку не отправкой, получает дату — по ней он встаёт в очередь проверки.
+        var draft = new Document { Status = S.Draft };
+        Assert.Equal(S.Draft, draft.ForceStatus(S.UnderReview, now));
+        Assert.Equal(now, draft.SubmittedAt);
+
+        // В другие статусы даты отправки не ставят.
+        var other = new Document { Status = S.Accepted };
+        other.ForceStatus(S.Returned, now);
+        Assert.Null(other.SubmittedAt);
+
+        // Запрещённое — исключение: эндпоинт проверяет заранее, а сущность защищает от ошибки в коде.
+        Assert.Throws<InvalidOperationException>(() => new Document { Status = S.Approved }.ForceStatus(S.Accepted, now));
+        Assert.Throws<InvalidOperationException>(() => new Document { Status = S.UnderReview }.ForceStatus(S.UnderReview, now));
+        Assert.Throws<InvalidOperationException>(() => new Document { Status = S.Deleted }.ForceStatus(S.Returned, now));
+    }
+
+    [Theory]
+    [InlineData(S.Draft, true)]
+    [InlineData(S.SavedDraft, true)]
+    [InlineData(S.UnderReview, true)]
+    [InlineData(S.Returned, true)]
+    [InlineData(S.Accepted, true)]
+    [InlineData(S.Approval, true)]
+    [InlineData(S.Approved, false)]
+    [InlineData(S.Archived, false)]
+    [InlineData(S.Deleted, false)]
+    public void Unfinished_document_is_not_approved_archived_or_deleted(string status, bool unfinished) =>
+        // Уточнение планировщика, этап 7: на дисциплину и линию шаблона — не больше одного незавершённого документа.
+        Assert.Equal(unfinished, DocumentTransitions.IsUnfinished(status));
 }

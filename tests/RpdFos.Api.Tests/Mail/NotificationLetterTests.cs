@@ -105,10 +105,14 @@ public class NotificationLetterTests
             {
                 NotificationEvents.ReturnedForRework, NotificationEvents.ReturnedAfterPlanCorrection,
                 NotificationEvents.AwaitingMark, NotificationEvents.ReturnedFromApproval,
-                NotificationEvents.ReworkDeadlineNear, NotificationEvents.ReworkOverdue
+                NotificationEvents.ReworkDeadlineNear, NotificationEvents.ReworkOverdue,
+                // Этап 7, A8: смена статуса администратором — нештатная ситуация; возврат согласованного документа на
+                // исправление (методист решил сам) письма по умолчанию не даёт.
+                NotificationEvents.StatusForced
             }.Order(),
             NotificationEvents.All.Where(e => e.DefaultMail == MailMode.Immediately).Select(e => e.Type).Order());
 
+        Assert.Equal(MailMode.Off, NotificationEvents.DefaultMailOf(NotificationEvents.ReturnedForCorrection));
         Assert.Equal(MailMode.Immediately, NotificationEvents.DefaultMailOf(NotificationEvents.AwaitingMark));
         Assert.Equal(MailMode.Off, NotificationEvents.DefaultMailOf(NotificationEvents.Approved));
         Assert.Equal(MailMode.Off, NotificationEvents.DefaultMailOf("неизвестное.событие"));

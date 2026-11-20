@@ -33,6 +33,13 @@ public static class AuditEvents
     public const string DocumentDeleted = "document.deleted";
 
     /// <summary>
+    /// Методист вернул согласованный документ на исправление и администратор принудительно сменил статус (этап 7, A8;
+    /// NFR-SEC-07): <c>{ "from", "to", "comment" }</c>. Принудительная смена с согласования — ещё
+    /// <c>"approval_interrupted": true</c>: круг прерван, как при возврате.
+    /// </summary>
+    public const string ReturnedForCorrection = "document.returned_for_correction", StatusForced = "document.status_forced";
+
+    /// <summary>
     /// Согласование (этап 6, часть B): старт круга — <c>{ "seats": [{ "role", "resolver", "signatory" }] }</c>, отметки
     /// согласующих — <c>{ "role" }</c> и <c>{ "role", "comment" }</c>, назначение или замена подписанта —
     /// <c>{ "role", "before", "after" }</c>. По ним виден и прежний круг: строки согласования новый круг сбрасывает.

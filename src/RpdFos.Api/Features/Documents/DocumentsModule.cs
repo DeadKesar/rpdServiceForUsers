@@ -16,9 +16,10 @@ namespace RpdFos.Api.Features.Documents;
 /// Срез «Документы»: РПД по опубликованному шаблону для дисциплины плана — создание с предзаполнением, список
 /// (преподаватель видит свои, FR-DOC-08), изменение по разделам, сохранение, удаление, проверка: отправка,
 /// замечания, возврат и приём. Приём запускает согласование — его действия в срезе «Согласование», а состояние
-/// приходит вместе с документом. Правила, предзаполнение и проверки — в ядре (<see cref="DocumentCreation"/>,
-/// <see cref="DocumentEditing"/>, <see cref="DocumentReview"/>, <see cref="DocumentApproval"/>,
-/// <see cref="DocumentTransitions"/>).
+/// приходит вместе с документом. Обратные переходы — возврат согласованного документа на исправление (методист) и
+/// принудительная смена статуса (администратор), этап 7, A8. Правила, предзаполнение и проверки — в ядре
+/// (<see cref="DocumentCreation"/>, <see cref="DocumentEditing"/>, <see cref="DocumentReview"/>,
+/// <see cref="DocumentApproval"/>, <see cref="DocumentReopening"/>, <see cref="DocumentTransitions"/>).
 /// </summary>
 public class DocumentsModule : ICarterModule
 {
@@ -39,6 +40,8 @@ public class DocumentsModule : ICarterModule
         g.MapPost("/{id:guid}/take", Take).RequireAuthorization(Policies.Reviewers);
         g.MapPost("/{id:guid}/return", Return).RequireAuthorization(Policies.Reviewers);
         g.MapPost("/{id:guid}/accept", Accept).RequireAuthorization(Policies.Reviewers);
+        g.MapPost("/{id:guid}/return-for-correction", ReturnForCorrection).RequireAuthorization(Policies.Reviewers);
+        g.MapPost("/{id:guid}/force-status", ForceStatus).RequireAuthorization(Policies.Admin);
         g.MapGet("/{id:guid}/comments", Comments);
         g.MapPost("/{id:guid}/comments", AddComment).RequireAuthorization(Policies.Commenters);
         g.MapPost("/{id:guid}/comments/{commentId:guid}/resolve", ResolveComment).RequireAuthorization(Policies.CommentResolvers);
@@ -160,7 +163,8 @@ public class DocumentsModule : ICarterModule
         {
             { Document: { } document } => Results.Created($"/api/documents/{document.Id}",
                 await DetailsAsync(document,
-                    new DocumentViewer(authorId, IsAuthor: true, IsReviewer(http.User), IsCorrector(http.User), IsSignatory: false),
+                    new DocumentViewer(authorId, IsAuthor: true, IsReviewer(http.User), IsCorrector(http.User), IsSignatory: false,
+                        IsAdmin: http.User.IsInRole(AppRoles.Admin)),
                     db, validator, rules, registry, approval, ct)),
             { Problem: DocumentCreationProblem.Duplicate } => Results.Problem(statusCode: StatusCodes.Status409Conflict,
                 title: "Документ уже есть", detail: result.Detail,
@@ -378,6 +382,71 @@ public class DocumentsModule : ICarterModule
         return Results.Ok(new DocumentReviewed(document!.Version, document.Status, DocumentStatuses.Title(document.Status), issues));
     }
 
+    /// <summary>
+    /// «Вернуть на исправление» (этап 7, A8, решение 2): методист возвращает согласованный документ на проверку. Причина
+    /// обязательна — 422; другой незавершённый документ той же дисциплины и линии шаблона — 409.
+    /// </summary>
+    private static async Task<IResult> ReturnForCorrection(
+        Guid id, CorrectionRequest rq, HttpContext http, AppDbContext db, DirectoryAccounts directory, DocumentReopening reopening,
+        CancellationToken ct)
+    {
+        var document = await db.Documents.SingleOrDefaultAsync(d => d.Id == id, ct);
+        if (document is null) return NotFound();
+        if (await directory.FindIdAsync(http.User, ct) is not Guid me) return NoDirectoryRecord();
+        if (!DocumentTransitions.CanReturnForCorrection(document.Status))
+            return Refused(document, DocumentTransitions.ReturnForCorrectionAction);
+
+        db.Entry(document).Property(d => d.Version).OriginalValue = rq.Version;
+        var result = await reopening.ReturnForCorrectionAsync(document, me, rq.Reason, ct);
+        if (result.Problem is not null)
+            return ReopeningRefused(result, "Не указана причина",
+                "Напишите, почему согласованный документ возвращается на исправление: причина попадёт в историю статусов и в уведомление.");
+
+        await db.SaveChangesAsync(ct);
+        return Results.Ok(new DocumentReviewed(document.Version, document.Status, DocumentStatuses.Title(document.Status), []));
+    }
+
+    /// <summary>
+    /// «Сменить статус» (этап 7, A8; FR-ADM-04): администратор принудительно переводит документ назад — в «Сохранённый
+    /// черновик», «На доработке» или «На проверке». Комментарий обязателен — 422, как и недопустимый статус; тот же статус и
+    /// другой незавершённый документ дисциплины — 409. Удалённый документ из выборки исключён (404).
+    /// </summary>
+    private static async Task<IResult> ForceStatus(
+        Guid id, ForceStatusRequest rq, HttpContext http, AppDbContext db, DirectoryAccounts directory, DocumentReopening reopening,
+        CancellationToken ct)
+    {
+        var document = await db.Documents.SingleOrDefaultAsync(d => d.Id == id, ct);
+        if (document is null) return NotFound();
+        if (await directory.FindIdAsync(http.User, ct) is not Guid me) return NoDirectoryRecord();
+
+        db.Entry(document).Property(d => d.Version).OriginalValue = rq.Version;
+        var result = await reopening.ForceStatusAsync(document, me, rq.Status, rq.Comment, ct);
+        if (result.Problem is not null)
+            return ReopeningRefused(result, "Не указан комментарий",
+                "Принудительная смена статуса — для нештатных ситуаций: напишите, что произошло. Комментарий попадёт в историю статусов и журнал аудита.");
+
+        await db.SaveChangesAsync(ct);
+        return Results.Ok(new DocumentReviewed(document.Version, document.Status, DocumentStatuses.Title(document.Status), []));
+    }
+
+    // Отказ обратного перехода (этап 7, A8). Данные запроса — 422, состояние документа — 409; текст пустого поля зависит от перехода.
+    private static IResult ReopeningRefused(ReopeningResult result, string emptyTitle, string emptyDetail) => result.Problem switch
+    {
+        ReopeningProblem.EmptyText => Results.Problem(statusCode: StatusCodes.Status422UnprocessableEntity, title: emptyTitle, detail: emptyDetail),
+        ReopeningProblem.TargetNotAllowed => Results.Problem(statusCode: StatusCodes.Status422UnprocessableEntity,
+            title: "Статус недоступен",
+            detail: "Принудительно документ переводят в «Сохранённый черновик», «На доработке» или «На проверке»."),
+        ReopeningProblem.SameStatus => Results.Problem(statusCode: StatusCodes.Status409Conflict, title: "Статус не изменится",
+            detail: "Документ уже в этом статусе."),
+        _ => Results.Problem(statusCode: StatusCodes.Status409Conflict, title: "Есть незавершённый документ",
+            detail: "У дисциплины уже есть другой незавершённый документ по этому шаблону: пока он не согласован, не архивирован и не " +
+                    "удалён, этот в работу вернуть нельзя.",
+            extensions: new Dictionary<string, object?>
+            {
+                ["documentId"] = result.OtherId, ["location"] = $"/api/documents/{result.OtherId}"
+            })
+    };
+
     /// <summary>Замечания к документу — всем, кто его видит: от старых к новым.</summary>
     private static async Task<IResult> Comments(
         Guid id, HttpContext http, AppDbContext db, DirectoryAccounts directory, DocumentApproval approval, CancellationToken ct)
@@ -573,7 +642,11 @@ public class DocumentsModule : ICarterModule
                 Delete: isAuthor && DocumentTransitions.CanDelete(status),
                 Approve: signs,
                 Comment: DocumentTransitions.CanComment(status, isReviewer, awaiting),
-                ResolveApprovalComments: isReviewer && DocumentTransitions.CanReview(status)),
+                ResolveApprovalComments: isReviewer && DocumentTransitions.CanReview(status),
+                ReturnForCorrection: isReviewer && DocumentTransitions.CanReturnForCorrection(status),
+                ForceTargets: viewer.IsAdmin
+                    ? DocumentTransitions.ForceTargetsFrom(status).Select(s => new StatusOption(s, DocumentStatuses.Title(s))).ToList()
+                    : null),
             template.DefaultPayload is { } defaults ? JsonDocument.Parse(defaults).RootElement : null,
             corrections, viewer.Id, panel);
     }
@@ -581,7 +654,8 @@ public class DocumentsModule : ICarterModule
     /// <summary>
     /// Панель «Согласование»: с приёма и до согласованного документа — всем, кто видит документ. После возврата с
     /// согласования строки прежнего круга и плашку «кто, когда, почему» видят те, кто разбирает возврат, —
-    /// методист и администратор; автору они не нужны: это не замечания к полям.
+    /// методист и администратор; автору они не нужны: это не замечания к полям. Им же — плашка «возвращён на исправление»
+    /// (этап 7, A8), пока документ не принят заново.
     /// </summary>
     private static async Task<ApprovalPanel?> ApprovalAsync(
         Document document, DocumentViewer viewer, DocumentApproval approval, CancellationToken ct)
@@ -590,7 +664,7 @@ public class DocumentsModule : ICarterModule
         var active = status is DocumentStatuses.Accepted or DocumentStatuses.Approval or DocumentStatuses.Approved;
         if (!active && !viewer.IsCorrector) return null;
         var state = await approval.StateAsync(document, ct);
-        if (!active && state.Returned is null) return null;
+        if (!active && state.Returned is null && state.Corrected is null) return null;
 
         return new ApprovalPanel(
             state.Seats.Select(s => new ApprovalSeatItem(s.Role, s.Title, s.SignatoryId, s.SignatoryName, s.Position, s.Status,
@@ -598,7 +672,8 @@ public class DocumentsModule : ICarterModule
             CanAssign: viewer.IsCorrector && DocumentTransitions.CanAssignSignatory(status) && state.Seats.Count > 0,
             // Строк нет — документ принят до появления согласования: запуск сам определит подписантов.
             CanStart: viewer.IsReviewer && DocumentTransitions.CanStartApproval(status) && state.Seats.All(s => s.SignatoryId is not null),
-            Returned: viewer.IsCorrector ? state.Returned : null);
+            Returned: viewer.IsCorrector ? state.Returned : null,
+            Corrected: viewer.IsCorrector ? state.Corrected : null);
     }
 
     // Исправления полей из плана — из журнала аудита: кто, когда, было, стало.
@@ -649,6 +724,12 @@ public record TakeRequest(int Version, string? Reason);
 
 /// <summary>Возврат на доработку: версия и необязательный общий комментарий — замечания к полям уже есть.</summary>
 public record ReturnRequest(int Version, string? Comment);
+
+/// <summary>«Вернуть на исправление» (этап 7, A8): версия и обязательная причина — в историю статусов и в уведомление.</summary>
+public record CorrectionRequest(int Version, string? Reason);
+
+/// <summary>«Сменить статус» (этап 7, A8): версия, целевой статус и обязательный комментарий — в историю статусов и аудит.</summary>
+public record ForceStatusRequest(int Version, string? Status, string? Comment);
 
 /// <summary>Замечание: JSON Pointer поля и текст.</summary>
 public record CommentRequest(string? FieldPath, string? Text);
@@ -701,16 +782,26 @@ public record DocumentItem(
 /// <param name="Approve">Согласующий отмечает согласие или возвращает документ на проверку (этап 6, B3).</param>
 /// <param name="Comment">Оставить замечание к полю: методист на проверке, согласующий до своей отметки (этап 7, A2).</param>
 /// <param name="ResolveApprovalComments">Методист на проверке снимает и замечания, оставленные на согласовании (этап 7, A2).</param>
+/// <param name="ReturnForCorrection">Методист возвращает согласованный документ на исправление (этап 7, A8).</param>
+/// <param name="ForceTargets">
+/// Статусы, в которые администратор переводит документ принудительно (этап 7, A8; FR-ADM-04); null — не администратор.
+/// </param>
 public record DocumentActions(bool Submit, bool Review, bool ResolveComments, bool Print, bool CorrectPlan = false,
     bool TakeForReview = false, bool ResolveOwnComments = false, bool Delete = false, bool Approve = false,
-    bool Comment = false, bool ResolveApprovalComments = false);
+    bool Comment = false, bool ResolveApprovalComments = false, bool ReturnForCorrection = false,
+    IReadOnlyList<StatusOption>? ForceTargets = null);
+
+/// <summary>Статус и его название для списка «Сменить статус».</summary>
+public record StatusOption(string Status, string Title);
 
 /// <summary>
 /// Панель «Согласование» документа (этап 6, B2–B3): места электронного согласования и что может зритель —
 /// назначить или заменить подписанта (FR-REV-13), запустить согласование принятого документа.
 /// </summary>
 /// <param name="Returned">Прежний круг закончился возвратом: кто, когда, с каким комментарием — методисту и администратору.</param>
-public record ApprovalPanel(IReadOnlyList<ApprovalSeatItem> Seats, bool CanAssign, bool CanStart, ApprovalReturn? Returned);
+/// <param name="Corrected">Согласованный документ вернули на исправление: кто, когда, причина — методисту и администратору (этап 7, A8).</param>
+public record ApprovalPanel(
+    IReadOnlyList<ApprovalSeatItem> Seats, bool CanAssign, bool CanStart, ApprovalReturn? Returned, ApprovalReturn? Corrected = null);
 
 /// <summary>Место согласования: назначенный, его отметка и время, комментарий возврата.</summary>
 /// <param name="CanSign">У назначенного есть действующая учётная запись с ролью «Утверждающий».</param>

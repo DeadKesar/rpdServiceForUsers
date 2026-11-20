@@ -140,6 +140,31 @@ public class Document : IVersioned
         return Move(DocumentStatuses.UnderReview);
     }
 
+    /// <summary>
+    /// Методист возвращает согласованный документ на проверку — исправить его иначе нельзя: правки после согласования
+    /// закрыты для всех (этап 7, A8, решение 2). Время согласования сбрасывается; снимок согласованной версии остаётся в
+    /// истории версий. Возвращает прежний статус.
+    /// </summary>
+    public string ReturnForCorrection()
+    {
+        Require(DocumentTransitions.CanReturnForCorrection(Status), DocumentTransitions.ReturnForCorrectionAction);
+        ApprovedAt = null;
+        return Move(DocumentStatuses.UnderReview);
+    }
+
+    /// <summary>
+    /// Принудительная смена статуса администратором — только назад (этап 7, A8; FR-ADM-04). Согласия у документа больше
+    /// нет — время согласования сбрасывается. Документ, пришедший на проверку не отправкой, получает время отправки: по
+    /// нему он встаёт в очередь проверки. Возвращает прежний статус.
+    /// </summary>
+    public string ForceStatus(string target, DateTimeOffset now)
+    {
+        Require(DocumentTransitions.CanForceStatus(Status, target), DocumentTransitions.ForceStatusAction);
+        ApprovedAt = null;
+        if (target == DocumentStatuses.UnderReview) SubmittedAt ??= now;
+        return Move(target);
+    }
+
     /// <summary>Мягкое удаление: статус и флаг — вместе. Возвращает прежний статус.</summary>
     public string Delete(DateTimeOffset now)
     {
@@ -179,7 +204,8 @@ public static class DocumentTransitions
         SubmitAction = "отправить на проверку", ReturnAction = "вернуть на доработку", AcceptAction = "принять",
         CommentAction = "оставить замечание", ResolveAction = "отметить замечание разрешённым",
         TakeAction = "взять на проверку", StartApprovalAction = "отправить на согласование", ApproveAction = "согласовать",
-        RejectAction = "вернуть с согласования", AssignAction = "назначить подписанта";
+        RejectAction = "вернуть с согласования", AssignAction = "назначить подписанта",
+        ReturnForCorrectionAction = "вернуть на исправление", ForceStatusAction = "перевести в другой статус";
 
     /// <summary>
     /// Автор правит черновик, сохранённый черновик и документ на доработке; на проверке и после приёма документ
@@ -225,7 +251,8 @@ public static class DocumentTransitions
 
     /// <summary>
     /// Методист берёт на проверку документ из статусов автора — черновик, сохранённый черновик, доработка (этап 6, A1).
-    /// Отступление от FR-ADM-04 (принудительная смена статуса — только администратору): узкое право методиста.
+    /// Отступление от FR-ADM-04 (принудительная смена статуса — только администратору): узкое право методиста; второе —
+    /// возврат согласованного документа на исправление (<see cref="CanReturnForCorrection"/>, этап 7, A8).
     /// </summary>
     public static bool CanTakeForReview(string status) =>
         status is DocumentStatuses.Draft or DocumentStatuses.SavedDraft or DocumentStatuses.Returned;
@@ -278,6 +305,43 @@ public static class DocumentTransitions
         isAuthor
         || isReviewer && status is DocumentStatuses.UnderReview or DocumentStatuses.Accepted or DocumentStatuses.Approval or DocumentStatuses.Approved
         || isSignatory && status is DocumentStatuses.Approval or DocumentStatuses.Approved;
+
+    /// <summary>
+    /// «Вернуть на исправление» — методист возвращает согласованный документ на проверку (этап 7, A8, решение 2). Другого
+    /// пути к правке согласованного документа нет: после согласования она закрыта для всех. Время согласования
+    /// сбрасывается, следующий приём начинает новый круг.
+    /// </summary>
+    public static bool CanReturnForCorrection(string status) => status is DocumentStatuses.Approved;
+
+    /// <summary>
+    /// Статусы, в которые администратор переводит документ принудительно (FR-ADM-04; этап 7, A8) — только назад. В «Принят»,
+    /// «На согласовании», «Согласован» и «Архивный» принудительно не переводят: они наступают только своим порядком —
+    /// приёмом, кругом согласования, явным архивированием.
+    /// </summary>
+    public static readonly IReadOnlyList<string> ForceTargets =
+        [DocumentStatuses.SavedDraft, DocumentStatuses.Returned, DocumentStatuses.UnderReview];
+
+    /// <summary>
+    /// Принудительная смена — из любого статуса, кроме «Удалённый», в один из <see cref="ForceTargets"/>, но не в тот же
+    /// статус: смена без перемены записала бы в историю переход из статуса в него же.
+    /// </summary>
+    public static bool CanForceStatus(string from, string to) =>
+        from != DocumentStatuses.Deleted && from != to && ForceTargets.Contains(to);
+
+    /// <summary>Статусы, в которые документ из <paramref name="from"/> переводят принудительно, — для кнопки «Сменить статус».</summary>
+    public static IReadOnlyList<string> ForceTargetsFrom(string from) => ForceTargets.Where(to => CanForceStatus(from, to)).ToList();
+
+    /// <summary>Статусы завершённого документа: «Согласован», «Архивный», «Удалённый».</summary>
+    public static readonly IReadOnlyList<string> FinishedStatuses =
+        [DocumentStatuses.Approved, DocumentStatuses.Archived, DocumentStatuses.Deleted];
+
+    /// <summary>
+    /// Незавершённый документ — не «Согласован», не «Архивный», не «Удалённый». На дисциплину и линию редакций шаблона
+    /// приходится не больше одного незавершённого (уточнение планировщика, этап 7): создание и переход, которые дали бы
+    /// второй, — 409. Возврат согласованного документа на исправление и принудительная смена статуса возвращают
+    /// завершённый документ в работу.
+    /// </summary>
+    public static bool IsUnfinished(string status) => !FinishedStatuses.Contains(status);
 
     public static string Refusal(string status, string action) =>
         $"Документ в статусе «{DocumentStatuses.Title(status)}» нельзя {action}.";

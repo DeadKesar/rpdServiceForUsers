@@ -21,18 +21,26 @@ public sealed record DocumentItem(Guid Id, string Type, string Title, string Sta
 /// <summary>
 /// Что пользователь может сделать с документом: отправить, проверить (вернуть, принять), оставлять и разрешать замечания.
 /// <paramref name="Comment"/> — методист на проверке и согласующий до своей отметки; <paramref name="ResolveApprovalComments"/> —
-/// методист на проверке снимает и замечания согласующих (этап 7, A2).
+/// методист на проверке снимает и замечания согласующих (этап 7, A2). <paramref name="ReturnForCorrection"/> — методист
+/// возвращает согласованный документ на исправление; <paramref name="ForceTargets"/> — статусы, в которые администратор
+/// переводит документ принудительно (null — не администратор), этап 7, A8.
 /// </summary>
 public sealed record DocumentActions(bool Submit, bool Review, bool ResolveComments, bool Print, bool CorrectPlan = false,
     bool TakeForReview = false, bool ResolveOwnComments = false, bool Delete = false, bool Approve = false,
-    bool Comment = false, bool ResolveApprovalComments = false);
+    bool Comment = false, bool ResolveApprovalComments = false, bool ReturnForCorrection = false,
+    List<StatusOption>? ForceTargets = null);
+
+/// <summary>Статус и его название для списка «Сменить статус».</summary>
+public sealed record StatusOption(string Status, string Title);
 
 /// <summary>
 /// Согласование документа (этап 6, B2–B3): места электронного согласования и что может зритель — назначить или
 /// заменить подписанта, запустить согласование принятого документа. <paramref name="Returned"/> — прежний круг
-/// закончился возвратом: кто, когда, с каким комментарием (методисту и администратору).
+/// закончился возвратом: кто, когда, с каким комментарием (методисту и администратору). <paramref name="Corrected"/> —
+/// согласованный документ вернули на исправление: кто, когда, причина (этап 7, A8).
 /// </summary>
-public sealed record ApprovalState(List<ApprovalSeatItem> Seats, bool CanAssign, bool CanStart, ApprovalReturn? Returned);
+public sealed record ApprovalState(
+    List<ApprovalSeatItem> Seats, bool CanAssign, bool CanStart, ApprovalReturn? Returned, ApprovalReturn? Corrected = null);
 
 /// <summary>Место согласования: назначенный, его отметка и время, комментарий возврата.</summary>
 /// <param name="CanSign">У назначенного есть действующая учётная запись с ролью «Утверждающий».</param>

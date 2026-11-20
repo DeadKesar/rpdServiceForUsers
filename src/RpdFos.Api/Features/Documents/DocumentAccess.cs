@@ -11,7 +11,9 @@ namespace RpdFos.Api.Features.Documents;
 /// </summary>
 /// <param name="Id">Запись справочника сотрудников пользователя; null — учётная запись с ней не связана.</param>
 /// <param name="IsCorrector">Методист или администратор: видят все документы, исправляют поля из плана, назначают подписантов.</param>
-public sealed record DocumentViewer(Guid? Id, bool IsAuthor, bool IsReviewer, bool IsCorrector, bool IsSignatory)
+/// <param name="IsAdmin">Администратор: принудительно меняет статус документа (этап 7, A8).</param>
+public sealed record DocumentViewer(
+    Guid? Id, bool IsAuthor, bool IsReviewer, bool IsCorrector, bool IsSignatory, bool IsAdmin = false)
 {
     public bool Sees => IsAuthor || IsCorrector || IsSignatory;
 
@@ -21,5 +23,6 @@ public sealed record DocumentViewer(Guid? Id, bool IsAuthor, bool IsReviewer, bo
         me is not null && document.AuthorId == me,
         user.IsInRole(AppRoles.Methodist),
         user.IsInRole(AppRoles.Methodist) || user.IsInRole(AppRoles.Admin),
-        user.IsInRole(AppRoles.Approver) && me is Guid id && await approval.HasSeatAsync(document.Id, id, ct));
+        user.IsInRole(AppRoles.Approver) && me is Guid id && await approval.HasSeatAsync(document.Id, id, ct),
+        user.IsInRole(AppRoles.Admin));
 }
