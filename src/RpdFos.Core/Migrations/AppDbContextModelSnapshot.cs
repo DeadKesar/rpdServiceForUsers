@@ -1100,6 +1100,10 @@ namespace RpdFos.Core.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("author_id");
 
+                    b.Property<Guid?>("BasedOnDocumentId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("based_on_document_id");
+
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
@@ -1168,6 +1172,9 @@ namespace RpdFos.Core.Migrations
 
                     b.HasKey("Id")
                         .HasName("pk_documents");
+
+                    b.HasIndex("BasedOnDocumentId")
+                        .HasDatabaseName("ix_documents_based_on_document_id");
 
                     b.HasIndex("DisciplineId")
                         .HasDatabaseName("ix_documents_discipline_id");
@@ -2632,6 +2639,12 @@ namespace RpdFos.Core.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_documents_employees_author_id");
+
+                    b.HasOne("RpdFos.Core.Data.Entities.Document", null)
+                        .WithMany()
+                        .HasForeignKey("BasedOnDocumentId")
+                        .OnDelete(DeleteBehavior.SetNull)
+                        .HasConstraintName("fk_documents_documents_based_on_document_id");
 
                     b.HasOne("RpdFos.Core.Data.Entities.Discipline", null)
                         .WithMany()

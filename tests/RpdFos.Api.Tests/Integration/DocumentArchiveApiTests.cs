@@ -142,12 +142,12 @@ public class DocumentArchiveApiTests(DatabaseFixture app)
                 Assert.Equal(HttpStatusCode.Forbidden, (await client.PostAsync(print, null)).StatusCode);
         }
 
-        // Только чтение: ни правки, ни отправки; из действий автору остаётся печать, методисту — печать и передача.
+        // Только чтение: ни правки, ни отправки; из действий автору остаются печать и «Создать на основе» (A11), методисту — ещё и передача.
         var forAuthor = await DetailsAsync(c.Author, id);
         Assert.Equal((S.Archived, false), (forAuthor.Document.Status, forAuthor.Editable));
-        Assert.Equal(new DocumentActions(Submit: false, Review: false, ResolveComments: false, Print: true), forAuthor.Actions);
+        Assert.Equal(new DocumentActions(Submit: false, Review: false, ResolveComments: false, Print: true, CreateBasedOn: true), forAuthor.Actions);
         var forMethodist = await DetailsAsync(c.Methodist, id);
-        Assert.Equal((false, new DocumentActions(false, false, false, Print: true, Transfer: true)), (forMethodist.Editable, forMethodist.Actions));
+        Assert.Equal((false, new DocumentActions(false, false, false, Print: true, Transfer: true, CreateBasedOn: true)), (forMethodist.Editable, forMethodist.Actions));
         var forAdmin = await DetailsAsync(c.Admin, id);
         Assert.False(forAdmin.Actions.Print);
         Assert.Equal([S.SavedDraft, S.Returned, S.UnderReview], forAdmin.Actions.ForceTargets!.Select(t => t.Status));

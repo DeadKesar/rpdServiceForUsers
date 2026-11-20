@@ -46,6 +46,14 @@ public static class AuditEvents
     public const string DocumentArchived = "document.archived", DocumentTransferred = "document.transferred";
 
     /// <summary>
+    /// Документ создан на основе другого (этап 7, A11; FR-DOC-07): объект — новый документ, в содержимом
+    /// <c>{ "base", "title", "not_transferred" }</c> — основа, её название и список неперенесённого. Из этой записи редактор
+    /// берёт список, который показывает после создания. Основа устарела (A11; расширение FR-DOC-12): согласован документ
+    /// на её основе для той же дисциплины — объект основа, в содержимом <c>{ "successor" }</c>.
+    /// </summary>
+    public const string DocumentBasedOn = "document.based_on", DocumentOutdated = "document.outdated";
+
+    /// <summary>
     /// Закрепление дисциплины за сотрудником и его снятие (этап 7, A10; NFR-SEC-07): объект — дисциплина, в содержимом
     /// <c>{ "employee" }</c> — закреплённый. Закрепление при передаче документа (A9) — ещё <c>"document"</c>: документ, из-за
     /// которого оно появилось.

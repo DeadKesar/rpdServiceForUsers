@@ -24,6 +24,50 @@
     </div>
 }
 
+@* Основа (этап 7, A11; S-11): ввод автора переносится из неё в новый документ — для той же дисциплины или для дисциплины
+   другого плана; поля из учебного плана берутся заново. Основа названа ссылкой «Создать на основе» из согласованного или
+   архивного документа либо выбрана здесь. *@
+<div class="mb-3" style="max-width: 960px">
+    <label class="form-label">Основа</label>
+    @if (basis is { } chosen)
+    {
+        <div class="d-flex flex-wrap align-items-center gap-2">
+            <span>
+                <a href="@($"documents/{chosen.Id}")"><strong>«@chosen.Title»</strong></a>
+                · @chosen.StatusTitle · @chosen.AuthorName
+            </span>
+            <button class="btn btn-sm btn-outline-secondary" disabled="@busy" @onclick="() => basis = null">Без основы</button>
+        </div>
+        <div class="form-text">
+            Из основы перенесётся то, что вводил автор; поля из учебного плана и справочников возьмутся заново. Не
+            перенесённое будет перечислено в новом документе.
+        </div>
+    }
+    else
+    {
+        <div>
+            <button class="btn btn-sm btn-outline-primary" disabled="@busy" @onclick="ToggleChoosingAsync">
+                @(choosing ? "Не выбирать основу" : "Создать на основе документа…")
+            </button>
+        </div>
+        @if (choosing)
+        {
+            <input class="form-control form-control-sm mt-2" placeholder="Поиск по названию, дисциплине или автору"
+                   @bind="baseFilter" @bind:event="oninput" />
+            <select class="form-select form-select-sm mt-1" size="8" @onchange="PickBase">
+                @foreach (var b in FilteredBases)
+                {
+                    <option value="@b.Id">@b.Title — @b.StatusTitle, @b.AuthorName</option>
+                }
+            </select>
+            @if (bases.Count == 0)
+            {
+                <div class="form-text">Документов, которые можно взять основой, нет: нужны свои РПД или РПД закреплённых за вами дисциплин.</div>
+            }
+        }
+    }
+</div>
+
 <div class="mb-3" style="max-width: 960px">
     <label class="form-label">Опубликованный шаблон РПД</label>
     <select class="form-select" @bind="templateId" @bind:after="LoadDisciplinesAsync">
@@ -75,10 +119,35 @@
                             {
                                 <span class="small text-muted">РПД уже есть (автор — @d.DocumentAuthor)</span>
                             }
+                            @* Согласованный документ занимает дисциплину: новый создаётся только на его основе (этап 7, A11). *@
+                            @if (d.DocumentStatus == "approved" && d.CanCreate)
+                            {
+                                @if (basis is null)
+                                {
+                                    <div class="small text-muted">Новый РПД — на основе согласованного</div>
+                                }
+                                else if (BasisRefusal(d) is { } why)
+                                {
+                                    <div class="small text-muted">@why</div>
+                                }
+                                else
+                                {
+                                    <button class="btn btn-sm btn-primary ms-1" disabled="@busy" @onclick="() => CreateAsync(d)">Создать на основе</button>
+                                }
+                            }
                         }
                         else if (d.CanCreate)
                         {
-                            <button class="btn btn-sm btn-primary" disabled="@busy" @onclick="() => CreateAsync(d)">Создать РПД</button>
+                            @if (BasisRefusal(d) is { } refusal)
+                            {
+                                <span class="small text-muted">@refusal</span>
+                            }
+                            else
+                            {
+                                <button class="btn btn-sm btn-primary" disabled="@busy" @onclick="() => CreateAsync(d)">
+                                    @(basis is null ? "Создать РПД" : "Создать на основе")
+                                </button>
+                            }
                         }
                         else
                         {
@@ -93,24 +162,92 @@
 }
 
 @code {
+    /// <summary>Основа из ссылки «Создать на основе» в согласованном или архивном документе (этап 7, A11).</summary>
+    [SupplyParameterFromQuery(Name = "basedOn")]
+    public Guid? BasedOnId { get; set; }
+
     private List<TemplateItem> templates = [];
     private List<DisciplineOption>? disciplines;
+    private List<DocumentListItem> bases = [];
+    private DocumentListItem? basis;
+    private bool basesLoaded, choosing;
+    private string baseFilter = "";
     private string templateId = "";
     private string? message;
     private bool messageIsError;
     private Guid? existingId;
     private bool busy;
 
+    private TemplateItem? SelectedTemplate => templates.FirstOrDefault(t => t.Id.ToString() == templateId);
+
+    // Основой служат свои РПД и РПД закреплённых дисциплин (методисту и администратору — все): тот же отбор, что на сервере.
+    private IEnumerable<DocumentListItem> FilteredBases => bases.Where(b => baseFilter.Length == 0 ||
+        $"{b.Title} {b.DisciplineName} {b.AuthorName}".Contains(baseFilter.Trim(), StringComparison.CurrentCultureIgnoreCase));
+
     protected override async Task OnInitializedAsync()
     {
         try
         {
             templates = await Http.GetFromJsonAsync<List<TemplateItem>>("api/templates?type=rpd&status=published") ?? [];
+            if (BasedOnId is Guid basedOn)
+            {
+                await LoadBasesAsync();
+                basis = bases.FirstOrDefault(b => b.Id == basedOn);
+                if (basis is null)
+                    (messageIsError, message) = (true, "Основа недоступна: документ удалён или не открыт вам. Выберите другую основу или создайте документ без неё.");
+                // Следующая редакция той же дисциплины: если у плана основы один опубликованный шаблон, он уже выбран.
+                else if (basis.Plan is { } plan && templates.Where(t => t.Plan?.Id == plan.Id).ToList() is [var same])
+                {
+                    templateId = same.Id.ToString();
+                    await LoadDisciplinesAsync();
+                }
+            }
         }
         catch (AccessTokenNotAvailableException e)
         {
             e.Redirect();
         }
+    }
+
+    private async Task LoadBasesAsync()
+    {
+        if (basesLoaded) return;
+        var own = await Http.GetFromJsonAsync<List<DocumentListItem>>("api/documents") ?? [];
+        var assigned = await Http.GetFromJsonAsync<List<DocumentListItem>>("api/documents/assigned") ?? [];
+        bases = own.Concat(assigned).Where(d => d.Type == "rpd").DistinctBy(d => d.Id).OrderBy(d => d.Title).ToList();
+        basesLoaded = true;
+    }
+
+    private async Task ToggleChoosingAsync()
+    {
+        choosing = !choosing;
+        if (!choosing) return;
+        try
+        {
+            await LoadBasesAsync();
+        }
+        catch (AccessTokenNotAvailableException e)
+        {
+            e.Redirect();
+        }
+    }
+
+    private void PickBase(ChangeEventArgs e)
+    {
+        basis = Guid.TryParse(e.Value?.ToString(), out var id) ? bases.FirstOrDefault(b => b.Id == id) : null;
+        choosing = basis is null;
+        message = null;
+    }
+
+    // Подсказка, почему на этой основе нельзя создать документ для дисциплины (решает сервер; здесь — чтобы не звать зря).
+    // На основе создают для той же дисциплины или для дисциплины другого плана; у дисциплины с согласованным документом новый
+    // создаётся только на основе согласованного.
+    private string? BasisRefusal(DisciplineOption d)
+    {
+        if (basis is null) return null;
+        if (basis.Plan?.Id is Guid basisPlan && basisPlan == SelectedTemplate?.Plan?.Id)
+            return basis.DisciplineCode == d.Code ? null : "Основа из этого же плана: на ней создают документ только той же дисциплины";
+        return d.DocumentStatus == "approved" ? "У дисциплины есть согласованный документ: новый создаётся только на его основе" : null;
     }
 
     private async Task LoadDisciplinesAsync()
@@ -135,9 +272,11 @@
         existingId = null;
         try
         {
-            var response = await Http.PostAsJsonAsync("api/documents", new { templateId = Guid.Parse(templateId), disciplineId = discipline.Id });
+            var response = await Http.PostAsJsonAsync("api/documents",
+                new { templateId = Guid.Parse(templateId), disciplineId = discipline.Id, basedOnDocumentId = basis?.Id });
             if (response.StatusCode == HttpStatusCode.Created && await response.Content.ReadFromJsonAsync<DocumentDetails>() is { } created)
             {
+                // Редактор покажет, на чём основан документ и что из основы не перенесено.
                 Navigation.NavigateTo($"documents/{created.Document.Id}");
                 return;
             }

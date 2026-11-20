@@ -13,7 +13,10 @@ public class Document : IVersioned
     public string Type { get; set; } = TemplateTypes.Rpd;
     public string Status { get; set; } = DocumentStatuses.Draft;
 
-    /// <summary>Вышла новая редакция шаблона — ортогонально статусу (FR-DOC-12).</summary>
+    /// <summary>
+    /// Вышла новая редакция шаблона или согласован документ, созданный на основе этого, для той же дисциплины (этап 7, A11) —
+    /// ортогонально статусу (FR-DOC-12). Версию документа признак не меняет (<c>VersioningInterceptor</c>).
+    /// </summary>
     public bool IsOutdated { get; set; }
 
     public Guid TemplateId { get; set; }
@@ -23,6 +26,13 @@ public class Document : IVersioned
 
     public Guid AuthorId { get; set; }
     public Guid DisciplineId { get; set; }
+
+    /// <summary>
+    /// Документ, на основе которого создан этот: из него перенесён ввод автора (колонка <c>based_on_document_id</c> — дополнение
+    /// модели данных, этап 7, A11; решение 4). Пусто — документ создан с нуля. Когда документ с основой той же дисциплины
+    /// согласован, основа получает <see cref="IsOutdated"/> (расширение FR-DOC-12).
+    /// </summary>
+    public Guid? BasedOnDocumentId { get; set; }
 
     /// <summary>«Тип + дисциплина + год».</summary>
     public string Title { get; set; } = "";
@@ -342,6 +352,13 @@ public static class DocumentTransitions
     /// после согласования — для печати и «Создать на основе».
     /// </summary>
     public static bool CanTransfer(string status) => status != DocumentStatuses.Deleted;
+
+    /// <summary>
+    /// «Создать на основе» в самом документе (S-13; этап 7, A11, решение 4): согласованный и архивный — из них делают
+    /// следующую редакцию для той же дисциплины и документ для дисциплины другого плана. Основой при создании (S-11) служит
+    /// документ любого статуса, кроме удалённого.
+    /// </summary>
+    public static bool CanBaseNew(string status) => status is DocumentStatuses.Approved or DocumentStatuses.Archived;
 
     /// <summary>
     /// «Вернуть на исправление» — методист возвращает согласованный документ на проверку (этап 7, A8, решение 2). Другого

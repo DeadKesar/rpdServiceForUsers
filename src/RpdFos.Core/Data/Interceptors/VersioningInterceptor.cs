@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using RpdFos.Core.Data.Entities;
 
@@ -34,6 +35,12 @@ public sealed class VersioningInterceptor(TimeProvider clock) : SaveChangesInter
         {
             if (entry.State == EntityState.Modified)
             {
+                // Признак «устарел» ортогонален содержимому и версию не меняет (FR-DOC-12): его ставят и публикация новой
+                // редакции шаблона, и согласование документа, созданного на основе этого (этап 7, A11), — правка в открытом
+                // редакторе или «В архив» не должны упасть с конфликтом версий из-за чужого события. Проверка версии остаётся
+                // в WHERE: если документ уже изменили, согласование получит обычный конфликт (409).
+                if (OnlyOutdatedChanged(entry)) continue;
+
                 // Исходная версия остаётся в WHERE (её мог подменить эндпоинт версией клиента),
                 // новая — уходит в SET. Не совпало — EF бросит DbUpdateConcurrencyException.
                 var original = (int)entry.Property(nameof(IVersioned.Version)).OriginalValue!;
@@ -46,4 +53,9 @@ public sealed class VersioningInterceptor(TimeProvider clock) : SaveChangesInter
             }
         }
     }
+
+    // Изменён только признак «устарел» документа — и ничего больше.
+    private static bool OnlyOutdatedChanged(EntityEntry<IVersioned> entry) =>
+        entry.Entity is Document &&
+        entry.Properties.Where(p => p.IsModified).Select(p => p.Metadata.Name).SequenceEqual([nameof(Document.IsOutdated)]);
 }

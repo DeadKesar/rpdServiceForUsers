@@ -175,6 +175,7 @@ public sealed class DocumentApproval(
         {
             var approvedAt = history.StatusChanged(document, document.Approve(now), signatoryId);
             await history.SnapshotAsync(document, signatoryId, VersionTriggers.Approved, ct);
+            await OutdateBaseAsync(document, signatoryId, ct);
             await notifications.ApprovedAsync(document, signatoryId, approvedAt, ct);
         }
         return null;
@@ -305,6 +306,7 @@ public sealed class DocumentApproval(
         if (rows.Count == 0)
         {
             var approvedAt = history.StatusChanged(document, document.Approve(clock.GetUtcNow()), by);
+            await OutdateBaseAsync(document, by, ct);
             await notifications.ApprovedAsync(document, by, approvedAt, ct);
             return;
         }
@@ -380,6 +382,20 @@ public sealed class DocumentApproval(
         var restarted = await db.DocumentStatusHistory.AnyAsync(
             h => h.DocumentId == documentId && h.ToStatus == DocumentStatuses.Accepted && h.ChangedAt > correction.At, ct);
         return restarted ? null : correction;
+    }
+
+    // Документ согласован — основа той же дисциплины, на которой он создан, устарела (этап 7, A11; расширение FR-DOC-12). Статус
+    // основы прежний, версия тоже (VersioningInterceptor): в архив её отправляют явно (A9). Основа другой дисциплины — документ
+    // другого плана — не устаревает: это не прежняя редакция того же документа. Признак ставится в том же сохранении, что и
+    // согласие, — неудавшееся сохранение (конфликт версий) его не оставит.
+    private async Task OutdateBaseAsync(Document successor, Guid by, CancellationToken ct)
+    {
+        if (successor.BasedOnDocumentId is not Guid baseId) return;
+        var basis = await db.Documents.SingleOrDefaultAsync(
+            d => d.Id == baseId && d.DisciplineId == successor.DisciplineId && !d.IsOutdated, ct);
+        if (basis is null) return;
+        basis.IsOutdated = true;
+        db.AuditLog.Add(Audit(basis, by, AuditEvents.DocumentOutdated, new JsonObject { ["successor"] = successor.Id }));
     }
 
     // Каждое действие согласования меняет документ: его версия упорядочивает одновременные отметки и назначения —

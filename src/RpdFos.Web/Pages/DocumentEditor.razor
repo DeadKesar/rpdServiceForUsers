@@ -47,9 +47,42 @@ else
         @(d.Type == "fos" ? "ФОС" : "РПД") · <strong>@statusTitle</strong> · редакция шаблона @d.TemplateRevision
         @if (d.IsOutdated)
         {
-            <span class="badge text-bg-warning ms-1" title="Вышла новая редакция шаблона">устарел</span>
+            <span class="badge text-bg-warning ms-1" title="@DocumentTitles.OutdatedHint">устарел</span>
         }
     </p>
+
+    @* «Создан на основе» (этап 7, A11): основа и то, что из неё не перенесено, — по этому списку автор доводит документ. *@
+    @if (details.BasedOn is { } basis)
+    {
+        <div class="alert alert-secondary py-2" role="status">
+            Создан на основе документа
+            @if (basis.CanOpen)
+            {
+                <a href="@($"documents/{basis.Id}")">«@basis.Title»</a>
+            }
+            else
+            {
+                <span>«@basis.Title»</span>
+            }
+            <span class="text-muted">(@(basis.StatusTitle?.ToLowerInvariant() ?? "удалён"))</span>.
+            @if (basis.NotTransferred.Count == 0)
+            {
+                <div class="small">Всё, что вводил автор основы, перенесено.</div>
+            }
+            else
+            {
+                <details open="@(d.Status is "draft" or "saved_draft" or "returned")" class="mt-1">
+                    <summary>Не перенесено: @basis.NotTransferred.Count</summary>
+                    <ul class="small mb-0">
+                        @foreach (var line in basis.NotTransferred)
+                        {
+                            <li>@line</li>
+                        }
+                    </ul>
+                </details>
+            }
+        </div>
+    }
 
     <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
         @if (details.Editable)
@@ -91,6 +124,11 @@ else
         @if (details.Actions.Transfer)
         {
             <button class="btn btn-outline-primary" disabled="@busy" @onclick="() => transferring = !transferring">Передать документ</button>
+        }
+        @* «Создать на основе» (этап 7, A11; S-13): выбор шаблона и дисциплины — на экране создания документа, основа уже названа. *@
+        @if (details.Actions.CreateBasedOn)
+        {
+            <a class="btn btn-outline-primary @(busy ? "disabled" : "")" href="@($"documents/new?basedOn={Id}")">Создать на основе</a>
         }
         @if (details.Actions.Approve)
         {

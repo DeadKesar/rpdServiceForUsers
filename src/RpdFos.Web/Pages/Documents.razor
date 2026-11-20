@@ -77,7 +77,7 @@ else
                         @d.StatusTitle
                         @if (d.IsOutdated)
                         {
-                            <span class="badge text-bg-warning ms-1" title="Вышла новая редакция шаблона">устарел</span>
+                            <span class="badge text-bg-warning ms-1" title="@DocumentTitles.OutdatedHint">устарел</span>
                         }
                     </td>
                     <td class="text-nowrap">@d.UpdatedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</td>
@@ -123,7 +123,7 @@ else
                         @d.StatusTitle
                         @if (d.IsOutdated)
                         {
-                            <span class="badge text-bg-warning ms-1" title="Вышла новая редакция шаблона">устарел</span>
+                            <span class="badge text-bg-warning ms-1" title="@DocumentTitles.OutdatedHint">устарел</span>
                         }
                     </td>
                     <td class="text-nowrap">@d.UpdatedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</td>

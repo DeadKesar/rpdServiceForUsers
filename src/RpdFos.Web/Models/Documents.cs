@@ -14,8 +14,12 @@ public sealed record ReturnedFromApproval(string By, DateTimeOffset At);
 
 /// <param name="AssignedTo">За кем дисциплина закреплена (этап 7, A10); null — ни за кем.</param>
 /// <param name="CanCreate">Пользователь может создать документ: закреплений нет, он закреплён, это методист или администратор.</param>
+/// <param name="DocumentStatus">
+/// Статус показанного документа дисциплины (этап 7, A11): у дисциплины с согласованным документом новый создаётся только на его
+/// основе.
+/// </param>
 public sealed record DisciplineOption(Guid Id, string Code, string Name, Guid? DocumentId, string? DocumentAuthor, bool CanOpen,
-    string? AssignedTo = null, bool CanCreate = true);
+    string? AssignedTo = null, bool CanCreate = true, string? DocumentStatus = null);
 
 public sealed record DocumentItem(Guid Id, string Type, string Title, string Status, string StatusTitle, bool IsOutdated, int Version,
     Guid TemplateId, int TemplateRevision, Guid DisciplineId, string DisciplineCode, string DisciplineName, Guid AuthorId,
@@ -28,12 +32,13 @@ public sealed record DocumentItem(Guid Id, string Type, string Title, string Sta
 /// возвращает согласованный документ на исправление; <paramref name="ForceTargets"/> — статусы, в которые администратор
 /// переводит документ принудительно (null — не администратор), этап 7, A8. <paramref name="Archive"/> — автор, методист или
 /// администратор отправляют согласованный документ в архив; <paramref name="Transfer"/> — методист или администратор
-/// передают документ другому автору (этап 7, A9).
+/// передают документ другому автору (этап 7, A9). <paramref name="CreateBasedOn"/> — «Создать на основе» в согласованном и
+/// архивном документе: автор, методист, администратор и закреплённый за дисциплиной (этап 7, A11).
 /// </summary>
 public sealed record DocumentActions(bool Submit, bool Review, bool ResolveComments, bool Print, bool CorrectPlan = false,
     bool TakeForReview = false, bool ResolveOwnComments = false, bool Delete = false, bool Approve = false,
     bool Comment = false, bool ResolveApprovalComments = false, bool ReturnForCorrection = false,
-    List<StatusOption>? ForceTargets = null, bool Archive = false, bool Transfer = false);
+    List<StatusOption>? ForceTargets = null, bool Archive = false, bool Transfer = false, bool CreateBasedOn = false);
 
 /// <summary>Статус и его название для списка «Сменить статус».</summary>
 public sealed record StatusOption(string Status, string Title);
@@ -69,9 +74,16 @@ public sealed record MarkedApprovalItem(Guid Id, string Type, string DisciplineC
 /// <summary>Исправление поля из учебного плана: место, было, стало, кто и когда.</summary>
 public sealed record PlanCorrection(string Path, JsonElement? Before, JsonElement? After, string? ChangedBy, DateTimeOffset ChangedAt);
 
+/// <param name="BasedOn">Документ создан на основе другого (этап 7, A11): основа и список неперенесённого; иначе null.</param>
 public sealed record DocumentDetails(DocumentItem Document, JsonElement Payload, JsonElement Schema, DocumentMetadata Metadata,
     bool Editable, DocumentActions Actions, JsonElement? TemplateDefaults = null, List<PlanCorrection>? PlanCorrections = null,
-    Guid? ViewerId = null, ApprovalState? Approval = null);
+    Guid? ViewerId = null, ApprovalState? Approval = null, DocumentBasis? BasedOn = null);
+
+/// <summary>
+/// Основа документа («Создать на основе», этап 7, A11): название и статус сейчас (<c>null</c> — основа удалена), открывается ли
+/// она зрителю и что из неё не перенесено — по тексту на строку.
+/// </summary>
+public sealed record DocumentBasis(Guid Id, string Title, string? Status, string? StatusTitle, bool CanOpen, List<string> NotTransferred);
 
 public sealed record DocumentMetadata(List<SectionState> Sections, List<string> ReadOnlyPaths, List<string> HiddenPaths,
     List<CompetenceCandidate> CompetenceCandidates, PlanDisciplineChoices? PlanDisciplines,
@@ -122,6 +134,12 @@ public static class DocumentTitles
         ("returned", "На доработке"), ("accepted", "Принят"), ("approval", "На согласовании"), ("approved", "Согласован"),
         ("archived", "Архивный")
     ];
+
+    /// <summary>
+    /// Подсказка у значка «устарел»: признак ставят две причины — вышла новая редакция шаблона (FR-DOC-12) и согласован документ,
+    /// созданный на основе этого, для той же дисциплины (этап 7, A11).
+    /// </summary>
+    public const string OutdatedHint = "Устарел: вышла новая редакция шаблона или согласован документ, созданный на основе этого";
 }
 
 /// <summary>

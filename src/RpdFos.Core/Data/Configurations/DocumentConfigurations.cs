@@ -45,6 +45,9 @@ internal sealed class DocumentConfiguration : IEntityTypeConfiguration<Document>
         e.HasOne<DocumentTemplate>().WithMany().HasForeignKey(x => x.TemplateId).OnDelete(DeleteBehavior.Restrict);
         e.HasOne<Employee>().WithMany().HasForeignKey(x => x.AuthorId).OnDelete(DeleteBehavior.Restrict);
         e.HasOne<Discipline>().WithMany().HasForeignKey(x => x.DisciplineId).OnDelete(DeleteBehavior.Restrict);
+        // Основа «Создать на основе» (этап 7, A11): документы удаляются мягко, ссылка на основу остаётся; физическое удаление
+        // основы ссылку лишь обнуляет.
+        e.HasOne<Document>().WithMany().HasForeignKey(x => x.BasedOnDocumentId).OnDelete(DeleteBehavior.SetNull);
     }
 }
 

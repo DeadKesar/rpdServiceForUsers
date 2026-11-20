@@ -20,7 +20,9 @@ namespace RpdFos.Api.Features.Documents;
 /// принудительная смена статуса (администратор), этап 7, A8. Архив (автор, методист, администратор) и передача документа
 /// другому автору (методист, администратор), этап 7, A9. Закреплённый за дисциплиной видит чужие документы по ней только для
 /// чтения, и они же — вторым списком «Документы моих дисциплин»; у дисциплины с закреплениями создают документы закреплённые
-/// преподаватели, этап 7, A10. Правила, предзаполнение и проверки — в ядре
+/// преподаватели, этап 7, A10. «Создать на основе» (A11): создание принимает документ-основу, из которого переносится ввод
+/// автора; ответ и документ несут список неперенесённого, а согласование документа с основой той же дисциплины помечает
+/// основу «устарел». Правила, предзаполнение и проверки — в ядре
 /// (<see cref="DocumentCreation"/>, <see cref="DocumentEditing"/>, <see cref="DocumentReview"/>,
 /// <see cref="DocumentApproval"/>, <see cref="DocumentReopening"/>, <see cref="DocumentArchiving"/>,
 /// <see cref="DocumentTransfer"/>, <see cref="DocumentTransitions"/>).
@@ -186,7 +188,8 @@ public class DocumentsModule : ICarterModule
             var isHolder = me is Guid employeeId && assigned?.Any(h => h.EmployeeId == employeeId) == true;
             var (assignedTo, canCreate) = (assigned is null ? null : DisciplineAssignments.Names(assigned), seesAll || assigned is null || isHolder);
             return existing.TryGetValue(d.Id, out var doc)
-                ? new DisciplineOption(d.Id, d.Code, d.Name, doc.Id, doc.ShortName, seesAll || doc.AuthorId == me || isHolder, assignedTo, canCreate)
+                ? new DisciplineOption(d.Id, d.Code, d.Name, doc.Id, doc.ShortName, seesAll || doc.AuthorId == me || isHolder, assignedTo,
+                    canCreate, doc.Status)
                 : new DisciplineOption(d.Id, d.Code, d.Name, null, null, false, assignedTo, canCreate);
         }).ToList());
     }
@@ -198,36 +201,41 @@ public class DocumentsModule : ICarterModule
     {
         var (document, viewer, refusal) = await VisibleDocumentAsync(id, http, db, directory, approval, assignments, ct);
         if (refusal is not null) return refusal;
-        return Results.Ok(await DetailsAsync(document!, viewer!, db, validator, rules, registry, approval, ct));
+        return Results.Ok(await DetailsAsync(document!, viewer!, db, validator, rules, registry, approval, assignments, ct));
     }
 
     private static async Task<IResult> Create(
         CreateDocumentRequest rq, HttpContext http, DirectoryAccounts directory, DocumentCreation creation, AppDbContext db,
         IDocumentValidator validator, ValidationRuleSet rules, DocumentTypeRegistry registry, DocumentApproval approval,
-        CancellationToken ct)
+        DisciplineAssignments assignments, CancellationToken ct)
     {
         // Автор — запись справочника текущего пользователя: она же первый составитель.
         var authorId = await directory.FindIdAsync(http.User, ct);
         if (authorId is null) return NoDirectoryRecord();
 
-        // Закрепления дисциплин ограничивают преподавателей; методист и администратор создают «за кафедру» (этап 7, A10).
-        var result = await creation.CreateAsync(rq.TemplateId, rq.DisciplineId, authorId.Value, bypassAssignments: IsCorrector(http.User), ct);
+        // Закрепления дисциплин ограничивают преподавателей; методист и администратор создают «за кафедру» (этап 7, A10) и видят
+        // все документы — любой подходит им в основы («Создать на основе», A11).
+        var result = await creation.CreateAsync(
+            rq.TemplateId, rq.DisciplineId, authorId.Value, isCorrector: IsCorrector(http.User), rq.BasedOnDocumentId, ct);
         return result switch
         {
             { Document: { } document } => Results.Created($"/api/documents/{document.Id}",
                 await DetailsAsync(document,
                     new DocumentViewer(authorId, IsAuthor: true, IsReviewer(http.User), IsCorrector(http.User), IsSignatory: false,
                         IsAdmin: http.User.IsInRole(AppRoles.Admin)),
-                    db, validator, rules, registry, approval, ct)),
+                    db, validator, rules, registry, approval, assignments, ct)),
             { Problem: DocumentCreationProblem.Duplicate } => Results.Problem(statusCode: StatusCodes.Status409Conflict,
                 title: "Документ уже есть", detail: result.Detail,
                 extensions: new Dictionary<string, object?>
                 {
                     ["documentId"] = result.ExistingId, ["location"] = $"/api/documents/{result.ExistingId}"
                 }),
-            // Доступ, а не данные запроса: дисциплину закрепили за другими преподавателями (этап 7, A10).
+            // Доступ, а не данные запроса: дисциплину закрепили за другими преподавателями (этап 7, A10) или основа — чужой
+            // документ (A11).
             { Problem: DocumentCreationProblem.DisciplineAssigned } => Results.Problem(statusCode: StatusCodes.Status403Forbidden,
                 title: "Дисциплина закреплена", detail: result.Detail),
+            { Problem: DocumentCreationProblem.BaseNotAvailable } => Results.Problem(statusCode: StatusCodes.Status403Forbidden,
+                title: "Основа недоступна", detail: result.Detail),
             _ => Results.Problem(statusCode: StatusCodes.Status422UnprocessableEntity,
                 title: result.Problem switch
                 {
@@ -236,6 +244,9 @@ public class DocumentsModule : ICarterModule
                     DocumentCreationProblem.TypeNotSupported => "Тип документа пока не создаётся",
                     DocumentCreationProblem.DisciplineNotFound => "Дисциплина не найдена",
                     DocumentCreationProblem.DisciplineNotInPlan => "Дисциплина не из плана шаблона",
+                    DocumentCreationProblem.BaseNotFound => "Основа не найдена",
+                    DocumentCreationProblem.BaseOtherType => "Основа другого типа",
+                    DocumentCreationProblem.BaseSamePlan => "Основа из того же плана",
                     _ => "Для этой строки плана документ не создаётся"
                 },
                 detail: result.Detail)
@@ -732,7 +743,7 @@ public class DocumentsModule : ICarterModule
 
     private static async Task<DocumentDetails> DetailsAsync(
         Document document, DocumentViewer viewer, AppDbContext db, IDocumentValidator validator, ValidationRuleSet rules,
-        DocumentTypeRegistry registry, DocumentApproval approval, CancellationToken ct)
+        DocumentTypeRegistry registry, DocumentApproval approval, DisciplineAssignments assignments, CancellationToken ct)
     {
         var (isAuthor, isReviewer, isCorrector) = (viewer.IsAuthor, viewer.IsReviewer, viewer.IsCorrector);
         var template = await db.DocumentTemplates.IgnoreQueryFilters().Where(t => t.Id == document.TemplateId)
@@ -747,6 +758,10 @@ public class DocumentsModule : ICarterModule
         // Строка согласующего ждёт отметки: он согласует или возвращает документ и оставляет замечания (этап 7, A2).
         var awaiting = viewer.IsSignatory && panel is not null && panel.Seats.Any(s => s.Mine && s.Status == SignatureStatuses.Pending);
         var signs = awaiting && DocumentTransitions.CanSign(status);
+        // «Создать на основе» (этап 7, A11): автор, методист, администратор и закреплённый за дисциплиной — как и сама основа.
+        // Закрепление проверяется последним: запрос к базе только тем, кому иначе кнопка не положена.
+        var canBase = DocumentTransitions.CanBaseNew(status) && (isAuthor || isCorrector || viewer.IsAssigned ||
+            viewer.Id is Guid me && await assignments.IsAssignedAsync(document.DisciplineId, me, ct));
 
         return new DocumentDetails(
             DocumentItem.From(document, facts.Discipline),
@@ -774,9 +789,40 @@ public class DocumentsModule : ICarterModule
                     ? DocumentTransitions.ForceTargetsFrom(status).Select(s => new StatusOption(s, DocumentStatuses.Title(s))).ToList()
                     : null,
                 Archive: (isAuthor || isCorrector) && DocumentTransitions.CanArchive(status),
-                Transfer: isCorrector && DocumentTransitions.CanTransfer(status)),
+                Transfer: isCorrector && DocumentTransitions.CanTransfer(status),
+                CreateBasedOn: canBase),
             template.DefaultPayload is { } defaults ? JsonDocument.Parse(defaults).RootElement : null,
-            corrections, viewer.Id, panel);
+            corrections, viewer.Id, panel, await BasisAsync(document, viewer, db, assignments, ct));
+    }
+
+    /// <summary>
+    /// «Создан на основе» (этап 7, A11): основа и список неперенесённого — из записи аудита, которую оставило создание. Название
+    /// основы называется и тогда, когда она удалена. Открыть основу может тот, кому она доступна: методист и администратор,
+    /// её автор и закреплённый за её дисциплиной.
+    /// </summary>
+    private static async Task<DocumentBasis?> BasisAsync(
+        Document document, DocumentViewer viewer, AppDbContext db, DisciplineAssignments assignments, CancellationToken ct)
+    {
+        if (document.BasedOnDocumentId is not Guid baseId) return null;
+        var basis = await db.Documents.AsNoTracking().Where(d => d.Id == baseId)
+            .Select(d => new { d.Title, d.Status, d.AuthorId, d.DisciplineId }).SingleOrDefaultAsync(ct);
+        var recorded = await db.AuditLog.AsNoTracking()
+            .Where(a => a.EntityType == AuditEntities.Document && a.EntityId == document.Id && a.EventType == AuditEvents.DocumentBasedOn)
+            .OrderByDescending(a => a.OccurredAt).Select(a => a.Payload).FirstOrDefaultAsync(ct);
+
+        string? loggedTitle = null;
+        string[] notTransferred = [];
+        if (recorded is not null)
+        {
+            using var json = JsonDocument.Parse(recorded);
+            loggedTitle = json.RootElement.TryGetProperty("title", out var title) ? title.GetString() : null;
+            if (json.RootElement.TryGetProperty("not_transferred", out var list) && list.ValueKind == JsonValueKind.Array)
+                notTransferred = list.EnumerateArray().Select(n => n.GetString() ?? "").ToArray();
+        }
+        var canOpen = basis is not null && (viewer.IsCorrector || basis.AuthorId == viewer.Id ||
+            viewer.Id is Guid me && await assignments.IsAssignedAsync(basis.DisciplineId, me, ct));
+        return new DocumentBasis(baseId, basis?.Title ?? loggedTitle ?? "Удалённый документ", basis?.Status,
+            basis is null ? null : DocumentStatuses.Title(basis.Status), canOpen, notTransferred);
     }
 
     /// <summary>
@@ -840,7 +886,8 @@ public class DocumentsModule : ICarterModule
             detail: "Учётная запись не связана со справочником сотрудников — обратитесь к администратору.");
 }
 
-public record CreateDocumentRequest(Guid TemplateId, Guid DisciplineId);
+/// <param name="BasedOnDocumentId">Документ-основа («Создать на основе», этап 7, A11); пусто — документ создаётся с нуля.</param>
+public record CreateDocumentRequest(Guid TemplateId, Guid DisciplineId, Guid? BasedOnDocumentId = null);
 
 /// <summary>Значение раздела целиком и версия документа, которую видел клиент.</summary>
 /// <param name="ConfirmReturn">Исправляющий подтвердил возврат принятого документа автору, если исправление сделает его неполным.</param>
@@ -893,10 +940,12 @@ public record ReturnedFromApproval(string By, DateTimeOffset At);
 /// Дисциплина плана для создания документа; есть документ — ссылка на него, если он доступен пользователю.
 /// <paramref name="AssignedTo"/> — за кем дисциплина закреплена (этап 7, A10; null — ни за кем), <paramref name="CanCreate"/> —
 /// может ли создать документ пользователь: закреплений нет, он закреплён или это методист или администратор.
+/// <paramref name="DocumentStatus"/> — статус показанного документа (этап 7, A11): у дисциплины с согласованным документом новый
+/// создаётся только на его основе, и экран выбирает кнопку по статусу.
 /// </summary>
 public record DisciplineOption(
     Guid Id, string Code, string Name, Guid? DocumentId, string? DocumentAuthor, bool CanOpen, string? AssignedTo = null,
-    bool CanCreate = true);
+    bool CanCreate = true, string? DocumentStatus = null);
 
 public record DocumentItem(
     Guid Id, string Type, string Title, string Status, string StatusTitle, bool IsOutdated, int Version, Guid TemplateId,
@@ -926,10 +975,14 @@ public record DocumentItem(
 /// </param>
 /// <param name="Archive">Автор, методист или администратор отправляют согласованный документ в архив (этап 7, A9).</param>
 /// <param name="Transfer">Методист или администратор передают документ другому автору (этап 7, A9; FR-DOC-15).</param>
+/// <param name="CreateBasedOn">
+/// «Создать на основе» в согласованном и архивном документе (этап 7, A11; S-13): автор, методист, администратор и закреплённый
+/// за дисциплиной документа.
+/// </param>
 public record DocumentActions(bool Submit, bool Review, bool ResolveComments, bool Print, bool CorrectPlan = false,
     bool TakeForReview = false, bool ResolveOwnComments = false, bool Delete = false, bool Approve = false,
     bool Comment = false, bool ResolveApprovalComments = false, bool ReturnForCorrection = false,
-    IReadOnlyList<StatusOption>? ForceTargets = null, bool Archive = false, bool Transfer = false);
+    IReadOnlyList<StatusOption>? ForceTargets = null, bool Archive = false, bool Transfer = false, bool CreateBasedOn = false);
 
 /// <summary>Статус и его название для списка «Сменить статус».</summary>
 public record StatusOption(string Status, string Title);
@@ -965,10 +1018,18 @@ public record PlanCorrection(string Path, JsonElement? Before, JsonElement? Afte
 /// Документ для редактора: содержимое, схема из шаблона, метаданные, доступные действия и значения по умолчанию
 /// шаблона — из них редактор берёт стандартные пункты для подсказок (виды самостоятельной работы).
 /// </summary>
+/// <param name="BasedOn">Документ создан на основе другого (этап 7, A11): основа и список неперенесённого; иначе null.</param>
 public record DocumentDetails(
     DocumentItem Document, JsonElement Payload, JsonElement Schema, DocumentMetadata Metadata, bool Editable, DocumentActions Actions,
     JsonElement? TemplateDefaults = null, IReadOnlyList<PlanCorrection>? PlanCorrections = null, Guid? ViewerId = null,
-    ApprovalPanel? Approval = null);
+    ApprovalPanel? Approval = null, DocumentBasis? BasedOn = null);
+
+/// <summary>
+/// Основа документа («Создать на основе», этап 7, A11): название и статус сейчас (null — основа удалена), открывается ли она
+/// зрителю и что из неё не перенесено — по тексту на строку.
+/// </summary>
+public record DocumentBasis(
+    Guid Id, string Title, string? Status, string? StatusTitle, bool CanOpen, IReadOnlyList<string> NotTransferred);
 
 /// <summary>Замечание к полю: кто и когда оставил, разрешено ли и кем.</summary>
 /// <param name="FromApproval">Замечание оставлено на согласовании — согласующим (этап 7, A2).</param>

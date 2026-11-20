@@ -1,5 +1,6 @@
 using System.Text.Encodings.Web;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Microsoft.EntityFrameworkCore;
 using RpdFos.Core.Data;
 using RpdFos.Core.Data.Entities;
@@ -14,7 +15,22 @@ public enum DocumentCreationProblem
     TemplateNotFound, TemplateNotPublished, TypeNotSupported, DisciplineNotFound, DisciplineNotInPlan, NotADiscipline, Duplicate,
 
     /// <summary>Дисциплина закреплена за другими преподавателями (этап 7, A10): автору создавать по ней нельзя — 403.</summary>
-    DisciplineAssigned
+    DisciplineAssigned,
+
+    /// <summary>Документ-основа не найден или удалён (этап 7, A11) — 422.</summary>
+    BaseNotFound,
+
+    /// <summary>Основа недоступна автору: не его документ и не документ закреплённой за ним дисциплины (A11) — 403.</summary>
+    BaseNotAvailable,
+
+    /// <summary>Основа другого типа, чем создаваемый документ (A11) — 422.</summary>
+    BaseOtherType,
+
+    /// <summary>
+    /// Основа — документ другой дисциплины того же плана (A11): на основе создают для той же дисциплины или для дисциплины
+    /// другого плана (решение 4) — 422.
+    /// </summary>
+    BaseSamePlan
 }
 
 public sealed record DocumentCreationResult(Document? Document, DocumentCreationProblem? Problem = null, string? Detail = null,
@@ -44,19 +60,27 @@ public static class DocumentRules
 
 /// <summary>
 /// Создание документа по опубликованному шаблону для дисциплины его плана: проверки, предзаполнение, нормализованные
-/// таблицы и первая запись истории статусов — одним сохранением.
+/// таблицы и первая запись истории статусов — одним сохранением. «Создать на основе» (этап 7, A11) — то же создание, где
+/// к предзаполнению из плана добавляется перенос ввода автора из документа-основы (<see cref="DocumentBasing"/>).
 /// </summary>
 public sealed class DocumentCreation(
     AppDbContext db, DocumentTypeRegistry registry, DocumentProjections projections, DisciplineAssignments assignments, TimeProvider clock)
 {
     private static readonly JsonSerializerOptions Json = new() { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
 
-    /// <param name="bypassAssignments">
+    /// <param name="isCorrector">
     /// Создаёт методист или администратор — «за кафедру»: закрепления дисциплин (этап 7, A10) для них не ограничение, ограничены
     /// ими преподаватели. Закрепления определяют, кто из преподавателей создаёт документы дисциплины, а не кто их видит.
+    /// Методист и администратор видят все документы, поэтому любой подходит им в основы (A11); остальным — свои и документы
+    /// закреплённых за ними дисциплин.
+    /// </param>
+    /// <param name="basedOnId">
+    /// Документ-основа (этап 7, A11; решение 4): неудалённый документ того же типа — для той же дисциплины или для дисциплины
+    /// другого плана. У дисциплины с согласованным документом новый создаётся только на основе согласованного.
     /// </param>
     public async Task<DocumentCreationResult> CreateAsync(
-        Guid templateId, Guid disciplineId, Guid authorId, bool bypassAssignments = false, CancellationToken ct = default)
+        Guid templateId, Guid disciplineId, Guid authorId, bool isCorrector = false, Guid? basedOnId = null,
+        CancellationToken ct = default)
     {
         var template = await db.DocumentTemplates.AsNoTracking().SingleOrDefaultAsync(t => t.Id == templateId, ct);
         if (template is null) return new(null, DocumentCreationProblem.TemplateNotFound);
@@ -75,28 +99,67 @@ public sealed class DocumentCreation(
 
         // Закрепления — до проверки «документ уже есть»: чужому преподавателю закреплённая дисциплина отвечает отказом доступа,
         // а не рассказом о документе, к которому у него нет доступа (как «в архив» чужого документа, A9).
-        if (!bypassAssignments && await assignments.HoldersAsync(disciplineId, ct) is { Count: > 0 } holders &&
+        if (!isCorrector && await assignments.HoldersAsync(disciplineId, ct) is { Count: > 0 } holders &&
             holders.All(h => h.EmployeeId != authorId))
             return new(null, DocumentCreationProblem.DisciplineAssigned, DisciplineAssignments.Refusal(holders));
 
+        // Основа (этап 7, A11). Порядок отказов: не найдена (422), недоступна (403), другого типа (422), другая дисциплина
+        // того же плана (422) — данные запроса раньше состояния дисциплины (409), доступ раньше данных.
+        Document? basis = null;
+        if (basedOnId is Guid basisId)
+        {
+            basis = await db.Documents.AsNoTracking().SingleOrDefaultAsync(d => d.Id == basisId, ct);
+            if (basis is null)
+                return new(null, DocumentCreationProblem.BaseNotFound, "Документ-основа не найден: возможно, он удалён.");
+            if (!isCorrector && basis.AuthorId != authorId && !await assignments.IsAssignedAsync(basis.DisciplineId, authorId, ct))
+                return new(null, DocumentCreationProblem.BaseNotAvailable,
+                    "Основой служит свой документ или документ дисциплины, закреплённой за вами.");
+            if (basis.Type != template.Type)
+                return new(null, DocumentCreationProblem.BaseOtherType, "Документ создаётся на основе документа того же типа.");
+            var basisPlanId = await db.Disciplines.Where(d => d.Id == basis.DisciplineId).Select(d => d.CurriculumPlanId).SingleAsync(ct);
+            if (basis.DisciplineId != disciplineId && basisPlanId == facts.Discipline.CurriculumPlanId)
+                return new(null, DocumentCreationProblem.BaseSamePlan,
+                    "Основа — документ другой дисциплины этого же плана. На основе создают документ той же дисциплины " +
+                    "или дисциплины другого плана.");
+        }
+
         // Один неудалённый документ на дисциплину и линию редакций шаблона. Архивный дисциплину не занимает (этап 7, A9,
-        // решение 3): по ней создаётся новый. Согласованный занимает её, пока новый нельзя создать на его основе (A11).
-        var existing = await (
-                from d in db.Documents
-                join t in db.DocumentTemplates on d.TemplateId equals t.Id
-                where d.DisciplineId == disciplineId && t.LineageId == template.LineageId && d.Status != DocumentStatuses.Archived
-                select (Guid?)d.Id)
-            .FirstOrDefaultAsync(ct);
-        if (existing is Guid existingId)
-            return new(null, DocumentCreationProblem.Duplicate, "Для этой дисциплины документ по шаблону уже есть.", existingId);
+        // решение 3): по ней создаётся новый. Незавершённый документ дисциплину занимает всегда; согласованный — пока новый не
+        // создают на его основе (A11: у дисциплины с согласованным документом новый создаётся только так).
+        var occupants = (await (
+                    from d in db.Documents
+                    join t in db.DocumentTemplates on d.TemplateId equals t.Id
+                    where d.DisciplineId == disciplineId && t.LineageId == template.LineageId && d.Status != DocumentStatuses.Archived
+                    select new { d.Id, d.Status, d.CreatedAt })
+                .ToListAsync(ct))
+            .OrderBy(o => DocumentTransitions.IsUnfinished(o.Status) ? 0 : 1).ThenByDescending(o => o.CreatedAt).ToList();
+        if (occupants.FirstOrDefault() is { } occupant)
+        {
+            if (DocumentTransitions.IsUnfinished(occupant.Status))
+                return new(null, DocumentCreationProblem.Duplicate, "Для этой дисциплины документ по шаблону уже есть.", occupant.Id);
+            if (basis is null || occupants.All(o => o.Id != basis.Id))
+                return new(null, DocumentCreationProblem.Duplicate,
+                    "У дисциплины есть согласованный документ: новый создаётся на его основе («Создать на основе»).", occupant.Id);
+        }
 
         var author = await db.Employees.AsNoTracking().Where(e => e.Id == authorId)
             .Select(e => new DocumentAuthor(e.Id, e.NameForDocument, e.Position)).SingleAsync(ct);
         var schema = JsonDocument.Parse(template.Schema).RootElement;
         var payload = DocumentPrefill.Build(schema, facts, author, registry.FindSchema);
         // Постоянные пункты вуза — из значений по умолчанию шаблона, кроме мест, не предусмотренных планом.
-        TemplateDefaults.Apply(payload, template.DefaultPayload, TemplateDefaults.Fields(schema, registry.FindSchema),
-            DocumentMetadata.Hidden(schema, facts.Semesters, registry.FindSchema));
+        var hidden = DocumentMetadata.Hidden(schema, facts.Semesters, registry.FindSchema);
+        TemplateDefaults.Apply(payload, template.DefaultPayload, TemplateDefaults.Fields(schema, registry.FindSchema), hidden);
+
+        // Ввод автора основы — поверх предзаполненного для цели; что не перенесено, попадёт в аудит и в плашку редактора.
+        IReadOnlyList<string> notTransferred = [];
+        if (basis is not null)
+        {
+            var source = await db.DocumentTemplates.IgnoreQueryFilters().Where(t => t.Id == basis.TemplateId)
+                .Select(t => new { t.Schema, t.DefaultPayload }).SingleAsync(ct);
+            notTransferred = DocumentBasing.Transfer(payload, schema, JsonDocument.Parse(source.Schema).RootElement,
+                source.DefaultPayload is { } defaults ? JsonNode.Parse(defaults) : null,
+                JsonNode.Parse(basis.Payload) as JsonObject ?? [], facts, author.Id, hidden, registry.FindSchema).NotTransferred;
+        }
 
         var now = clock.GetUtcNow();
         var document = new Document
@@ -106,11 +169,23 @@ public sealed class DocumentCreation(
             TemplateRevision = template.Revision,
             AuthorId = author.Id,
             DisciplineId = disciplineId,
+            BasedOnDocumentId = basis?.Id,
             Title = Title(template.Type, facts),
             Payload = payload.ToJsonString(Json),
             CreatedAt = now
         };
         db.Documents.Add(document);
+        if (basis is not null)
+            db.AuditLog.Add(new AuditLogEntry
+            {
+                UserId = author.Id, EventType = AuditEvents.DocumentBasedOn, EntityType = AuditEntities.Document,
+                EntityId = document.Id, OccurredAt = now,
+                Payload = new JsonObject
+                {
+                    ["base"] = basis.Id, ["title"] = basis.Title,
+                    ["not_transferred"] = new JsonArray(notTransferred.Select(n => (JsonNode)n).ToArray())
+                }.ToJsonString(Json)
+            });
         await projections.SyncAsync(document, ct);
         db.DocumentStatusHistory.Add(new DocumentStatusChange
         {
