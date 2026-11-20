@@ -108,7 +108,10 @@ public class NotificationLetterTests
                 NotificationEvents.ReworkDeadlineNear, NotificationEvents.ReworkOverdue,
                 // Этап 7, A8: смена статуса администратором — нештатная ситуация; возврат согласованного документа на
                 // исправление (методист решил сам) письма по умолчанию не даёт.
-                NotificationEvents.StatusForced
+                NotificationEvents.StatusForced,
+                // Этап 7, A9: новый автор получает документ, за который теперь отвечает; отправка в архив и сообщение
+                // прежнему автору только сообщают.
+                NotificationEvents.TransferredIn
             }.Order(),
             NotificationEvents.All.Where(e => e.DefaultMail == MailMode.Immediately).Select(e => e.Type).Order());
 

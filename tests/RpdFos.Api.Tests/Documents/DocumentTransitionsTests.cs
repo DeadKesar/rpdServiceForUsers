@@ -138,9 +138,11 @@ public class DocumentTransitionsTests
     [InlineData(S.Accepted, true, false)]
     [InlineData(S.Approval, true, true)]
     [InlineData(S.Approved, true, true)]
+    [InlineData(S.Archived, true, true)]
     public void Printing_by_status_and_role(string status, bool reviewer, bool signatory)
     {
-        // Автор печатает всегда; методист — с проверки; согласующий — на согласовании и после; остальные — нет.
+        // Автор печатает всегда; методист — с проверки; согласующий — на согласовании и после, архивный — те же участники,
+        // что и согласованный (этап 7, A9); остальные — нет.
         Assert.True(DocumentTransitions.CanPrint(status, isAuthor: true, isReviewer: false, isSignatory: false));
         Assert.Equal(reviewer, DocumentTransitions.CanPrint(status, isAuthor: false, isReviewer: true, isSignatory: false));
         Assert.Equal(signatory, DocumentTransitions.CanPrint(status, isAuthor: false, isReviewer: false, isSignatory: true));
@@ -240,6 +242,64 @@ public class DocumentTransitionsTests
         Assert.Equal(S.Approved, document.ReturnForCorrection());
         // Время согласования сбрасывается; снимок согласованной версии — в document_versions, документ его не хранит.
         Assert.Equal((S.UnderReview, null), (document.Status, document.ApprovedAt));
+    }
+
+    [Theory]
+    [InlineData(S.Draft, false)]
+    [InlineData(S.SavedDraft, false)]
+    [InlineData(S.UnderReview, false)]
+    [InlineData(S.Returned, false)]
+    [InlineData(S.Accepted, false)]
+    [InlineData(S.Approval, false)]
+    [InlineData(S.Approved, true)]
+    [InlineData(S.Archived, false)]
+    [InlineData(S.Deleted, false)]
+    public void Only_an_approved_document_goes_to_the_archive(string status, bool allowed)
+    {
+        // Этап 7, A9, решение 3: в архив — только из «Согласован» и только явно; архивный документ закрыт для правки.
+        Assert.Equal(allowed, DocumentTransitions.CanArchive(status));
+
+        var document = new Document { Status = status, ApprovedAt = DateTimeOffset.UtcNow };
+        if (!allowed)
+        {
+            Assert.Throws<InvalidOperationException>(document.Archive);
+            return;
+        }
+        var approvedAt = document.ApprovedAt;
+        Assert.Equal(S.Approved, document.Archive());
+        // Время согласования остаётся: архивный документ был согласован.
+        Assert.Equal((S.Archived, approvedAt), (document.Status, document.ApprovedAt));
+        Assert.False(DocumentTransitions.CanEdit(S.Archived, DocumentRole.Author));
+        Assert.False(DocumentTransitions.CanEdit(S.Archived, DocumentRole.Reviewer));
+        Assert.False(DocumentTransitions.CanCorrectPlanFields(S.Archived));
+        Assert.False(DocumentTransitions.IsUnfinished(S.Archived));
+    }
+
+    [Theory]
+    [InlineData(S.Draft, true)]
+    [InlineData(S.SavedDraft, true)]
+    [InlineData(S.UnderReview, true)]
+    [InlineData(S.Returned, true)]
+    [InlineData(S.Accepted, true)]
+    [InlineData(S.Approval, true)]
+    [InlineData(S.Approved, true)]
+    [InlineData(S.Archived, true)]
+    [InlineData(S.Deleted, false)]
+    public void A_document_is_transferred_in_any_status_but_deleted(string status, bool allowed)
+    {
+        // Этап 7, A9; FR-DOC-15: передача меняет только автора.
+        Assert.Equal(allowed, DocumentTransitions.CanTransfer(status));
+
+        var (previous, next) = (Guid.NewGuid(), Guid.NewGuid());
+        var document = new Document { Status = status, AuthorId = previous, Payload = """{"a":1}""" };
+        if (!allowed)
+        {
+            Assert.Throws<InvalidOperationException>(() => document.TransferTo(next));
+            Assert.Equal(previous, document.AuthorId);
+            return;
+        }
+        Assert.Equal(previous, document.TransferTo(next));
+        Assert.Equal((next, status, """{"a":1}"""), (document.AuthorId, document.Status, document.Payload));
     }
 
     [Theory]

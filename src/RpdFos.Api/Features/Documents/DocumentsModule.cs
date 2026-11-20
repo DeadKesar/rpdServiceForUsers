@@ -17,9 +17,11 @@ namespace RpdFos.Api.Features.Documents;
 /// (преподаватель видит свои, FR-DOC-08), изменение по разделам, сохранение, удаление, проверка: отправка,
 /// замечания, возврат и приём. Приём запускает согласование — его действия в срезе «Согласование», а состояние
 /// приходит вместе с документом. Обратные переходы — возврат согласованного документа на исправление (методист) и
-/// принудительная смена статуса (администратор), этап 7, A8. Правила, предзаполнение и проверки — в ядре
+/// принудительная смена статуса (администратор), этап 7, A8. Архив (автор, методист, администратор) и передача документа
+/// другому автору (методист, администратор), этап 7, A9. Правила, предзаполнение и проверки — в ядре
 /// (<see cref="DocumentCreation"/>, <see cref="DocumentEditing"/>, <see cref="DocumentReview"/>,
-/// <see cref="DocumentApproval"/>, <see cref="DocumentReopening"/>, <see cref="DocumentTransitions"/>).
+/// <see cref="DocumentApproval"/>, <see cref="DocumentReopening"/>, <see cref="DocumentArchiving"/>,
+/// <see cref="DocumentTransfer"/>, <see cref="DocumentTransitions"/>).
 /// </summary>
 public class DocumentsModule : ICarterModule
 {
@@ -42,6 +44,10 @@ public class DocumentsModule : ICarterModule
         g.MapPost("/{id:guid}/accept", Accept).RequireAuthorization(Policies.Reviewers);
         g.MapPost("/{id:guid}/return-for-correction", ReturnForCorrection).RequireAuthorization(Policies.Reviewers);
         g.MapPost("/{id:guid}/force-status", ForceStatus).RequireAuthorization(Policies.Admin);
+        // Архив и передача документа (этап 7, A9): в архив отправляют автор, методист и администратор — чужому преподавателю
+        // отказывает сама операция; передают методист и администратор.
+        g.MapPost("/{id:guid}/archive", Archive).RequireAuthorization(Policies.DocumentAuthors);
+        g.MapPost("/{id:guid}/transfer", Transfer).RequireAuthorization(Policies.MethodistOrAdmin);
         g.MapGet("/{id:guid}/comments", Comments);
         g.MapPost("/{id:guid}/comments", AddComment).RequireAuthorization(Policies.Commenters);
         g.MapPost("/{id:guid}/comments/{commentId:guid}/resolve", ResolveComment).RequireAuthorization(Policies.CommentResolvers);
@@ -125,13 +131,17 @@ public class DocumentsModule : ICarterModule
         var disciplines = (await db.Disciplines.AsNoTracking().Where(d => d.CurriculumPlanId == planId)
                 .OrderBy(d => d.Code).ToListAsync(ct))
             .Where(DocumentRules.CanHaveDocument).ToList();
-        var existing = await (
-                from d in db.Documents
-                join t in db.DocumentTemplates on d.TemplateId equals t.Id
-                join a in db.Employees on d.AuthorId equals a.Id
-                where t.LineageId == template.LineageId
-                select new { d.DisciplineId, d.Id, d.AuthorId, a.ShortName })
-            .ToDictionaryAsync(x => x.DisciplineId, ct);
+        // Архивный документ дисциплину не занимает (этап 7, A9). Остальных у дисциплины может быть два — согласованный и
+        // незавершённый (возврат на исправление, «Создать на основе», A11): показывается тот, что в работе, затем новейший.
+        var existing = (await (
+                    from d in db.Documents
+                    join t in db.DocumentTemplates on d.TemplateId equals t.Id
+                    join a in db.Employees on d.AuthorId equals a.Id
+                    where t.LineageId == template.LineageId && d.Status != DocumentStatuses.Archived
+                    select new { d.DisciplineId, d.Id, d.AuthorId, d.Status, d.CreatedAt, a.ShortName })
+                .ToListAsync(ct))
+            .OrderBy(x => DocumentTransitions.IsUnfinished(x.Status) ? 0 : 1).ThenByDescending(x => x.CreatedAt)
+            .GroupBy(x => x.DisciplineId).ToDictionary(g => g.Key, g => g.First());
         var me = await directory.FindIdAsync(http.User, ct);
         var seesAll = SeesAll(http.User);
 
@@ -447,6 +457,68 @@ public class DocumentsModule : ICarterModule
             })
     };
 
+    /// <summary>
+    /// «В архив» (этап 7, A9, решение 3): согласованный документ отправляют в архив автор, методист или администратор.
+    /// Преподаватель, не автор, — 403 раньше проверки статуса: чужой документ не сообщает, в каком он состоянии. Документ в
+    /// другом статусе — 409. Подтверждение — на клиенте.
+    /// </summary>
+    private static async Task<IResult> Archive(
+        Guid id, DocumentVersionRequest rq, HttpContext http, AppDbContext db, DirectoryAccounts directory, DocumentArchiving archiving,
+        CancellationToken ct)
+    {
+        var document = await db.Documents.SingleOrDefaultAsync(d => d.Id == id, ct);
+        if (document is null) return NotFound();
+        if (await directory.FindIdAsync(http.User, ct) is not Guid me) return NoDirectoryRecord();
+        if (document.AuthorId != me && !IsCorrector(http.User))
+            return Results.Problem(statusCode: StatusCodes.Status403Forbidden, title: "Чужой документ",
+                detail: "В архив документ отправляет его автор, методист или администратор.");
+        if (!DocumentTransitions.CanArchive(document.Status)) return Refused(document, DocumentTransitions.ArchiveAction);
+
+        db.Entry(document).Property(d => d.Version).OriginalValue = rq.Version;
+        await archiving.ArchiveAsync(document, me, ActorRole(http.User), ct);
+        await db.SaveChangesAsync(ct);
+        return Results.Ok(new DocumentReviewed(document.Version, document.Status, DocumentStatuses.Title(document.Status), []));
+    }
+
+    /// <summary>
+    /// «Передать документ» (этап 7, A9; FR-DOC-15): методист или администратор передаёт документ любого статуса, кроме
+    /// удалённого (404), другому автору. Причина и новый автор с действующей учётной записью преподавателя — 422; тот же автор — 409.
+    /// </summary>
+    private static async Task<IResult> Transfer(
+        Guid id, TransferRequest rq, HttpContext http, AppDbContext db, DirectoryAccounts directory, DocumentTransfer transfer,
+        CancellationToken ct)
+    {
+        var document = await db.Documents.SingleOrDefaultAsync(d => d.Id == id, ct);
+        if (document is null) return NotFound();
+        if (await directory.FindIdAsync(http.User, ct) is not Guid me) return NoDirectoryRecord();
+
+        db.Entry(document).Property(d => d.Version).OriginalValue = rq.Version;
+        var result = await transfer.TransferAsync(document, me, ActorRole(http.User), rq.EmployeeId, rq.Reason, ct);
+        if (result.Problem is { } problem) return TransferRefused(problem);
+
+        await db.SaveChangesAsync(ct);
+        return Results.Ok(new DocumentReviewed(document.Version, document.Status, DocumentStatuses.Title(document.Status), []));
+    }
+
+    private static IResult TransferRefused(TransferProblem problem) => problem switch
+    {
+        TransferProblem.EmptyReason => Results.Problem(statusCode: StatusCodes.Status422UnprocessableEntity, title: "Не указана причина",
+            detail: "Напишите, почему документ передаётся другому автору: причина попадёт в журнал аудита и в уведомления."),
+        TransferProblem.EmployeeNotFound => Results.Problem(statusCode: StatusCodes.Status422UnprocessableEntity,
+            title: "Сотрудник не найден", detail: "Выберите нового автора в справочнике: запись должна быть действующей."),
+        TransferProblem.NoTeacherAccount => Results.Problem(statusCode: StatusCodes.Status422UnprocessableEntity,
+            title: "У сотрудника нет учётной записи преподавателя",
+            detail: "Новый автор входит в систему и правит документ как преподаватель: создайте или включите ему учётную запись " +
+                    "с ролью «Преподаватель» на странице «Пользователи»."),
+        _ => Results.Problem(statusCode: StatusCodes.Status409Conflict, title: "Автор не изменится",
+            detail: "Документ уже у этого автора. Выберите другого сотрудника.")
+    };
+
+    // Роль, от которой действует пользователь, — для текста уведомлений: методист назван раньше администратора, а автор без этих
+    // ролей отправляет в архив собственный документ и уведомления не создаёт.
+    private static string ActorRole(ClaimsPrincipal user) =>
+        user.IsInRole(AppRoles.Methodist) ? AppRoles.Methodist : user.IsInRole(AppRoles.Admin) ? AppRoles.Admin : AppRoles.Teacher;
+
     /// <summary>Замечания к документу — всем, кто его видит: от старых к новым.</summary>
     private static async Task<IResult> Comments(
         Guid id, HttpContext http, AppDbContext db, DirectoryAccounts directory, DocumentApproval approval, CancellationToken ct)
@@ -646,22 +718,25 @@ public class DocumentsModule : ICarterModule
                 ReturnForCorrection: isReviewer && DocumentTransitions.CanReturnForCorrection(status),
                 ForceTargets: viewer.IsAdmin
                     ? DocumentTransitions.ForceTargetsFrom(status).Select(s => new StatusOption(s, DocumentStatuses.Title(s))).ToList()
-                    : null),
+                    : null,
+                Archive: (isAuthor || isCorrector) && DocumentTransitions.CanArchive(status),
+                Transfer: isCorrector && DocumentTransitions.CanTransfer(status)),
             template.DefaultPayload is { } defaults ? JsonDocument.Parse(defaults).RootElement : null,
             corrections, viewer.Id, panel);
     }
 
     /// <summary>
-    /// Панель «Согласование»: с приёма и до согласованного документа — всем, кто видит документ. После возврата с
-    /// согласования строки прежнего круга и плашку «кто, когда, почему» видят те, кто разбирает возврат, —
-    /// методист и администратор; автору они не нужны: это не замечания к полям. Им же — плашка «возвращён на исправление»
-    /// (этап 7, A8), пока документ не принят заново.
+    /// Панель «Согласование»: с приёма и до согласованного документа, а после — в архивном (этап 7, A9: круг, который его
+    /// согласовал, остаётся виден) — всем, кто видит документ. После возврата с согласования строки прежнего круга и плашку
+    /// «кто, когда, почему» видят те, кто разбирает возврат, — методист и администратор; автору они не нужны: это не
+    /// замечания к полям. Им же — плашка «возвращён на исправление» (этап 7, A8), пока документ не принят заново.
     /// </summary>
     private static async Task<ApprovalPanel?> ApprovalAsync(
         Document document, DocumentViewer viewer, DocumentApproval approval, CancellationToken ct)
     {
         var status = document.Status;
-        var active = status is DocumentStatuses.Accepted or DocumentStatuses.Approval or DocumentStatuses.Approved;
+        var active = status is DocumentStatuses.Accepted or DocumentStatuses.Approval or DocumentStatuses.Approved
+            or DocumentStatuses.Archived;
         if (!active && !viewer.IsCorrector) return null;
         var state = await approval.StateAsync(document, ct);
         if (!active && state.Returned is null && state.Corrected is null) return null;
@@ -731,6 +806,9 @@ public record CorrectionRequest(int Version, string? Reason);
 /// <summary>«Сменить статус» (этап 7, A8): версия, целевой статус и обязательный комментарий — в историю статусов и аудит.</summary>
 public record ForceStatusRequest(int Version, string? Status, string? Comment);
 
+/// <summary>«Передать документ» (этап 7, A9): версия, запись справочника нового автора и обязательная причина — в аудит и уведомления.</summary>
+public record TransferRequest(int Version, Guid EmployeeId, string? Reason);
+
 /// <summary>Замечание: JSON Pointer поля и текст.</summary>
 public record CommentRequest(string? FieldPath, string? Text);
 
@@ -786,10 +864,12 @@ public record DocumentItem(
 /// <param name="ForceTargets">
 /// Статусы, в которые администратор переводит документ принудительно (этап 7, A8; FR-ADM-04); null — не администратор.
 /// </param>
+/// <param name="Archive">Автор, методист или администратор отправляют согласованный документ в архив (этап 7, A9).</param>
+/// <param name="Transfer">Методист или администратор передают документ другому автору (этап 7, A9; FR-DOC-15).</param>
 public record DocumentActions(bool Submit, bool Review, bool ResolveComments, bool Print, bool CorrectPlan = false,
     bool TakeForReview = false, bool ResolveOwnComments = false, bool Delete = false, bool Approve = false,
     bool Comment = false, bool ResolveApprovalComments = false, bool ReturnForCorrection = false,
-    IReadOnlyList<StatusOption>? ForceTargets = null);
+    IReadOnlyList<StatusOption>? ForceTargets = null, bool Archive = false, bool Transfer = false);
 
 /// <summary>Статус и его название для списка «Сменить статус».</summary>
 public record StatusOption(string Status, string Title);

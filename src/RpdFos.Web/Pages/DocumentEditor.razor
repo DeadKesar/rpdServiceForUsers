@@ -84,6 +84,14 @@ else
         {
             <button class="btn btn-outline-danger" disabled="@busy" @onclick="() => forcing = !forcing">Сменить статус</button>
         }
+        @if (details.Actions.Archive)
+        {
+            <button class="btn btn-outline-secondary" disabled="@busy" @onclick="ArchiveAsync">В архив</button>
+        }
+        @if (details.Actions.Transfer)
+        {
+            <button class="btn btn-outline-primary" disabled="@busy" @onclick="() => transferring = !transferring">Передать документ</button>
+        }
         @if (details.Actions.Approve)
         {
             <button class="btn btn-success" disabled="@busy" @onclick="ApproveAsync">Согласовать</button>
@@ -198,6 +206,57 @@ else
                 <div class="mt-2 d-flex gap-2">
                     <button class="btn btn-sm btn-danger" disabled="@(busy || string.IsNullOrEmpty(forceStatus) || string.IsNullOrWhiteSpace(forceComment))" @onclick="ForceStatusAsync">Сменить статус</button>
                     <button class="btn btn-sm btn-link" @onclick="() => forcing = false">Отмена</button>
+                </div>
+            </div>
+        </div>
+    }
+
+    @* «Передать документ» (этап 7, A9; FR-DOC-15): новый автор — преподаватель с действующей учётной записью, причина обязательна. *@
+    @if (transferring && details.Actions.Transfer)
+    {
+        <div class="card mb-3">
+            <div class="card-body py-2">
+                <div class="small mb-2">
+                    Документ перейдёт к другому автору: править его сможет только он, составители в документе не изменятся.
+                    Передача запишется в журнал аудита, прежний и новый автор получат уведомление.
+                </div>
+                <div class="input-group input-group-sm mb-2" style="max-width: 420px">
+                    <input class="form-control" placeholder="Фамилия нового автора" aria-label="Фамилия нового автора"
+                           @bind="transferSurname" @bind:event="oninput" @onkeydown="OnTransferSearchKeyAsync" />
+                    <button class="btn btn-outline-secondary" type="button" disabled="@busy" @onclick="SearchTeachersAsync">Найти</button>
+                </div>
+                @if (transferCandidates is { Count: 0 })
+                {
+                    <div class="small text-muted mb-2">Преподавателей с действующей учётной записью и такой фамилией нет.</div>
+                }
+                else if (transferCandidates is not null)
+                {
+                    <ul class="list-group mb-2" style="max-width: 720px">
+                        @foreach (var candidate in transferCandidates)
+                        {
+                            <li class="list-group-item py-1 d-flex justify-content-between align-items-center @(candidate.Id == transferTo?.Id ? "list-group-item-primary" : "")">
+                                <span>@DescribePerson(candidate)</span>
+                                @if (candidate.Id == d.AuthorId)
+                                {
+                                    <span class="small text-muted">уже автор</span>
+                                }
+                                else
+                                {
+                                    <button class="btn btn-sm btn-outline-primary" type="button" @onclick="() => transferTo = candidate">Выбрать</button>
+                                }
+                            </li>
+                        }
+                    </ul>
+                }
+                @if (transferTo is not null)
+                {
+                    <div class="small mb-2">Новый автор: <strong>@transferTo.ShortName</strong></div>
+                }
+                <textarea class="form-control form-control-sm" rows="2" placeholder="Причина (обязательно): попадёт в журнал аудита и в уведомления"
+                          @bind="transferReason" @bind:event="oninput"></textarea>
+                <div class="mt-2 d-flex gap-2">
+                    <button class="btn btn-sm btn-primary" disabled="@(busy || transferTo is null || string.IsNullOrWhiteSpace(transferReason))" @onclick="TransferAsync">Передать</button>
+                    <button class="btn btn-sm btn-link" @onclick="() => transferring = false">Отмена</button>
                 </div>
             </div>
         </div>
@@ -476,6 +535,12 @@ else
     private bool forcing;
     private string? forceStatus;
     private string? forceComment;
+    // Передача документа другому автору (этап 7, A9): поиск по фамилии среди преподавателей, выбранный и причина.
+    private bool transferring;
+    private string transferSurname = "";
+    private List<DirectoryPerson>? transferCandidates;
+    private DirectoryPerson? transferTo;
+    private string? transferReason;
     // Заголовок плашки конфликта: документ взял на проверку методист (этап 6, A1) — иначе «изменён в другой сессии».
     private string? conflictTitle;
     private const string TakenByReviewer = "Документ взят на проверку методистом";
@@ -539,6 +604,7 @@ else
         (taking, takeReason, conflictTitle) = (false, null, null);
         (rejecting, rejectComment) = (false, null);
         (correcting, correctionReason, forcing, forceStatus, forceComment) = (false, null, false, null, null);
+        (transferring, transferSurname, transferCandidates, transferTo, transferReason) = (false, "", null, null, null);
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -575,6 +641,7 @@ else
         "accepted" => "Документ принят методистом. Согласование начнётся, когда будут назначены все согласующие.",
         "approval" => "Документ на согласовании: изменить его нельзя. Согласующий может вернуть документ методисту.",
         "approved" => "Документ согласован: правки закрыты.",
+        "archived" => "Документ в архиве: он открыт только для чтения.",
         "returned" => "Документ на доработке у автора.",
         _ => "Документ открыт только для просмотра: изменяет его автор, пока документ в работе."
     };
@@ -697,6 +764,48 @@ else
         await ChangeStatusAsync("force-status", new { version, status = forceStatus, comment = forceComment },
             $"Статус изменён принудительно: «{title}».");
     }
+
+    // «В архив» (этап 7, A9, решение 3): только явно и только согласованный документ. Из архива его вернёт лишь администратор
+    // принудительной сменой статуса (A8), поэтому — с подтверждением.
+    private async Task ArchiveAsync()
+    {
+        if (!await confirm.AskAsync($"Отправить документ «{details!.Document.DisciplineName}» в архив? Он станет доступен только для чтения, " +
+                "а по дисциплине можно будет создать новый документ. Из архива документ вернёт только администратор.",
+                "Отправка в архив")) return;
+        await ChangeStatusAsync("archive", new { version }, "Документ отправлен в архив.");
+    }
+
+    private Task OnTransferSearchKeyAsync(KeyboardEventArgs e) => e.Key == "Enter" ? SearchTeachersAsync() : Task.CompletedTask;
+
+    // Кандидаты в новые авторы — преподаватели с действующей учётной записью; запись справочника без неё автором не станет.
+    private async Task SearchTeachersAsync()
+    {
+        try
+        {
+            var response = await Http.GetAsync($"api/directory/teachers?surname={Uri.EscapeDataString(transferSurname.Trim())}");
+            if (response.IsSuccessStatusCode)
+                transferCandidates = await response.Content.ReadFromJsonAsync<List<DirectoryPerson>>() ?? [];
+            else
+                (messageIsError, message, fieldErrors) = (true, await ProblemTextAsync(response, "Поиск не выполнен"), []);
+        }
+        catch (AccessTokenNotAvailableException e)
+        {
+            e.Redirect();
+        }
+    }
+
+    // «Передать документ» (этап 7, A9; FR-DOC-15): после передачи править документ будет только новый автор.
+    private async Task TransferAsync()
+    {
+        if (transferTo is not { } next) return;
+        if (!await confirm.AskAsync($"Передать документ «{details!.Document.DisciplineName}» автору {next.ShortName}? " +
+                "Править его сможет только новый автор; прежний автор документ больше не увидит.", "Передача документа")) return;
+        await ChangeStatusAsync("transfer", new { version, employeeId = next.Id, reason = transferReason },
+            $"Документ передан: новый автор — {next.ShortName.TrimEnd('.')}.");
+    }
+
+    private static string DescribePerson(DirectoryPerson p) =>
+        string.Join(", ", new[] { p.ShortName, p.Position, p.Department }.Where(s => !string.IsNullOrEmpty(s)));
 
     private async Task ReturnAsync()
     {

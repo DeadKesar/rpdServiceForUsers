@@ -23,12 +23,14 @@ public sealed record DocumentItem(Guid Id, string Type, string Title, string Sta
 /// <paramref name="Comment"/> — методист на проверке и согласующий до своей отметки; <paramref name="ResolveApprovalComments"/> —
 /// методист на проверке снимает и замечания согласующих (этап 7, A2). <paramref name="ReturnForCorrection"/> — методист
 /// возвращает согласованный документ на исправление; <paramref name="ForceTargets"/> — статусы, в которые администратор
-/// переводит документ принудительно (null — не администратор), этап 7, A8.
+/// переводит документ принудительно (null — не администратор), этап 7, A8. <paramref name="Archive"/> — автор, методист или
+/// администратор отправляют согласованный документ в архив; <paramref name="Transfer"/> — методист или администратор
+/// передают документ другому автору (этап 7, A9).
 /// </summary>
 public sealed record DocumentActions(bool Submit, bool Review, bool ResolveComments, bool Print, bool CorrectPlan = false,
     bool TakeForReview = false, bool ResolveOwnComments = false, bool Delete = false, bool Approve = false,
     bool Comment = false, bool ResolveApprovalComments = false, bool ReturnForCorrection = false,
-    List<StatusOption>? ForceTargets = null);
+    List<StatusOption>? ForceTargets = null, bool Archive = false, bool Transfer = false);
 
 /// <summary>Статус и его название для списка «Сменить статус».</summary>
 public sealed record StatusOption(string Status, string Title);

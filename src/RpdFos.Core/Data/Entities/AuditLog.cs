@@ -40,6 +40,12 @@ public static class AuditEvents
     public const string ReturnedForCorrection = "document.returned_for_correction", StatusForced = "document.status_forced";
 
     /// <summary>
+    /// Согласованный документ отправлен в архив (этап 7, A9; NFR-SEC-07): <c>{ "from", "to" }</c> — статусы. Передача
+    /// документа другому автору (FR-DOC-15): <c>{ "from", "to", "reason" }</c> — записи справочника прежнего и нового автора.
+    /// </summary>
+    public const string DocumentArchived = "document.archived", DocumentTransferred = "document.transferred";
+
+    /// <summary>
     /// Согласование (этап 6, часть B): старт круга — <c>{ "seats": [{ "role", "resolver", "signatory" }] }</c>, отметки
     /// согласующих — <c>{ "role" }</c> и <c>{ "role", "comment" }</c>, назначение или замена подписанта —
     /// <c>{ "role", "before", "after" }</c>. По ним виден и прежний круг: строки согласования новый круг сбрасывает.

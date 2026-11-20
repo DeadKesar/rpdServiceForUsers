@@ -108,16 +108,10 @@ public sealed class ReworkReminders(
         if (await signatories.FindAsync(DepartmentHeadResolver.Rule, document.DisciplineId, ct) is { } head
             && !linked.Contains(head.Id)
             && await directory.RolesOfActiveAsync(head.Id, ct) is { } roles)
-            (await CanOpenAsync(document, head.Id, roles, ct) ? linked : unlinked).Add(head.Id);
+            (await DocumentVisibility.CanOpenAsync(approval, document, head.Id, roles, ct) ? linked : unlinked).Add(head.Id);
 
         await notifications.ReworkOverdueAsync(document, settings.Value.ReworkDays, since, linked, unlinked, zone, now, ct);
     }
-
-    // Те же участники, что видят документ в API (DocumentViewer): автор, методист, администратор и согласующий со строкой
-    // согласования в этом документе. Правило продублировано: API определяет его по токену, а задаче токена нет.
-    private async Task<bool> CanOpenAsync(Document document, Guid employeeId, IReadOnlyList<string> roles, CancellationToken ct) =>
-        document.AuthorId == employeeId || roles.Contains(AppRoles.Methodist) || roles.Contains(AppRoles.Admin)
-        || roles.Contains(AppRoles.Approver) && await approval.HasSeatAsync(document.Id, employeeId, ct);
 
     private static Guid? DocumentOf(string payload) =>
         JsonNode.Parse(payload)?["document_id"]?.GetValue<string>() is { } text && Guid.TryParse(text, out var id) ? id : null;

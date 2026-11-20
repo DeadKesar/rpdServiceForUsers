@@ -26,7 +26,8 @@ namespace RpdFos.Core.Documents;
 /// <c>task_id</c> и <c>reason</c> (причина сбоя), у замены согласующего — <c>signatory</c> (новый согласующий), у
 /// напоминаний о доработке (этап 7, A6) — <c>document_id</c>, <c>since</c> (с какого момента документ на доработке),
 /// <c>deadline</c> (срок), <c>days</c> (срок доработки в днях) и <c>author</c>; у принудительной смены статуса (этап 7, A8) —
-/// <c>from</c> и <c>to</c> (статусы). В фразах нет родовых форм («Принят»,
+/// <c>from</c> и <c>to</c> (статусы); у передачи документа (этап 7, A9) — <c>new_author</c> (прежнему автору) и
+/// <c>previous_author</c> (новому), причина — в <c>comment</c>. В фразах нет родовых форм («Принят»,
 /// «Согласующий: …»): пол автора и методиста системе неизвестен.
 /// </summary>
 public sealed class DocumentNotifications(AppDbContext db, DirectoryAccounts directory)
@@ -150,6 +151,54 @@ public sealed class DocumentNotifications(AppDbContext db, DirectoryAccounts dir
                 $"Было: «{DocumentStatuses.Title(from)}», стало: «{DocumentStatuses.Title(document.Status)}»",
                 $"Администратор: {who}", $"Комментарий: {comment}"),
             new JsonObject { ["by"] = who, ["comment"] = comment, ["from"] = from, ["to"] = document.Status }, ct);
+    }
+
+    /// <summary>
+    /// Автору: методист или администратор отправил его согласованный документ в архив (этап 7, A9). Автор, отправивший
+    /// документ сам, уведомления не получает. <paramref name="role"/> — роль совершившего (<see cref="AppRoles"/>): в
+    /// тексте она названа, чтобы автор понял, кто это.
+    /// </summary>
+    public async Task ArchivedAsync(Document document, Guid by, string role, DateTimeOffset at, CancellationToken ct = default)
+    {
+        var to = Others([document.AuthorId], by);
+        if (to.Count == 0) return;
+        var who = await NameAsync(by, ct);
+        await AddAsync(NotificationEvents.Archived, document, to, at,
+            Text($"Отправлен в архив: {document.Title}", $"{AppRoles.Title(role)}: {who}"), new JsonObject { ["by"] = who }, ct);
+    }
+
+    /// <summary>
+    /// Прежнему автору: документ передан другому (этап 7, A9; FR-DOC-15) — кому, кто передал и причина. Ссылка на документ — только
+    /// если он прежнему автору всё ещё доступен (<paramref name="linked"/>: он методист, администратор или согласующий
+    /// документа): иначе переход по ней дал бы 403 (правило A3). Передавший себя уведомлением не получает.
+    /// </summary>
+    public async Task TransferredOutAsync(
+        Document document, Guid previous, Guid next, Guid by, string role, string reason, bool linked, DateTimeOffset at,
+        CancellationToken ct = default)
+    {
+        var to = Others([previous], by);
+        if (to.Count == 0) return;
+        var (who, newAuthor) = (await NameAsync(by, ct), await NameAsync(next, ct));
+        await AddAsync(NotificationEvents.TransferredOut, document, to, at,
+            Text($"Документ передан другому автору: {document.Title}", $"Новый автор: {newAuthor}", $"{AppRoles.Title(role)}: {who}",
+                $"Причина: {reason}"),
+            new JsonObject { ["by"] = who, ["comment"] = reason, ["new_author"] = newAuthor }, ct, linked);
+    }
+
+    /// <summary>
+    /// Новому автору: ему передан документ (этап 7, A9; FR-DOC-15) — от кого, кто передал и причина. Назначивший себя автором
+    /// (методист с ролью преподавателя) уведомления не получает.
+    /// </summary>
+    public async Task TransferredInAsync(
+        Document document, Guid previous, Guid next, Guid by, string role, string reason, DateTimeOffset at, CancellationToken ct = default)
+    {
+        var to = Others([next], by);
+        if (to.Count == 0) return;
+        var (who, oldAuthor) = (await NameAsync(by, ct), await NameAsync(previous, ct));
+        await AddAsync(NotificationEvents.TransferredIn, document, to, at,
+            Text($"Вам передан документ: {document.Title}", $"Прежний автор: {oldAuthor}", $"{AppRoles.Title(role)}: {who}",
+                $"Причина: {reason}"),
+            new JsonObject { ["by"] = who, ["comment"] = reason, ["previous_author"] = oldAuthor }, ct);
     }
 
     /// <summary>

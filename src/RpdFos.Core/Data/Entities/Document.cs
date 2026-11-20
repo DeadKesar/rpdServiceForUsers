@@ -165,6 +165,28 @@ public class Document : IVersioned
         return Move(target);
     }
 
+    /// <summary>
+    /// «В архив» (этап 7, A9, решение 3): согласованный документ уходит в архив только явно — автором, методистом или
+    /// администратором. Архивный документ открыт только для чтения и дисциплину не занимает. Возвращает прежний статус.
+    /// </summary>
+    public string Archive()
+    {
+        Require(DocumentTransitions.CanArchive(Status), DocumentTransitions.ArchiveAction);
+        return Move(DocumentStatuses.Archived);
+    }
+
+    /// <summary>
+    /// Передача документа другому автору (FR-DOC-15; этап 7, A9): меняется только владелец — статус, содержимое и составители
+    /// в нём прежние. Возвращает прежнего автора.
+    /// </summary>
+    public Guid TransferTo(Guid newAuthorId)
+    {
+        Require(DocumentTransitions.CanTransfer(Status), DocumentTransitions.TransferAction);
+        var previous = AuthorId;
+        AuthorId = newAuthorId;
+        return previous;
+    }
+
     /// <summary>Мягкое удаление: статус и флаг — вместе. Возвращает прежний статус.</summary>
     public string Delete(DateTimeOffset now)
     {
@@ -205,7 +227,8 @@ public static class DocumentTransitions
         CommentAction = "оставить замечание", ResolveAction = "отметить замечание разрешённым",
         TakeAction = "взять на проверку", StartApprovalAction = "отправить на согласование", ApproveAction = "согласовать",
         RejectAction = "вернуть с согласования", AssignAction = "назначить подписанта",
-        ReturnForCorrectionAction = "вернуть на исправление", ForceStatusAction = "перевести в другой статус";
+        ReturnForCorrectionAction = "вернуть на исправление", ForceStatusAction = "перевести в другой статус",
+        ArchiveAction = "отправить в архив", TransferAction = "передать другому автору";
 
     /// <summary>
     /// Автор правит черновик, сохранённый черновик и документ на доработке; на проверке и после приёма документ
@@ -298,13 +321,27 @@ public static class DocumentTransitions
     public static bool CanAssignSignatory(string status) => status is DocumentStatuses.Accepted or DocumentStatuses.Approval;
 
     /// <summary>
-    /// Печатную форму формирует автор — в любом статусе, методист — с проверки и до согласованного документа,
-    /// согласующий — на согласовании и после него: предварительный PDF он формирует сам (этап 6, B2–B3).
+    /// Печатную форму формирует автор — в любом статусе, методист — с проверки и дальше, согласующий — на согласовании и
+    /// после него: предварительный PDF он формирует сам (этап 6, B2–B3). Архивный документ печатают те же участники, что
+    /// и согласованный (этап 7, A9).
     /// </summary>
     public static bool CanPrint(string status, bool isAuthor, bool isReviewer, bool isSignatory) =>
         isAuthor
-        || isReviewer && status is DocumentStatuses.UnderReview or DocumentStatuses.Accepted or DocumentStatuses.Approval or DocumentStatuses.Approved
-        || isSignatory && status is DocumentStatuses.Approval or DocumentStatuses.Approved;
+        || isReviewer && status is DocumentStatuses.UnderReview or DocumentStatuses.Accepted or DocumentStatuses.Approval
+            or DocumentStatuses.Approved or DocumentStatuses.Archived
+        || isSignatory && status is DocumentStatuses.Approval or DocumentStatuses.Approved or DocumentStatuses.Archived;
+
+    /// <summary>
+    /// «В архив» — только из «Согласован», явным действием автора, методиста или администратора (этап 7, A9, решение 3):
+    /// сам документ в архив не уходит, а согласованный преемник лишь помечает прежний документ «устарел» (A11).
+    /// </summary>
+    public static bool CanArchive(string status) => status is DocumentStatuses.Approved;
+
+    /// <summary>
+    /// Передача документа другому автору — в любом статусе, кроме «Удалённый» (FR-DOC-15; этап 7, A9): документ нужен и
+    /// после согласования — для печати и «Создать на основе».
+    /// </summary>
+    public static bool CanTransfer(string status) => status != DocumentStatuses.Deleted;
 
     /// <summary>
     /// «Вернуть на исправление» — методист возвращает согласованный документ на проверку (этап 7, A8, решение 2). Другого

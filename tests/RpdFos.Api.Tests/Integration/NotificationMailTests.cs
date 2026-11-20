@@ -73,12 +73,15 @@ public class NotificationMailTests(DatabaseFixture app)
 
         // Список — из задания: возвращён на доработку (в том числе после исправления плана), ждёт согласования,
         // возвращён с согласования, напоминания о сроке доработки (A6); статус сменён принудительно — решение A8
-        // (нештатная ситуация). Остальные события, в том числе возврат согласованного документа на исправление, письма не получают.
+        // (нештатная ситуация); документ передан новому автору — решение A9 (теперь он отвечает за документ). Остальные
+        // события, в том числе возврат согласованного документа на исправление, отправка в архив и передача документа
+        // прежнему автору, письма не получают.
         string[] expected =
         [
             NotificationEvents.ReturnedForRework, NotificationEvents.ReturnedAfterPlanCorrection,
             NotificationEvents.AwaitingMark, NotificationEvents.ReturnedFromApproval,
-            NotificationEvents.ReworkDeadlineNear, NotificationEvents.ReworkOverdue, NotificationEvents.StatusForced
+            NotificationEvents.ReworkDeadlineNear, NotificationEvents.ReworkOverdue, NotificationEvents.StatusForced,
+            NotificationEvents.TransferredIn
         ];
         Assert.Equal(expected.Order(), Mail.SentTo(email).Select(m => m.Subject).Order());
         foreach (var (type, id) in ids)

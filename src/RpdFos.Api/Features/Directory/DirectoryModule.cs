@@ -17,6 +17,8 @@ namespace RpdFos.Api.Features.Directory;
 /// (заведующий или директор из файла должностей входит «самим собой», а не новой записью справочника).</item>
 /// <item>Авторам документов — все активные записи, с учётной записью и без: составитель РПД может и не входить
 /// в систему.</item>
+/// <item>Методисту и администратору при передаче документа (этап 7, A9) — записи с действующей учётной записью
+/// преподавателя.</item>
 /// </list>
 /// </summary>
 public class DirectoryModule : ICarterModule
@@ -55,13 +57,23 @@ public class DirectoryModule : ICarterModule
         authors.MapGet("/", async (string? surname, AppDbContext db, CancellationToken ct) =>
         {
             var query = BySurname(db.Employees.Where(e => e.IsActive), surname);
-            return await query.OrderBy(e => e.ShortName).Take(MaxResults)
-                .Select(e => new DirectoryPersonItem(
-                    e.Id, e.ShortName, e.NameForDocument, e.Position,
-                    db.Departments.Where(d => d.Id == e.DepartmentId).Select(d => d.ShortName).FirstOrDefault()))
-                .ToListAsync(ct);
+            return await Persons(query.OrderBy(e => e.ShortName).Take(MaxResults), db).ToListAsync(ct);
         });
+
+        // Кандидаты в новые авторы документа (этап 7, A9; FR-DOC-15) — методисту и администратору: записи с действующей
+        // учётной записью преподавателя. Группа пускает всех авторов, а этот поиск — только тех, кто передаёт документы.
+        authors.MapGet("/teachers", async (string? surname, AppDbContext db, DirectoryAccounts accounts, CancellationToken ct) =>
+        {
+            var teachers = (await accounts.ActiveHoldersOfAsync(AppRoles.Teacher, ct)).ToList();
+            var query = BySurname(db.Employees.Where(e => teachers.Contains(e.Id)), surname);
+            return await Persons(query.OrderBy(e => e.ShortName).Take(MaxResults), db).ToListAsync(ct);
+        }).RequireAuthorization(Policies.MethodistOrAdmin);
     }
+
+    private static IQueryable<DirectoryPersonItem> Persons(IQueryable<Employee> query, AppDbContext db) =>
+        query.Select(e => new DirectoryPersonItem(
+            e.Id, e.ShortName, e.NameForDocument, e.Position,
+            db.Departments.Where(d => d.Id == e.DepartmentId).Select(d => d.ShortName).FirstOrDefault()));
 
     // Записи справочника: фамилия (начало), категория подписанта, неактивные — по флажку.
     private static async Task<List<DirectoryEntry>> Records(

@@ -64,11 +64,12 @@ public sealed class DocumentCreation(AppDbContext db, DocumentTypeRegistry regis
         if (DocumentRules.WhyNoDocument(facts.Discipline) is { } reason)
             return new(null, DocumentCreationProblem.NotADiscipline, reason);
 
-        // Один неудалённый документ на дисциплину и линию редакций шаблона.
+        // Один неудалённый документ на дисциплину и линию редакций шаблона. Архивный дисциплину не занимает (этап 7, A9,
+        // решение 3): по ней создаётся новый. Согласованный занимает её, пока новый нельзя создать на его основе (A11).
         var existing = await (
                 from d in db.Documents
                 join t in db.DocumentTemplates on d.TemplateId equals t.Id
-                where d.DisciplineId == disciplineId && t.LineageId == template.LineageId
+                where d.DisciplineId == disciplineId && t.LineageId == template.LineageId && d.Status != DocumentStatuses.Archived
                 select (Guid?)d.Id)
             .FirstOrDefaultAsync(ct);
         if (existing is Guid existingId)

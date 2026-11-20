@@ -102,7 +102,8 @@ public class PrintingModule : ICarterModule
         return tasks.Select(t => GenerationItem.From(t, files.GetValueOrDefault(t.Id))).ToList();
     }
 
-    // Автор — в любом статусе; методист — с проверки; согласующий — на согласовании и после; администратор и остальные — нет.
+    // Автор — в любом статусе; методист — с проверки, в том числе архивный документ; согласующий — на согласовании и после, в том числе
+    // архивный; администратор и остальные — нет.
     private static async Task<(Document? Document, Guid? Me, IResult? Refusal)> PrintableAsync(
         Guid id, HttpContext http, AppDbContext db, DirectoryAccounts directory, DocumentApproval approval, CancellationToken ct)
     {
