@@ -3,8 +3,10 @@ using RpdFos.Corpus;
 
 // Прогон системы по корпусу настоящих данных вуза (этап 5.3). Запуск:
 //   dotnet run --project tools/RpdFos.Corpus -- <папка корпуса> [--only <часть имени плана>] [--no-rpd]
+//   dotnet run --project tools/RpdFos.Corpus -- <папка корпуса> --fos [--template <файл оформления ФОС>]
 // Папка корпуса — аргументом или переменной RPDFOS_CORPUS; конвертер PDF — RPDFOS_CONVERTER (по умолчанию
 // http://localhost:3000, нужен только для наглядного сравнения). Нужен Docker: база — одноразовая, в контейнере.
+// Режим --fos (этап 7) разбирает настоящие ФОС и Docker не использует: он только читает файлы.
 var corpus = args.FirstOrDefault(a => !a.StartsWith("--")) ?? Environment.GetEnvironmentVariable("RPDFOS_CORPUS");
 if (corpus is null || !Directory.Exists(corpus))
 {
@@ -17,10 +19,17 @@ var withRpd = !args.Contains("--no-rpd");
 var started = DateTimeOffset.Now;
 var watch = Stopwatch.StartNew();
 var output = Path.Combine(corpus, "_отчёты");
-// Повторный прогон перезаписывает отчёты целиком: устаревших файлов от прошлого прогона не остаётся.
-// «Главные находки.md» пишет автор по итогам прогона — инструмент его не трогает.
 Directory.CreateDirectory(output);
-foreach (var dir in Directory.GetDirectories(output)) Directory.Delete(dir, recursive: true);
+if (args.Contains("--fos"))
+{
+    FosRunner.Run(corpus, output, args.SkipWhile(a => a != "--template").Skip(1).FirstOrDefault());
+    return 0;
+}
+
+// Повторный прогон перезаписывает отчёты целиком: устаревших файлов от прошлого прогона не остаётся.
+// «Главные находки.md» пишет автор по итогам прогона — инструмент его не трогает. Папка «ФОС» — отчёты режима
+// --fos: обычный прогон её не стирает.
+foreach (var dir in Directory.GetDirectories(output).Where(d => Path.GetFileName(d) != FosReports.Folder)) Directory.Delete(dir, recursive: true);
 foreach (var file in Directory.GetFiles(output).Where(f => Path.GetFileName(f) != Reports.MainFindings)) File.Delete(file);
 
 await using var bench = await Workbench.StartAsync(Environment.GetEnvironmentVariable("RPDFOS_CONVERTER"));
