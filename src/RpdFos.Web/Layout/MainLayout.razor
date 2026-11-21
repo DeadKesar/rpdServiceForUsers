@@ -1,4 +1,7 @@
 ﻿@inherits LayoutComponentBase
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+@inject NotificationService Notifications
 <div class="page">
     <div class="sidebar">
         <NavMenu />
@@ -15,5 +18,37 @@
     </main>
 </div>
 
-@* Окна Radzen (диалог вставки таблицы в редакторе текста) показываются отсюда. *@
+@* Окна Radzen: диалог «Таблица» редактора текста, предупреждения его таблиц и меню правой кнопки по ячейке.
+   Без RadzenNotification и RadzenContextMenu сообщения редактора не видны, а щелчок по ячейке ничего не открывает. *@
 <RadzenDialog />
+<RadzenNotification />
+<RadzenContextMenu />
+
+@code {
+    private DotNetObjectReference<MainLayout>? self;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        // Предупреждения скриптов таблиц (wwwroot/js/rpdfos-tables.js) показываются здесь же, окном Radzen.
+        self = DotNetObjectReference.Create(this);
+        await JS.InvokeVoidAsync("rpdfosTables.register", self);
+    }
+
+    [JSInvokable]
+    public void Warn(string message) => Notifications.Notify(new NotificationMessage
+    {
+        Severity = NotificationSeverity.Warning,
+        Summary = "Таблица",
+        Detail = message,
+        Duration = 7000
+    });
+
+    public async ValueTask DisposeAsync()
+    {
+        if (self is null) return;
+        try { await JS.InvokeVoidAsync("rpdfosTables.unregister", self); }
+        catch (JSDisconnectedException) { }
+        self.Dispose();
+    }
+}

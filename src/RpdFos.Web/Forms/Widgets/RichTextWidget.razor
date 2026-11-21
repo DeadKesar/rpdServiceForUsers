@@ -1,9 +1,13 @@
 @using System.Text.Json.Nodes
 @using System.Text.RegularExpressions
 @inherits FieldBase
+@inject DialogService DialogService
+@inject NotificationService Notifications
 
 @* Форматированный текст: полужирный, курсив, списки и таблицы (решение этапа 4 и B4 этапа 7); разметку на сервере
-   чистит санитайзер. Таблицы — встроенные инструменты редактора: вставка, строки, столбцы, объединение ячеек. *@
+   чистит санитайзер. Таблица: своя кнопка со вставкой (диалог «строк, столбцов, заголовок») и команды Radzen над
+   строками, столбцами и ячейками. Строки и столбцы по сетке при объединённых ячейках ведут свои функции
+   (wwwroot/js/rpdfos-tables.js), диалога правки таблицы нет. *@
 <div class="mb-3">
     <label class="form-label">@Title</label>
     @if (ReadOnly)
@@ -12,14 +16,26 @@
     }
     else
     {
-        <RadzenHtmlEditor Value="@(Text(Value) ?? "")" Input="@((string html) => OnInput(html))"
-                          ValueChanged="@((string html) => OnChanged(html))" TableStrings="@TableTexts" Style="height: 220px;">
+        <RadzenHtmlEditor @ref="editor" Value="@(Text(Value) ?? "")" Input="@((string html) => OnInput(html))"
+                          ValueChanged="@((string html) => OnChanged(html))" TableStrings="@TableTexts"
+                          Execute="@OnExecute" Style="height: 220px;">
             <RadzenHtmlEditorBold Title="Полужирный" />
             <RadzenHtmlEditorItalic Title="Курсив" />
             <RadzenHtmlEditorUnorderedList Title="Маркированный список" />
             <RadzenHtmlEditorOrderedList Title="Нумерованный список" />
             <RadzenHtmlEditorSeparator />
-            <RadzenHtmlEditorTableTools />
+            @* Таблицы в ячейке таблицы не бывает: в ячейке кнопка недоступна. *@
+            <RadzenHtmlEditorCustomTool CommandName="@InsertTable" Icon="table_chart" Title="Таблица"
+                                        Disabled="@(editor?.TableSelection?.InTable == true)" />
+            <RadzenHtmlEditorTableCommandButton TableCommand="addRowBefore" Icon="north" Title="@TableTexts.InsertRowAbove" />
+            <RadzenHtmlEditorTableCommandButton TableCommand="addRowAfter" Icon="south" Title="@TableTexts.InsertRowBelow" />
+            <RadzenHtmlEditorTableCommandButton TableCommand="addColumnBefore" Icon="west" Title="@TableTexts.InsertColumnLeft" />
+            <RadzenHtmlEditorTableCommandButton TableCommand="addColumnAfter" Icon="east" Title="@TableTexts.InsertColumnRight" />
+            <RadzenHtmlEditorTableCommandButton TableCommand="deleteRow" Icon="horizontal_rule" Title="@TableTexts.DeleteRow" />
+            <RadzenHtmlEditorTableCommandButton TableCommand="deleteColumn" Icon="vertical_align_center" Title="@TableTexts.DeleteColumn" />
+            <RadzenHtmlEditorTableCommandButton TableCommand="mergeCellRight" Icon="merge_type" Title="@TableTexts.MergeRight" />
+            <RadzenHtmlEditorTableCommandButton TableCommand="mergeCellDown" Icon="merge" Title="@TableTexts.MergeDown" />
+            <RadzenHtmlEditorTableCommandButton TableCommand="splitCell" Icon="call_split" Title="@TableTexts.SplitCell" />
         </RadzenHtmlEditor>
     }
     @if (Hint is not null)
@@ -31,11 +47,16 @@
         <div class="form-text">
             Формулы — линейной записью, символами Unicode: x² + y₁ ≤ √z. В таблице сохраняются строки, столбцы и
             объединение ячеек; цвет, ширина и выравнивание не сохраняются — печатается таблица с рамками на всю ширину.
+            Таблицы внутри ячейки нет: вставленная туда таблица становится текстом.
         </div>
     }
 </div>
 
 @code {
+    private const string InsertTable = "InsertTable";
+
+    private RadzenHtmlEditor? editor;
+
     private void OnChanged(string? html) => SetValue(Html(html));
 
     // Input — каждая правка в редакторе: признак несохранённых правок не ждёт ухода из него.
@@ -47,12 +68,39 @@
         string.IsNullOrWhiteSpace(Regex.Replace(html ?? "", "<[^>]*>|&nbsp;", "")) && !Regex.IsMatch(html ?? "", "<table", RegexOptions.IgnoreCase)
             ? null : JsonValue.Create(html);
 
-    // Подписи инструментов таблицы по-русски. Редактор предлагает и цвет, ширину, рамки и выравнивание ячеек:
-    // санитайзер их снимает (см. подсказку под полем), печать рисует таблицу сама.
+    private async Task OnExecute(HtmlEditorExecuteEventArgs args)
+    {
+        if (args.CommandName != InsertTable) return;
+        var target = args.Editor;
+        if ((await target.GetTableSelectionAsync()).InTable)
+        {
+            Notifications.Notify(NotificationSeverity.Warning, "Таблица", "Таблицу нельзя вставить в ячейку другой таблицы.");
+            return;
+        }
+
+        // Диалог забирает фокус у редактора: место вставки запоминается и возвращается.
+        await target.SaveSelectionAsync();
+        var answer = await DialogService.OpenAsync<TableInsertDialog>("Таблица", options: new DialogOptions { Width = "24rem" });
+        await target.RestoreSelectionAsync();
+        if (answer is not TableSize size) return;
+
+        // Строк в диалоге — всего; Radzen считает строки тела отдельно от строки заголовка.
+        await target.ExecuteTableCommandAsync("insertTable", new HtmlEditorTableCommandArgs
+        {
+            Rows = size.HeaderRow ? size.Rows - 1 : size.Rows,
+            Columns = size.Columns,
+            HeaderRow = size.HeaderRow,
+            Width = "100%",
+            Border = 1
+        });
+    }
+
+    // Подписи инструментов таблицы по-русски: их показывают кнопки панели и меню по правой кнопке мыши.
+    // Редактор предлагает и цвет, ширину, рамки и выравнивание ячеек: санитайзер их снимает (см. подсказку под полем),
+    // печать рисует таблицу сама. Заголовок «Столбец N» не нужен: ячейки заголовка у новой таблицы пустые.
     private static readonly HtmlEditorTableStrings TableTexts = new()
     {
         DialogTitle = "Таблица",
-        DefaultColumnHeader = "Столбец {0}",
         Rows = "Строк",
         Columns = "Столбцов",
         Width = "Ширина",

@@ -9,6 +9,9 @@
          убрать, когда OpenIddict перейдёт на исправленные версии. -->
     <PackageReference Include="System.Security.Cryptography.Pkcs" Version="10.0.13" />
     <PackageReference Include="System.Security.Cryptography.Xml" Version="10.0.13" />
+    <!-- JavaScript без браузера: логику таблиц редактора (wwwroot/js/rpdfos-table-logic.js) проверяют чистые функции
+         в интерпретаторе, а не Node. BSD-2-Clause; Acornima — BSD-3-Clause. -->
+    <PackageReference Include="Jint" Version="4.18.0" />
     <PackageReference Include="Testcontainers.PostgreSql" Version="4.16.0" />
     <PackageReference Include="xunit" Version="2.9.3" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" PrivateAssets="all" />
@@ -20,5 +23,7 @@
   <ItemGroup>
     <!-- Реальные файлы этапа 2 для тестов импорта, см. tests/fixtures/README.md. -->
     <None Include="..\fixtures\*.xlsx;..\fixtures\*.docx" LinkBase="fixtures" CopyToOutputDirectory="PreserveNewest" />
+    <!-- Логика таблиц редактора: тот же файл, что грузит браузер. -->
+    <None Include="..\..\src\RpdFos.Web\wwwroot\js\rpdfos-table-logic.js" Link="js\rpdfos-table-logic.js" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

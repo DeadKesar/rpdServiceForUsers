@@ -8,6 +8,7 @@ namespace RpdFos.Api.Tests;
 /// Оболочка клиента (<c>index.html</c>) отдаётся без кэша браузера (этап 6.1, C1): иначе после пересборки клиента
 /// браузер открывает старую оболочку со ссылками на файлы, которых уже нет, и страница пуста. Так же — два файла стилей
 /// без хеша в имени (этап 7, A1): иначе после пересборки страница открывается со старым оформлением или без него.
+/// То же — два скрипта таблиц редактора текста (этап 7, B4).
 /// </summary>
 public sealed class ClientShellTests(ClientShellFactory factory) : IClassFixture<ClientShellFactory>
 {
@@ -33,9 +34,11 @@ public sealed class ClientShellTests(ClientShellFactory factory) : IClassFixture
     }
 
     [Theory]
-    [InlineData("/RpdFos.Web.styles.css")] // стили компонентов: пакет без хеша в имени
-    [InlineData("/css/app.css")]           // стили приложения
-    public async Task Styles_without_hash_are_served_with_no_cache(string path)
+    [InlineData("/RpdFos.Web.styles.css")]        // стили компонентов: пакет без хеша в имени
+    [InlineData("/css/app.css")]                  // стили приложения
+    [InlineData("/js/rpdfos-table-logic.js")]     // логика таблиц редактора текста (этап 7, B4)
+    [InlineData("/js/rpdfos-tables.js")]          // замена функций таблиц Radzen (этап 7, B4)
+    public async Task Files_without_hash_are_served_with_no_cache(string path)
     {
         var response = await CreateClient().GetAsync(path);
 
@@ -49,6 +52,7 @@ public sealed class ClientShellTests(ClientShellFactory factory) : IClassFixture
     [Theory]
     [InlineData("/lib/bootstrap/dist/css/bootstrap.min.css")] // обычный файл
     [InlineData("/lib/app.css")]                              // то же имя файла, другой адрес: стили приложения — только /css/app.css
+    [InlineData("/lib/rpdfos-tables.js")]                     // и скрипт таблиц — только /js/rpdfos-tables.js
     public async Task Other_static_files_are_left_as_before(string path)
     {
         var response = await CreateClient().GetAsync(path);
@@ -74,12 +78,16 @@ public sealed class ClientShellFactory : WebApplicationFactory<Program>
     {
         var bootstrap = Path.Combine(_webRoot, "lib", "bootstrap", "dist", "css");
         Directory.CreateDirectory(Path.Combine(_webRoot, "css"));
+        Directory.CreateDirectory(Path.Combine(_webRoot, "js"));
         Directory.CreateDirectory(bootstrap);
         File.WriteAllText(Path.Combine(_webRoot, "index.html"), Shell);
         File.WriteAllText(Path.Combine(_webRoot, "RpdFos.Web.styles.css"), Styles);
         File.WriteAllText(Path.Combine(_webRoot, "css", "app.css"), Styles);
         File.WriteAllText(Path.Combine(bootstrap, "bootstrap.min.css"), Styles);
         File.WriteAllText(Path.Combine(_webRoot, "lib", "app.css"), Styles);
+        File.WriteAllText(Path.Combine(_webRoot, "js", "rpdfos-table-logic.js"), Styles);
+        File.WriteAllText(Path.Combine(_webRoot, "js", "rpdfos-tables.js"), Styles);
+        File.WriteAllText(Path.Combine(_webRoot, "lib", "rpdfos-tables.js"), Styles);
     }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)

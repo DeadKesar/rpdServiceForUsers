@@ -13,8 +13,11 @@
     <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.Authentication" Version="10.0.13" />
     <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.13" />
     <!-- Редактор форматированного текста (RadzenHtmlEditor): MIT, свой JS в пакете — без внешних CDN.
-         В документах — только полужирный, курсив и списки; разметку на сервере чистит санитайзер. -->
-    <PackageReference Include="Radzen.Blazor" Version="12.0.8" />
+         В документах — только полужирный, курсив, списки и таблицы; разметку на сервере чистит санитайзер.
+         Версия точная: свои функции таблиц (wwwroot/js/rpdfos-tables.js) заменяют функции Radzen по имени,
+         и при каждом обновлении пакета их нужно сверять с новым Radzen.Blazor.js. 12.0.8 не годилась: после
+         «Удалить строку» курсор оставался вне ячеек, и команды строк и столбцов падали (исправлено с 12.1.5). -->
+    <PackageReference Include="Radzen.Blazor" Version="[12.1.11]" />
   </ItemGroup>
 
 </Project>

@@ -1,0 +1,50 @@
+@inject DialogService Dialog
+
+@* Вставка таблицы в редакторе текста: строк, столбцов, строка заголовка. Правки таблицы диалога нет — строки и
+   столбцы меняют кнопки панели и меню по правой кнопке мыши. *@
+<form @onsubmit="Insert" @onsubmit:preventDefault>
+    <div class="row g-3">
+        <div class="col-6">
+            <label class="form-label" for="table-rows">Строк</label>
+            <input id="table-rows" type="number" class="form-control" min="@MinRows" max="@MaxRows" @bind="rows" @bind:event="oninput" />
+        </div>
+        <div class="col-6">
+            <label class="form-label" for="table-columns">Столбцов</label>
+            <input id="table-columns" type="number" class="form-control" min="1" max="@MaxColumns" @bind="columns" @bind:event="oninput" />
+        </div>
+        <div class="col-12">
+            <div class="form-check">
+                <input id="table-header" type="checkbox" class="form-check-input" @bind="headerRow" />
+                <label class="form-check-label" for="table-header">Строка заголовка (первая из строк)</label>
+            </div>
+        </div>
+    </div>
+    @if (!Valid)
+    {
+        <div class="text-danger small mt-2">Строк — от @MinRows до @MaxRows, столбцов — от 1 до @MaxColumns.</div>
+    }
+    <div class="d-flex justify-content-end gap-2 mt-3">
+        <button type="button" class="btn btn-outline-secondary" @onclick="() => Dialog.Close()">Отмена</button>
+        <button type="submit" class="btn btn-primary" disabled="@(!Valid)">Вставить</button>
+    </div>
+</form>
+
+@code {
+    // Столбцов не больше, чем помещается на странице при печати; объединение ячеек в санитайзере — до 100.
+    private const int MaxRows = 100;
+    private const int MaxColumns = 20;
+
+    private int rows = 3;
+    private int columns = 3;
+    private bool headerRow = true;
+
+    // С заголовком в таблице хотя бы одна строка тела.
+    private int MinRows => headerRow ? 2 : 1;
+
+    private bool Valid => rows >= MinRows && rows <= MaxRows && columns >= 1 && columns <= MaxColumns;
+
+    private void Insert()
+    {
+        if (Valid) Dialog.Close(new TableSize(rows, columns, headerRow));
+    }
+}

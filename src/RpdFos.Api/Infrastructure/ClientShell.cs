@@ -11,7 +11,9 @@ namespace RpdFos.Api.Infrastructure;
 /// <para>
 /// Так же отдаются два файла стилей без хеша в имени: <c>RpdFos.Web.styles.css</c> (стили компонентов) и
 /// <c>css/app.css</c>. Иначе после пересборки браузер берёт прежние стили из кэша, и страница открывается без оформления
-/// (этап 7, A1).
+/// (этап 7, A1). Туда же — два скрипта таблиц редактора текста
+/// (<c>js/rpdfos-table-logic.js</c>, <c>js/rpdfos-tables.js</c>, этап 7, B4): хост раздаёт файлы клиента обычными
+/// статическими файлами, адреса с хешем в имени он не знает, а старый скрипт рядом с новой страницей ломает редактор.
 /// </para>
 /// Остальные файлы не затрагиваются: у файла с хешем новое содержимое — новое имя, а значит, другой адрес.
 /// </summary>
@@ -19,9 +21,10 @@ public static class ClientShell
 {
     public const string FileName = "index.html";
 
-    // Адреса стилей без хеша в имени (клиент подключает их так в index.html). Сравнение по адресу, а не по имени файла:
+    // Адреса файлов без хеша в имени (клиент подключает их так в index.html). Сравнение по адресу, а не по имени файла:
     // «app.css» в другой папке — не наш файл.
-    private static readonly PathString[] UncachedStyles = ["/RpdFos.Web.styles.css", "/css/app.css"];
+    private static readonly PathString[] Uncached =
+        ["/RpdFos.Web.styles.css", "/css/app.css", "/js/rpdfos-table-logic.js", "/js/rpdfos-tables.js"];
 
     /// <summary>
     /// Параметры раздачи статических файлов — и для <c>UseStaticFiles</c> (адрес <c>/index.html</c>), и для
@@ -32,9 +35,9 @@ public static class ClientShell
 
     private static void PrepareResponse(StaticFileResponseContext context)
     {
-        // Оболочку узнаём по файлу: запасной маршрут отдаёт её по любому адресу страницы; стили — по адресу запроса.
+        // Оболочку узнаём по файлу: запасной маршрут отдаёт её по любому адресу страницы; остальные — по адресу запроса.
         var isShell = string.Equals(context.File.Name, FileName, StringComparison.OrdinalIgnoreCase);
-        if (isShell || UncachedStyles.Any(style => context.Context.Request.Path.Equals(style, StringComparison.OrdinalIgnoreCase)))
+        if (isShell || Uncached.Any(file => context.Context.Request.Path.Equals(file, StringComparison.OrdinalIgnoreCase)))
             context.Context.Response.Headers.CacheControl = "no-cache";
     }
 }

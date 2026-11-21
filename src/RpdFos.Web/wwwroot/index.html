@@ -32,6 +32,10 @@
     </div>
     <script src="_content/Microsoft.AspNetCore.Components.WebAssembly.Authentication/AuthenticationService.js"></script>
     <script src="_content/Radzen.Blazor/Radzen.Blazor.js"></script>
+    <!-- Таблицы редактора текста: логика без DOM и замена функций таблиц Radzen; обе — после Radzen.Blazor.js.
+         Без хеша в имени: хост отдаёт их обычными статическими файлами, как стили, — и без кэша (ClientShell). -->
+    <script src="js/rpdfos-table-logic.js"></script>
+    <script src="js/rpdfos-tables.js"></script>
     <script>
         // Переход к полю из списка замечаний и ошибок: первый найденный элемент — само поле или виджет, внутри которого оно.
         window.rpdfosScrollToField = (ids) => {

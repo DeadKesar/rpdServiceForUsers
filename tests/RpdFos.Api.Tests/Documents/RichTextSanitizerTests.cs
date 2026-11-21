@@ -119,15 +119,39 @@ public class RichTextSanitizerTests
     public void Merging_outside_cells_is_removed(string html, string expected) =>
         Assert.Equal(expected, Sanitizer.Sanitize(html));
 
+    /// <summary>
+    /// Вложенная таблица — текст: строки через перенос, ячейки через пробел, от текста вокруг отделена переносом.
+    /// Те же разметки проверяет RichTextTableLogicTests: редактор делает вложенную таблицу текстом сразу, и результат
+    /// должен совпадать с тем, что сохранит сервер.
+    /// </summary>
+    public static IEnumerable<object[]> NestedTableMarkups =>
+    [
+        ["<table><tr><td>до<table><tr><td>а</td><td>б</td></tr><tr><td><p>в</p></td><td>г</td></tr></table>после</td></tr></table>",
+            "<table><tbody><tr><td>до<br>а б<br>в г<br>после</td></tr></tbody></table>"],
+        ["<table><tr><td><table><tr><td>а</td><td>б</td></tr></table></td><td>в</td></tr></table>",
+            "<table><tbody><tr><td>а б</td><td>в</td></tr></tbody></table>"],
+        // Два уровня вложенности — текстом оба.
+        ["<table><tr><td><table><tr><td>а<table><tr><td>б</td></tr></table></td></tr></table></td></tr></table>",
+            "<table><tbody><tr><td>а<br>б</td></tr></tbody></table>"],
+        // Отступы и переводы строк между разметкой — как у таблицы из Word.
+        ["<table>\n <tr>\n  <td>\n   <table>\n    <tr>\n     <td>а</td>\n     <td>б</td>\n    </tr>\n   </table>\n  </td>\n </tr>\n</table>",
+            "<table><tbody><tr><td>а б</td></tr></tbody></table>"],
+        // Абзацы вокруг вложенной таблицы: перенос с каждой стороны.
+        ["<table><tr><td><p>до</p><table><tr><td>x</td></tr></table><p>после</p></td></tr></table>",
+            "<table><tbody><tr><td><p>до</p><br>x<br><p>после</p></td></tr></tbody></table>"],
+        // Ячейка заголовка и полужирный в ячейке.
+        ["<table><tr><td><table><tr><th><b>а</b></th><td>б</td></tr></table></td></tr></table>",
+            "<table><tbody><tr><td><b>а</b> б</td></tr></tbody></table>"],
+        // Две вложенные таблицы подряд в одной ячейке.
+        ["<table><tr><td><table><tr><td>а</td></tr></table><table><tr><td>б</td></tr></table></td></tr></table>",
+            "<table><tbody><tr><td>а<br>б</td></tr></tbody></table>"],
+        // Вложенная таблица в пункте списка внутри ячейки.
+        ["<table><tr><td><ul><li>пункт<table><tr><td>y</td></tr></table></li></ul></td></tr></table>",
+            "<table><tbody><tr><td><ul><li>пункт<br>y</li></ul></td></tr></tbody></table>"]
+    ];
+
     [Theory]
-    // Вложенная таблица — текст: строки через перенос, ячейки через пробел, от текста вокруг отделена переносом.
-    [InlineData("<table><tr><td>до<table><tr><td>а</td><td>б</td></tr><tr><td><p>в</p></td><td>г</td></tr></table>после</td></tr></table>",
-        "<table><tbody><tr><td>до<br>а б<br>в г<br>после</td></tr></tbody></table>")]
-    [InlineData("<table><tr><td><table><tr><td>а</td><td>б</td></tr></table></td><td>в</td></tr></table>",
-        "<table><tbody><tr><td>а б</td><td>в</td></tr></tbody></table>")]
-    // Два уровня вложенности — текстом оба.
-    [InlineData("<table><tr><td><table><tr><td>а<table><tr><td>б</td></tr></table></td></tr></table></td></tr></table>",
-        "<table><tbody><tr><td>а<br>б</td></tr></tbody></table>")]
+    [MemberData(nameof(NestedTableMarkups))]
     public void Nested_table_stays_as_text(string html, string expected) =>
         Assert.Equal(expected, Sanitizer.Sanitize(html));
 
