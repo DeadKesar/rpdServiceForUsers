@@ -1,0 +1,304 @@
+@using System.Text.Json
+@using System.Text.Json.Nodes
+@inherits FieldBase
+
+@* Банк заданий ФОС (этап 7, B5; FR-DOC-22): именованные группы — вопросы, задания или тесты, с видом контроля, разделом РПД
+   и семестрами; в группе — задания: текст (форматированный, с таблицами и рисунками), ожидаемый ответ, балл и индикаторы из
+   снимка РПД. Номер хранится у задания и сам не меняется: новое получает следующий, удаление оставляет пропуск;
+   «Перенумеровать» делает сервер вместе со ссылками паспорта. Редактор текста тяжёлый, поэтому задания свёрнуты до строки с
+   началом текста и открываются по одному. *@
+<div class="mb-3">
+    <label class="form-label">@Title</label>
+    <p class="text-muted small mb-2">
+        Паспорт ссылается на группу по названию и номерам заданий: после переименования группы исправьте ссылки в паспорте.
+        Номер задания не меняется сам — после удаления в нумерации остаётся пропуск, «Перенумеровать» убирает его и
+        переписывает ссылки паспорта.
+    </p>
+    @{ var groups = Value as JsonArray; }
+    @for (var g = 0; g < (groups?.Count ?? 0); g++)
+    {
+        var index = g;
+        var block = groups![index] as JsonObject;
+        if (block is null) continue;
+        var tasks = Tasks(block);
+        var path = $"{Path}/{index}";
+        <div class="card mb-3" @key="block" id="@SchemaContext.Anchor(path)">
+            <div class="card-header d-flex flex-wrap gap-2 align-items-center">
+                <strong class="me-auto">@(Text(block["group"]) is { Length: > 0 } name ? name : "Группа без названия")</strong>
+                <span class="small text-muted">заданий: @tasks.Count</span>
+                @if (!ReadOnly)
+                {
+                    <button class="btn btn-sm btn-outline-secondary" type="button" disabled="@(Context.RenumberBank is null || IsContinuous(tasks) || string.IsNullOrEmpty(Text(block["group"])))"
+                            title="@RenumberTitle(tasks)" @onclick="() => RenumberAsync(block)">Перенумеровать</button>
+                    @if (removing == block)
+                    {
+                        <span class="small">Удалить группу и её задания (@tasks.Count)?</span>
+                        <button class="btn btn-sm btn-danger" type="button" @onclick="() => RemoveGroup(block)">Да</button>
+                        <button class="btn btn-sm btn-outline-secondary" type="button" @onclick="() => removing = null">Нет</button>
+                    }
+                    else
+                    {
+                        <button class="btn btn-sm btn-outline-secondary" type="button" title="Удалить группу"
+                                @onclick="() => AskRemoveGroup(block)">✕</button>
+                    }
+                }
+            </div>
+            <div class="card-body">
+                <div class="row g-2 mb-2">
+                    <div class="col-md-6">
+                        <label class="form-label small mb-0">Название группы</label>
+                        <ScalarInput Context="Context" Schema="@(Prop(Items, "group"))" Parent="block" Key="group" Path="@($"{path}/group")" />
+                        @if (IsDuplicate(block))
+                        {
+                            <div class="field-missing-text">Такое название уже есть: ссылки паспорта не различат группы.</div>
+                        }
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label small mb-0">Вид</label>
+                        <ScalarInput Context="Context" Schema="@(Prop(Items, "kind"))" Parent="block" Key="kind" Path="@($"{path}/kind")" />
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label small mb-0">Контроль</label>
+                        <ScalarInput Context="Context" Schema="@(Prop(Items, "control_form"))" Parent="block" Key="control_form" Path="@($"{path}/control_form")" />
+                    </div>
+                </div>
+                <div class="row g-2 mb-2">
+                    <div class="col-md-3">
+                        <label class="form-label small mb-0">Раздел РПД@(Text(block["kind"]) == "tests" ? " (обязателен)" : "")</label>
+                        <ScalarInput Context="Context" Schema="@(Prop(Items, "section_number"))" Parent="block" Key="section_number" Path="@($"{path}/section_number")" />
+                        @if (SectionTitle(Number(block["section_number"])) is { } sectionTitle)
+                        {
+                            <div class="form-text">@sectionTitle</div>
+                        }
+                    </div>
+                    <div class="col-md-9">
+                        <label class="form-label small mb-0">Подзаголовок в печати</label>
+                        <ScalarInput Context="Context" Schema="@(Prop(Items, "title"))" Parent="block" Key="title" Path="@($"{path}/title")" />
+                    </div>
+                </div>
+                <div class="mb-2">
+                    <span class="form-label small me-2">Семестры:</span>
+                    @foreach (var semester in SemesterChoices(block))
+                    {
+                        <div class="form-check form-check-inline">
+                            <input type="checkbox" class="form-check-input" id="@($"bank-{index}-sem-{semester}")" disabled="@ReadOnly"
+                                   checked="@(Semesters(block).Contains(semester))" @onchange="e => ToggleSemester(block, semester, e.Value is true)" />
+                            <label class="form-check-label small" for="@($"bank-{index}-sem-{semester}")">@semester</label>
+                        </div>
+                    }
+                </div>
+
+                @for (var t = 0; t < tasks.Count; t++)
+                {
+                    var task = tasks[t];
+                    var taskIndex = t;
+                    var taskPath = $"{path}/tasks/{taskIndex}";
+                    var open = opened.Contains(task);
+                    <div class="border rounded p-2 mb-2" @key="task" id="@SchemaContext.Anchor(taskPath)">
+                        <div class="d-flex gap-2 align-items-start">
+                            <strong class="text-nowrap">№ @(Number(task["number"]))</strong>
+                            @if (open)
+                            {
+                                <span class="me-auto"></span>
+                                <button class="btn btn-sm btn-outline-secondary" type="button" @onclick="() => opened.Remove(task)">Свернуть</button>
+                            }
+                            else
+                            {
+                                <span class="me-auto small @(string.IsNullOrWhiteSpace(Preview(task["text"])) ? "text-muted" : "")">
+                                    @(string.IsNullOrWhiteSpace(Preview(task["text"])) ? "текст не заполнен" : Preview(task["text"]))
+                                </span>
+                                <button class="btn btn-sm btn-outline-secondary" type="button" @onclick="() => opened.Add(task)">@(ReadOnly ? "Открыть" : "Править")</button>
+                            }
+                            @if (!ReadOnly)
+                            {
+                                <button class="btn btn-sm btn-outline-secondary" type="button" title="Удалить задание"
+                                        @onclick="() => RemoveTask(block, taskIndex)">✕</button>
+                            }
+                        </div>
+                        @if (open)
+                        {
+                            <div class="mt-2">
+                                <SchemaField Context="Context" Schema="@(Prop(TaskItems, "text"))" Parent="task" Key="text"
+                                             Path="@($"{taskPath}/text")" Label="Текст задания" />
+                                <div class="row g-2">
+                                    <div class="col-md-8">
+                                        <label class="form-label small mb-0">Ожидаемый ответ</label>
+                                        <ScalarInput Context="Context" Schema="@(Prop(TaskItems, "expected_answer"))" Parent="task" Key="expected_answer"
+                                                     Path="@($"{taskPath}/expected_answer")" Multiline="true" Compact="true" />
+                                        <div class="form-text">У теста — верные варианты ответа.</div>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label small mb-0">Балл</label>
+                                        <ScalarInput Context="Context" Schema="@(Prop(TaskItems, "max_score"))" Parent="task" Key="max_score"
+                                                     Path="@($"{taskPath}/max_score")" Compact="true" />
+                                    </div>
+                                </div>
+                                <div class="mt-2">
+                                    <span class="form-label small me-2">Индикаторы:</span>
+                                    @if (IndicatorChoices(task).Count == 0)
+                                    {
+                                        <span class="small text-muted">в снимке РПД индикаторов нет</span>
+                                    }
+                                    @foreach (var (code, text) in IndicatorChoices(task))
+                                    {
+                                        var known = Indicators.Any(i => i.Code == code);
+                                        <div class="form-check form-check-inline">
+                                            <input type="checkbox" class="form-check-input" id="@($"bank-{index}-{taskIndex}-{code}")" disabled="@ReadOnly"
+                                                   checked="@(Codes(task).Contains(code))" @onchange="e => ToggleIndicator(task, code, e.Value is true)" />
+                                            <label class="form-check-label small @(known ? "" : "text-danger")" for="@($"bank-{index}-{taskIndex}-{code}")"
+                                                   title="@(known ? text : "Индикатора нет в снимке РПД")"><b>@(code)</b></label>
+                                        </div>
+                                    }
+                                </div>
+                            </div>
+                        }
+                    </div>
+                }
+                @if (!ReadOnly)
+                {
+                    <button class="btn btn-sm btn-outline-primary" type="button" @onclick="() => AddTask(block)">Добавить задание</button>
+                }
+            </div>
+        </div>
+    }
+    @if (!ReadOnly)
+    {
+        <button class="btn btn-sm btn-outline-primary" type="button" @onclick="AddGroup">Добавить группу</button>
+    }
+    @if (Hint is not null)
+    {
+        <div class="form-text">@Hint</div>
+    }
+</div>
+
+@code {
+    // Открытые задания (по узлу содержимого, не по номеру: номер у задания может смениться) и группа, которую спросили удалить.
+    private readonly HashSet<JsonObject> opened = [];
+    private JsonObject? removing;
+
+    private JsonElement TaskItems => Items.ValueKind == JsonValueKind.Object ? ItemSchema(Prop(Items, "tasks")) : default;
+
+    private JsonElement Prop(JsonElement schema, string name) =>
+        schema.ValueKind == JsonValueKind.Object && schema.TryGetProperty("properties", out var p) && p.TryGetProperty(name, out var s)
+            ? Context.Resolve(s)
+            : default;
+
+    private JsonElement ItemSchema(JsonElement array) =>
+        array.ValueKind == JsonValueKind.Object && array.TryGetProperty("items", out var i) ? Context.Resolve(i) : default;
+
+    private static List<JsonObject> Tasks(JsonObject block) => (block["tasks"] as JsonArray ?? []).OfType<JsonObject>().ToList();
+
+    // ---- Снимок РПД: индикаторы, разделы, семестры ----
+    private JsonObject? Link => Context.Payload["linked_rpd"] as JsonObject;
+
+    private List<(string Code, string Text)> Indicators => (Link?["competences"] as JsonArray ?? []).OfType<JsonObject>()
+        .SelectMany(c => (c["indicators"] as JsonArray ?? []).OfType<JsonObject>())
+        .Select(i => (Text(i["code"]) ?? "", Text(i["text"]) ?? "")).Where(i => i.Item1 != "").ToList();
+
+    private string? SectionTitle(int number) => number == 0 ? null
+        : (Link?["sections"] as JsonArray ?? []).OfType<JsonObject>().FirstOrDefault(s => Number(s["number"]) == number) is { } s
+            ? $"Раздел {number}: {Text(s["title"])}"
+            : "Такого раздела нет в снимке РПД";
+
+    // Семестры: из снимка, а выбранные, которых в снимке нет, остаются — их не прячем. Без снимка — первые восемь.
+    private List<int> SemesterChoices(JsonObject block)
+    {
+        var fromSnapshot = (Link?["semesters"] as JsonArray ?? []).OfType<JsonObject>().Select(s => Number(s["number"])).Where(n => n > 0);
+        var all = fromSnapshot.Concat(Semesters(block)).Distinct().Order().ToList();
+        return all.Count > 0 ? all : Enumerable.Range(1, 8).ToList();
+    }
+
+    private static List<int> Semesters(JsonObject block) =>
+        (block["semesters"] as JsonArray ?? []).Select(n => Number(n)).Where(n => n > 0).ToList();
+
+    private void ToggleSemester(JsonObject block, int semester, bool on)
+    {
+        var chosen = Semesters(block);
+        if (on && !chosen.Contains(semester)) chosen.Add(semester);
+        if (!on) chosen.Remove(semester);
+        chosen.Sort();
+        if (chosen.Count == 0) block.Remove("semesters");
+        else block["semesters"] = new JsonArray(chosen.Select(n => (JsonNode?)JsonValue.Create(n)).ToArray());
+        Context.Changed();
+    }
+
+    private List<(string Code, string Text)> IndicatorChoices(JsonObject task)
+    {
+        var known = Indicators;
+        return known.Concat(Codes(task).Where(c => known.All(k => k.Code != c)).Select(c => (c, ""))).ToList();
+    }
+
+    private static List<string> Codes(JsonObject task) =>
+        (task["indicator_codes"] as JsonArray ?? []).Select(c => c?.ToString() ?? "").Where(c => c != "").ToList();
+
+    private void ToggleIndicator(JsonObject task, string code, bool on)
+    {
+        var chosen = Codes(task);
+        if (on && !chosen.Contains(code)) chosen.Add(code);
+        if (!on) chosen.Remove(code);
+        if (chosen.Count == 0) task.Remove("indicator_codes");
+        else task["indicator_codes"] = new JsonArray(chosen.Select(c => (JsonNode?)JsonValue.Create(c)).ToArray());
+        Context.Changed();
+    }
+
+    // ---- Группы и задания ----
+    private bool IsDuplicate(JsonObject block) =>
+        Text(block["group"]) is { Length: > 0 } name &&
+        (Value as JsonArray ?? []).OfType<JsonObject>().Count(b => Text(b["group"]) == name) > 1;
+
+    private void AddGroup()
+    {
+        var groups = EnsureArray();
+        var taken = groups.OfType<JsonObject>().Select(b => Text(b["group"])).ToHashSet();
+        var n = groups.Count + 1;
+        while (taken.Contains($"Группа {n}")) n++;
+        var block = new JsonObject
+        {
+            ["group"] = $"Группа {n}", ["kind"] = "questions", ["control_form"] = "intermediate", ["tasks"] = new JsonArray()
+        };
+        groups.Add(block);
+        Context.Changed();
+    }
+
+    private void AskRemoveGroup(JsonObject block)
+    {
+        // Пустую группу удаляют сразу, с заданиями — после вопроса.
+        if (Tasks(block).Count == 0) RemoveGroup(block);
+        else removing = block;
+    }
+
+    private void RemoveGroup(JsonObject block)
+    {
+        removing = null;
+        EnsureArray().Remove(block);
+        Context.Changed();
+    }
+
+    // Номер нового задания — следующий за наибольшим: удаление оставляет пропуск, номера остальных не сдвигаются.
+    private void AddTask(JsonObject block)
+    {
+        if (block["tasks"] is not JsonArray tasks) block["tasks"] = tasks = new JsonArray();
+        var task = new JsonObject { ["number"] = Tasks(block).Select(t => Number(t["number"])).DefaultIfEmpty(0).Max() + 1, ["text"] = "" };
+        tasks.Add(task);
+        opened.Add(task);
+        Context.Changed();
+    }
+
+    private void RemoveTask(JsonObject block, int index)
+    {
+        if (block["tasks"] is not JsonArray tasks || index >= tasks.Count) return;
+        if (tasks[index] is JsonObject task) opened.Remove(task);
+        tasks.RemoveAt(index);
+        Context.Changed();
+    }
+
+    private static bool IsContinuous(List<JsonObject> tasks) =>
+        tasks.Select(t => Number(t["number"])).SequenceEqual(Enumerable.Range(1, tasks.Count));
+
+    private string RenumberTitle(List<JsonObject> tasks) => IsContinuous(tasks)
+        ? "Номера уже идут подряд с 1"
+        : "Номера заданий группы станут подряд с 1, ссылки паспорта на них будут переписаны";
+
+    private Task RenumberAsync(JsonObject block) =>
+        Context.RenumberBank is { } renumber && Text(block["group"]) is { Length: > 0 } name ? renumber(name) : Task.CompletedTask;
+}

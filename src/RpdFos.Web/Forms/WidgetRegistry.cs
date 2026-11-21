@@ -23,7 +23,10 @@ public static class WidgetRegistry
         ["class_table"] = typeof(ObjectTableWidget),
         ["literature_list"] = typeof(ObjectTableWidget),
         // Снимок данных РПД в ФОС (этап 7, B3): только для чтения.
-        ["linked_rpd"] = typeof(LinkedRpdWidget)
+        ["linked_rpd"] = typeof(LinkedRpdWidget),
+        // Банк заданий и билеты ФОС (этап 7, B5).
+        ["task_bank"] = typeof(TaskBankWidget),
+        ["exam_tickets"] = typeof(ExamTicketsWidget)
     };
 
     /// <summary>Виджет поля: по имени из схемы, а для списков без имени — список строк или таблица записей.</summary>

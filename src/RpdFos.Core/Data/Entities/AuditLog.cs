@@ -61,6 +61,13 @@ public static class AuditEvents
     public const string RpdSnapshotRefreshed = "document.rpd_snapshot_refreshed";
 
     /// <summary>
+    /// «Перенумеровать» группу банка заданий ФОС (этап 7, B5; NFR-SEC-07): объект — ФОС, в содержимом <c>{ "group",
+    /// "rewritten_references", "dropped_references" }</c> — группа, число переписанных ссылок паспорта и названия удалённых
+    /// (ссылок на диапазон без заданий).
+    /// </summary>
+    public const string BankRenumbered = "document.bank_renumbered";
+
+    /// <summary>
     /// Закрепление дисциплины за сотрудником и его снятие (этап 7, A10; NFR-SEC-07): объект — дисциплина, в содержимом
     /// <c>{ "employee" }</c> — закреплённый. Закрепление при передаче документа (A9) — ещё <c>"document"</c>: документ, из-за
     /// которого оно появилось.

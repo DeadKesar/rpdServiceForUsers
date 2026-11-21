@@ -1,0 +1,140 @@
+@using System.Text.Json
+@using System.Text.Json.Nodes
+@inherits FieldBase
+
+@* Экзаменационные билеты ФОС (этап 7, B5; FR-DOC-22, решение 10): номер и вопросы. Раздел необязательный; число вопросов —
+   по усмотрению кафедры, обычно два-три, схема требует не меньше двух. Вопрос — форматированный текст, как задание банка:
+   таблицы и формулы линейной записью; рисунков в билетах нет (F55). Билеты свёрнуты до строки с началом вопросов:
+   редактор текста тяжёлый, и открывается он по одному билету. *@
+<div class="mb-3">
+    <label class="form-label">@Title</label>
+    @{ var tickets = Value as JsonArray; }
+    @for (var i = 0; i < (tickets?.Count ?? 0); i++)
+    {
+        var index = i;
+        var ticket = tickets![index] as JsonObject;
+        if (ticket is null) continue;
+        var path = $"{Path}/{index}";
+        var questions = Questions(ticket);
+        var open = opened.Contains(ticket);
+        var missing = ReadOnly ? null : Context.MissingAt($"{path}/questions");
+        <div class="border rounded p-2 mb-2 @(missing is null ? "" : "field-missing-box")" @key="ticket" id="@SchemaContext.Anchor(path)">
+            <div class="d-flex gap-2 align-items-start">
+                <strong class="text-nowrap">Билет № @Number(ticket["number"])</strong>
+                @if (open)
+                {
+                    <span class="me-auto"></span>
+                    <button class="btn btn-sm btn-outline-secondary" type="button" @onclick="() => opened.Remove(ticket)">Свернуть</button>
+                }
+                else
+                {
+                    <span class="me-auto small">
+                        @for (var q = 0; q < questions.Count; q++)
+                        {
+                            var line = Preview(questions[q], 60);
+                            <span class="me-2 @(line == "" ? "text-muted" : "")">@(q + 1). @(line == "" ? "пусто" : line)</span>
+                        }
+                    </span>
+                    <button class="btn btn-sm btn-outline-secondary" type="button" @onclick="() => opened.Add(ticket)">@(ReadOnly ? "Открыть" : "Править")</button>
+                }
+                @if (!ReadOnly)
+                {
+                    <button class="btn btn-sm btn-outline-secondary" type="button" title="Удалить билет" @onclick="() => RemoveTicket(ticket)">✕</button>
+                }
+            </div>
+            @if (open)
+            {
+                <div class="mt-2">
+                    <div class="row g-2 mb-2">
+                        <div class="col-md-3">
+                            <label class="form-label small mb-0">Номер билета</label>
+                            <ScalarInput Context="Context" Schema="@(Prop("number"))" Parent="ticket" Key="number" Path="@($"{path}/number")" Compact="true" />
+                        </div>
+                    </div>
+                    @for (var q = 0; q < questions.Count; q++)
+                    {
+                        var question = q;
+                        <div class="d-flex gap-2 align-items-start">
+                            <div class="flex-grow-1">
+                                <SchemaField Context="Context" Schema="@(QuestionSchema)" Parent="@questions" Key="@question.ToString()"
+                                             Path="@($"{path}/questions/{question}")" Label="@($"Вопрос {question + 1}")" />
+                            </div>
+                            @if (!ReadOnly)
+                            {
+                                <button class="btn btn-sm btn-outline-secondary mt-4" type="button" disabled="@(questions.Count <= 2)"
+                                        title="@(questions.Count <= 2 ? "В билете должно быть не меньше двух вопросов" : "Удалить вопрос")"
+                                        @onclick="() => RemoveQuestion(ticket, question)">✕</button>
+                            }
+                        </div>
+                    }
+                    @if (!ReadOnly)
+                    {
+                        <button class="btn btn-sm btn-outline-primary" type="button" @onclick="() => AddQuestion(ticket)">Добавить вопрос</button>
+                    }
+                </div>
+            }
+            @if (missing is not null)
+            {
+                <div class="field-missing-text mt-1">@missing</div>
+            }
+        </div>
+    }
+    @if (!ReadOnly)
+    {
+        <button class="btn btn-sm btn-outline-primary" type="button" @onclick="AddTicket">Добавить билет</button>
+    }
+    @if (Hint is not null)
+    {
+        <div class="form-text">@Hint</div>
+    }
+</div>
+
+@code {
+    // Открытые билеты — по узлу содержимого: номер билета можно править.
+    private readonly HashSet<JsonObject> opened = [];
+
+    private JsonElement Prop(string name) =>
+        Items.ValueKind == JsonValueKind.Object && Items.TryGetProperty("properties", out var p) && p.TryGetProperty(name, out var s)
+            ? Context.Resolve(s)
+            : default;
+
+    // Подсхема вопроса: элемент списка questions — строка с x-ui-widget: richtext.
+    private JsonElement QuestionSchema =>
+        Prop("questions") is { ValueKind: JsonValueKind.Object } list && list.TryGetProperty("items", out var items) ? Context.Resolve(items) : default;
+
+    // Вопросы билета — узлы массива содержимого: виджет текста правит их на месте.
+    private static JsonArray Questions(JsonObject ticket) =>
+        ticket["questions"] as JsonArray ?? (JsonArray)(ticket["questions"] = new JsonArray());
+
+    private void AddTicket()
+    {
+        var tickets = EnsureArray();
+        var number = tickets.OfType<JsonObject>().Select(t => Number(t["number"])).DefaultIfEmpty(0).Max() + 1;
+        // Два пустых вопроса: меньше схема не принимает.
+        var ticket = new JsonObject { ["number"] = number, ["questions"] = new JsonArray(JsonValue.Create(""), JsonValue.Create("")) };
+        tickets.Add(ticket);
+        opened.Add(ticket);
+        Context.Changed();
+    }
+
+    private void RemoveTicket(JsonObject ticket)
+    {
+        opened.Remove(ticket);
+        EnsureArray().Remove(ticket);
+        Context.Changed();
+    }
+
+    private void AddQuestion(JsonObject ticket)
+    {
+        Questions(ticket).Add(JsonValue.Create(""));
+        Context.Changed();
+    }
+
+    private void RemoveQuestion(JsonObject ticket, int index)
+    {
+        var questions = Questions(ticket);
+        if (questions.Count <= 2 || index >= questions.Count) return;
+        questions.RemoveAt(index);
+        Context.Changed();
+    }
+}

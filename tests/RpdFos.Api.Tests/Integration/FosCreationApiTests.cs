@@ -428,6 +428,124 @@ public class FosCreationApiTests(DatabaseFixture fixture) : AssignmentTestBase(f
         Assert.Equal(HttpStatusCode.OK, saved.StatusCode);
     }
 
+    // ───── банк заданий и билеты (этап 7, B5) ─────
+
+    private const string BankSample = """
+        [ { "group": "Вопросы к зачёту", "kind": "questions", "control_form": "intermediate", "semesters": [1],
+            "tasks": [ { "number": 1, "text": "<p>Первый</p>" }, { "number": 3, "text": "<p>Третий</p>" },
+                       { "number": 4, "text": "<p>Четвёртый</p>" }, { "number": 7, "text": "<p>Седьмой</p>" } ] },
+          { "group": "Тест 1", "kind": "tests", "section_number": 1, "control_form": "current",
+            "tasks": [ { "number": 1, "text": "<p>Вопрос</p>", "expected_answer": "а", "max_score": 2 } ] } ]
+        """;
+
+    private const string PassportSample = """
+        { "sections": [ { "section_number": 1, "competence_codes": ["УК-1"],
+            "tasks": [ { "group": "Вопросы к зачёту", "from": 3, "to": 4 }, { "group": "Вопросы к зачёту", "from": 7, "to": 7 },
+                       { "group": "Тест 1" } ] } ],
+          "indicators": [ { "competence_code": "УК-1", "indicator_code": "УК-1.1",
+            "tasks": [ { "group": "Вопросы к зачёту", "from": 1, "to": 7 } ] } ] }
+        """;
+
+    /// <summary>ФОС по заполненной РПД с банком и паспортом из образцов: номера в группе идут с пропусками, паспорт ссылается на них.</summary>
+    private async Task<(HttpClient Author, DocumentDetails Fos, int Version)> FosWithBankAsync(string code)
+    {
+        var (author, _) = await AccountAsync(App, AppRoles.Teacher);
+        var rpd = await FilledRpdAsync(author, (await DocumentData.PublishedTemplateAsync(App)).Id, code);
+        var fos = await CreatedAsync(author, (await FosTemplateAsync()).Id, rpd.Document.DisciplineId, rpd.Document.Id);
+        var bank = await DocumentData.PatchAsync(author, fos.Document.Id, "task_bank", fos.Document.Version, JsonNode.Parse(BankSample));
+        var passport = await DocumentData.PatchAsync(author, fos.Document.Id, "passport", bank.Version, JsonNode.Parse(PassportSample));
+        return (author, fos, passport.Version);
+    }
+
+    private static Task<HttpResponseMessage> RenumberAsync(HttpClient client, Guid documentId, int version, string group) =>
+        client.PostAsJsonAsync($"/api/documents/{documentId}/renumber-bank", new RenumberBankRequest(version, group));
+
+    [Fact]
+    public async Task The_author_renumbers_a_group_and_the_passport_references_change_in_the_same_save()
+    {
+        var (author, fos, version) = await FosWithBankAsync("Б1.О.11");
+
+        var response = await RenumberAsync(author, fos.Document.Id, version, "Вопросы к зачёту");
+        Assert.True(response.IsSuccessStatusCode, $"{(int)response.StatusCode} {await response.Content.ReadAsStringAsync()}");
+        var done = (await response.Content.ReadFromJsonAsync<DocumentReviewed>())!;
+
+        // Одно сохранение: версия выросла на единицу, статус не менялся, в ответе — что сделано.
+        Assert.Equal(version + 1, done.Version);
+        Assert.Contains("перенумерованы: 1–4", done.Notice);
+        var after = await DetailsAsync(author, fos.Document.Id);
+        var payload = JsonNode.Parse(after.Payload.GetRawText())!;
+        Assert.Equal(new[] { 1, 2, 3, 4 }, payload["task_bank"]![0]!["tasks"]!.AsArray().Select(t => (int)t!["number"]!));
+        Assert.Equal(new[] { 1 }, payload["task_bank"]![1]!["tasks"]!.AsArray().Select(t => (int)t!["number"]!));
+        var refs = payload["passport"]!["sections"]![0]!["tasks"]!.AsArray();
+        Assert.Equal((2, 3), ((int)refs[0]!["from"]!, (int)refs[0]!["to"]!));
+        Assert.Equal((4, 4), ((int)refs[1]!["from"]!, (int)refs[1]!["to"]!));
+        Assert.Equal("Тест 1", (string)refs[2]!["group"]!);
+        var wide = payload["passport"]!["indicators"]![0]!["tasks"]![0]!;
+        Assert.Equal((1, 4), ((int)wide["from"]!, (int)wide["to"]!));
+
+        // Снимок версии и запись аудита — как у любой правки.
+        await App.WithDbAsync(async db =>
+        {
+            var last = await db.DocumentVersions.Where(v => v.DocumentId == fos.Document.Id).OrderByDescending(v => v.VersionNumber).FirstAsync();
+            Assert.True(JsonNode.DeepEquals(JsonNode.Parse(last.Snapshot), payload));
+            var audit = Assert.Single(await db.AuditLog.Where(a => a.EntityId == fos.Document.Id && a.EventType == AuditEvents.BankRenumbered).ToListAsync());
+            var content = JsonNode.Parse(audit.Payload)!;
+            Assert.Equal(("Вопросы к зачёту", 3), ((string)content["group"]!, (int)content["rewritten_references"]!));
+        });
+
+        // Повторно — нумерация уже сплошная: 409, версия не растёт.
+        var again = await RenumberAsync(author, fos.Document.Id, done.Version, "Вопросы к зачёту");
+        Assert.Equal(HttpStatusCode.Conflict, again.StatusCode);
+        Assert.Equal("Нумерация уже сплошная", (await again.Content.ReadFromJsonAsync<ProblemDetails>())!.Title);
+        Assert.Equal(done.Version, (await DetailsAsync(author, fos.Document.Id)).Document.Version);
+    }
+
+    [Fact]
+    public async Task Renumbering_is_refused_for_a_stranger_an_rpd_an_unknown_group_and_a_stale_version()
+    {
+        var (author, fos, version) = await FosWithBankAsync("Б1.О.11");
+        var (stranger, _) = await AccountAsync(App, AppRoles.Teacher);
+
+        Assert.Equal(HttpStatusCode.Forbidden, (await RenumberAsync(stranger, fos.Document.Id, version, "Вопросы к зачёту")).StatusCode);
+        var unknown = await RenumberAsync(author, fos.Document.Id, version, "Нет такой");
+        Assert.Equal(HttpStatusCode.NotFound, unknown.StatusCode);
+        Assert.Equal("Группа не найдена", (await unknown.Content.ReadFromJsonAsync<ProblemDetails>())!.Title);
+        Assert.Equal(HttpStatusCode.Conflict, (await RenumberAsync(author, fos.Document.Id, version - 1, "Вопросы к зачёту")).StatusCode);
+        var rpdId = Guid.Parse((string)JsonNode.Parse(fos.Payload.GetRawText())!["linked_rpd"]!["rpd_document_id"]!);
+        var rpd = await DetailsAsync(author, rpdId);
+        var onRpd = await RenumberAsync(author, rpdId, rpd.Document.Version, "Вопросы к зачёту");
+        Assert.Equal(HttpStatusCode.Conflict, onRpd.StatusCode);
+        Assert.Equal("Действие недоступно для РПД", (await onRpd.Content.ReadFromJsonAsync<ProblemDetails>())!.Title);
+
+        // Ни один отказ ничего не изменил: номера прежние.
+        var payload = JsonNode.Parse((await DetailsAsync(author, fos.Document.Id)).Payload.GetRawText())!;
+        Assert.Equal(new[] { 1, 3, 4, 7 }, payload["task_bank"]![0]!["tasks"]!.AsArray().Select(t => (int)t!["number"]!));
+    }
+
+    [Fact]
+    public async Task Rich_text_of_tasks_and_ticket_questions_is_sanitized()
+    {
+        var (author, fos, version) = await FosWithBankAsync("Б1.О.11");
+
+        // Задание — форматированный текст с таблицей; вопрос билета — тоже форматированный: скрипт и обработчики снимаются.
+        var bank = JsonNode.Parse(BankSample)!;
+        bank[0]!["tasks"]![0]!["text"] = "<p>Задание <b>с</b> таблицей</p><table><tr><td colspan=\"2\" onclick=\"x()\">а</td></tr></table><script>x()</script>";
+        version = (await DocumentData.PatchAsync(author, fos.Document.Id, "task_bank", version, bank)).Version;
+        var tickets = JsonNode.Parse("""[ { "number": 1, "questions": ["<p onclick=\"x()\">Первый <i>вопрос</i></p><script>x()</script>", "<p>Второй</p>"] } ]""");
+        version = (await DocumentData.PatchAsync(author, fos.Document.Id, "exam_tickets", version, tickets)).Version;
+
+        var payload = JsonNode.Parse((await DetailsAsync(author, fos.Document.Id)).Payload.GetRawText())!;
+        var text = (string)payload["task_bank"]![0]!["tasks"]![0]!["text"]!;
+        Assert.Contains("<table>", text);
+        Assert.Contains("colspan=\"2\"", text);
+        Assert.DoesNotContain("script", text);
+        Assert.DoesNotContain("onclick", text);
+        var question = (string)payload["exam_tickets"]![0]!["questions"]![0]!;
+        Assert.Contains("<i>вопрос</i>", question);
+        Assert.DoesNotContain("script", question);
+        Assert.DoesNotContain("onclick", question);
+    }
+
     // ───── вспомогательное ─────
 
     /// <summary>Строки из значений-узлов JSON.</summary>

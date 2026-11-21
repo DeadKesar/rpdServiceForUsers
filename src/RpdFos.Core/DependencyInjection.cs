@@ -54,6 +54,8 @@ public static class DependencyInjection
         // Связь ФОС и РПД (этап 7, B3): создание ФОС, чтение связанной РПД автором ФОС, обновление снимка.
         services.AddScoped<LinkedDocuments>();
         services.AddScoped<FosRefresh>();
+        // Банк заданий ФОС (этап 7, B5): «Перенумеровать» группу вместе со ссылками паспорта.
+        services.AddScoped<FosBankRenumbering>();
         services.AddScoped<DocumentCreation>();
         services.AddScoped<DocumentHistory>();
         services.AddScoped<DocumentNotifications>();

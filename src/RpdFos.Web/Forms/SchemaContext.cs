@@ -66,6 +66,12 @@ public sealed class SchemaContext(JsonElement root, JsonObject payload, Document
 
     public Func<CommentItem, Task>? ResolveComment { get; set; }
 
+    /// <summary>
+    /// «Перенумеровать» группу банка заданий ФОС (этап 7, B5): страница сохраняет открытый раздел и просит сервер сделать
+    /// нумерацию сплошной вместе со ссылками паспорта. Нет у значений по умолчанию шаблона и у документа, который не правится.
+    /// </summary>
+    public Func<string, Task>? RenumberBank { get; set; }
+
     /// <summary>Замечания к самому месту, а для <paramref name="subtree"/> — и к вложенным в него полям.</summary>
     public IEnumerable<CommentItem> CommentsAt(string path, bool subtree) =>
         Comments.Where(c => c.FieldPath == path || subtree && c.FieldPath.StartsWith(path + "/", StringComparison.Ordinal));

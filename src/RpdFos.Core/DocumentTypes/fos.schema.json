@@ -204,6 +204,7 @@
       "type": "array",
       "title": "Банк заданий",
       "description": "Именованные группы вопросов, заданий и тестов; нумерация — внутри группы. Число заданий группы в паспорте вычисляется, а не вводится",
+      "x-ui-widget": "task_bank",
       "items": {
         "type": "object",
         "required": ["group", "kind", "control_form", "tasks"],
@@ -250,12 +251,13 @@
       "type": "array",
       "title": "Экзаменационные билеты",
       "description": "Необязательный раздел: билеты с шапкой и подписью заведующего кафедрой. Число вопросов — по усмотрению кафедры",
+      "x-ui-widget": "exam_tickets",
       "items": {
         "type": "object",
         "required": ["number", "questions"],
         "properties": {
           "number": { "type": "integer", "minimum": 1 },
-          "questions": { "type": "array", "minItems": 2, "items": { "type": "string" } }
+          "questions": { "type": "array", "minItems": 2, "items": { "type": "string", "x-ui-widget": "richtext" } }
         }
       }
     },

@@ -53,8 +53,24 @@ public abstract class FieldBase : ComponentBase
         {
             case JsonObject o when value is null: o.Remove(Key); break;
             case JsonObject o: o[Key] = value; break;
-            case JsonArray a when int.TryParse(Key, out var i) && i < a.Count: a[i] = value; break;
+            // Пустой элемент списка — пустая строка, а не null: у вопроса билета (форматированный текст) схема ждёт строку.
+            case JsonArray a when int.TryParse(Key, out var i) && i < a.Count: a[i] = value ?? JsonValue.Create(""); break;
         }
+    }
+
+    /// <summary>
+    /// Начало текста поля для свёрнутой строки списка: разметка снята, пробелы сжаты, длинное усечено. Рисунок без слов
+    /// называется «рисунок», таблица — «таблица».
+    /// </summary>
+    protected static string Preview(JsonNode? html, int length = 140)
+    {
+        var raw = html is JsonValue v && v.TryGetValue(out string? s) ? s : "";
+        var text = System.Text.RegularExpressions.Regex.Replace(
+            System.Net.WebUtility.HtmlDecode(System.Text.RegularExpressions.Regex.Replace(raw, "<[^>]*>|&nbsp;", " ")), @"\s+", " ").Trim();
+        if (text.Length == 0)
+            return System.Text.RegularExpressions.Regex.IsMatch(raw, "<img", System.Text.RegularExpressions.RegexOptions.IgnoreCase) ? "рисунок"
+                : System.Text.RegularExpressions.Regex.IsMatch(raw, "<table", System.Text.RegularExpressions.RegexOptions.IgnoreCase) ? "таблица" : "";
+        return text.Length <= length ? text : text[..length].TrimEnd() + "…";
     }
 
     protected bool ReadOnly => Context.IsReadOnly(Path, Schema);

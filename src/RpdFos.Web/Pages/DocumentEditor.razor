@@ -697,6 +697,7 @@ else
             CanResolve = details.Actions.ResolveComments, CanResolveOwn = details.Actions.ResolveOwnComments,
             CanResolveApproval = details.Actions.ResolveApprovalComments,
             ViewerId = details.ViewerId, AddComment = AddCommentAsync, ResolveComment = ResolveCommentAsync,
+            RenumberBank = details.Editable ? RenumberBankAsync : null,
             Defaults = details.TemplateDefaults is { } defaults ? JsonNode.Parse(defaults.GetRawText()) as JsonObject : null,
             CorrectPlan = details.Actions.CorrectPlan, Corrections = details.PlanCorrections ?? [],
             PlanFieldChanged = () => _ = InvokeAsync(SavePlanCorrectionAsync),
@@ -889,6 +890,16 @@ else
                 "аттестации. Строки паспорта и оценочных средств останутся как есть. Обновить?", "Обновление из РПД")) return;
         if (!await SaveSectionAsync()) return;
         await ChangeStatusAsync("refresh-from-rpd", new { version }, "Данные РПД обновлены.", r => r.Notice ?? "Данные РПД обновлены.");
+    }
+
+    // «Перенумеровать» группу банка заданий ФОС (этап 7, B5): сначала сохраняется открытый раздел, затем сервер делает номера
+    // сплошными и переписывает ссылки паспорта; документ перечитывается — виджеты видят новые номера.
+    private async Task RenumberBankAsync(string group)
+    {
+        if (!await confirm.AskAsync($"Задания группы «{group}» получат номера подряд с 1, пропуски исчезнут. Ссылки паспорта на эти " +
+                "задания будут переписаны. Перенумеровать?", "Перенумерация группы")) return;
+        if (!await SaveSectionAsync()) return;
+        await ChangeStatusAsync("renumber-bank", new { version, group }, "Задания перенумерованы.", r => r.Notice ?? "Задания перенумерованы.");
     }
 
     private Task OnTransferSearchKeyAsync(KeyboardEventArgs e) => e.Key == "Enter" ? SearchTeachersAsync() : Task.CompletedTask;

@@ -58,6 +58,8 @@ public class DocumentsModule : ICarterModule
         g.MapPost("/{id:guid}/transfer", Transfer).RequireAuthorization(Policies.MethodistOrAdmin);
         // «Обновить из РПД» (этап 7, B3): автор ФОС в статусах правки и методист на проверке; решает сама операция.
         g.MapPost("/{id:guid}/refresh-from-rpd", RefreshFromRpd).RequireAuthorization(Policies.DocumentAuthors);
+        // «Перенумеровать» группу банка заданий ФОС (этап 7, B5): права как у правки содержимого.
+        g.MapPost("/{id:guid}/renumber-bank", RenumberBank).RequireAuthorization(Policies.DocumentAuthors);
         g.MapGet("/{id:guid}/comments", Comments);
         g.MapPost("/{id:guid}/comments", AddComment).RequireAuthorization(Policies.Commenters);
         g.MapPost("/{id:guid}/comments/{commentId:guid}/resolve", ResolveComment).RequireAuthorization(Policies.CommentResolvers);
@@ -621,6 +623,40 @@ public class DocumentsModule : ICarterModule
             document.Version, document.Status, DocumentStatuses.Title(document.Status), [], result.Notice));
     }
 
+    /// <summary>
+    /// «Перенумеровать» группу банка заданий (этап 7, B5): номера заданий группы становятся сплошными, ссылки паспорта на них
+    /// переписываются тем же сохранением. Права — как у правки содержимого (автор в статусах правки, методист на проверке);
+    /// поля плана здесь ни при чём, поэтому исправляющему после приёма — отказ как у правки. Документ не ФОС, группы нет или
+    /// она не одна, нумерация уже сплошная — отказ без изменений. Ответ — новая версия и, в <c>notice</c>, что сделано.
+    /// </summary>
+    private static async Task<IResult> RenumberBank(
+        Guid id, RenumberBankRequest rq, HttpContext http, AppDbContext db, DirectoryAccounts directory, FosBankRenumbering renumbering,
+        DocumentReview review, CancellationToken ct)
+    {
+        var (document, editorId, scope, refusal) = await SectionEditorAsync(id, http, db, directory, review, ct);
+        if (refusal is not null) return refusal;
+        if (document!.Type != TemplateTypes.Fos)
+            return Results.Problem(statusCode: StatusCodes.Status409Conflict, title: "Действие недоступно для РПД",
+                detail: "Банка заданий нет у РПД: «Перенумеровать» есть только у ФОС.");
+        if (scope != DocumentEditScope.Content) return Refused(document, DocumentTransitions.EditAction);
+
+        db.Entry(document).Property(d => d.Version).OriginalValue = rq.Version;
+        var result = await renumbering.RenumberAsync(document, rq.Group, editorId, ct);
+        if (result.Problem is { } problem)
+            return Results.Problem(
+                statusCode: problem == BankRenumberProblem.NoSuchGroup ? StatusCodes.Status404NotFound : StatusCodes.Status409Conflict,
+                title: problem switch
+                {
+                    BankRenumberProblem.NoSuchGroup => "Группа не найдена",
+                    BankRenumberProblem.DuplicateGroup => "Названия групп повторяются",
+                    _ => "Нумерация уже сплошная"
+                },
+                detail: result.Detail);
+
+        await db.SaveChangesAsync(ct);
+        return Results.Ok(new DocumentReviewed(document.Version, document.Status, DocumentStatuses.Title(document.Status), [], result.Notice));
+    }
+
     private static IResult TransferRefused(TransferProblem problem) => problem switch
     {
         TransferProblem.EmptyReason => Results.Problem(statusCode: StatusCodes.Status422UnprocessableEntity, title: "Не указана причина",
@@ -1033,6 +1069,9 @@ public record CreateDocumentRequest(Guid TemplateId, Guid DisciplineId, Guid? Ba
 public record SectionUpdateRequest(int Version, JsonElement Value, bool ConfirmReturn = false);
 
 public record DocumentVersionRequest(int Version);
+
+/// <summary>«Перенумеровать» группу банка заданий ФОС (этап 7, B5): название группы и версия документа, которую видел клиент.</summary>
+public record RenumberBankRequest(int Version, string Group);
 
 /// <summary>«Взять на проверку»: версия и обязательная причина — в историю статусов.</summary>
 public record TakeRequest(int Version, string? Reason);
