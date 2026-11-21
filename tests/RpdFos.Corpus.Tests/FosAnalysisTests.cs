@@ -61,6 +61,9 @@ public class FosHeuristicsTests
     [InlineData("Экзаменационный билет № 5", "tickets")]
     [InlineData("Паспорт фонда оценочных средств по дисциплине", "passport")]
     [InlineData("Лабораторная работа №2", "bank")]
+    [InlineData("Раздел 2. Линейные резистивные цепи и методы их анализа", "group")]
+    [InlineData("Уровень обучаемости «ЗНАТЬ»", "group")]
+    [InlineData("Критерии формирования оценок", "scale")]
     public void Headings_get_the_expected_kind(string heading, string kind) =>
         Assert.Equal(kind, MatchKinds(heading).First().Id);
 }

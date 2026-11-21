@@ -30,6 +30,8 @@ public sealed class FosAnalysis
     public string Year { get; set; } = "";
     public string StudyForm { get; set; } = "";
     public string Level { get; set; } = "";
+    public string DocKind { get; set; } = "?";                   // «ФОС», «РПД» (рабочая программа лежит в папке ФОС) или «?» — титул не опознан
+    public string? DuplicateOf { get; set; }                     // номер файла с тем же содержимым, если это точная копия
     public string Standard { get; set; } = "?";                  // «3++» — есть индикаторы достижения компетенций; «3+» — только коды компетенций
     public int Parts { get; set; }                               // частей с шапкой вуза: титул и приложения
     public List<OutlineItem> Outline { get; } = [];
@@ -98,6 +100,7 @@ public static class FosAnalyzer
         if (doc.Error is not null) return a;
 
         var paragraphs = doc.Paragraphs.ToList();
+        a.DocKind = KindOf(paragraphs);
         var head = paragraphs.Take(80).Select(p => p.Text).ToList();
         a.Direction = head.Select(t => DirectionRx.Match(t)).FirstOrDefault(m => m.Success)?.Value
                       ?? DirectionRx.Match(doc.FileName).Value;
@@ -114,6 +117,21 @@ public static class FosAnalyzer
         FillTickets(a, paragraphs);
         FillNoSlot(a);
         return a;
+    }
+
+    /// <summary>
+    /// ФОС или рабочая программа: в папку ФОС попадают и РПД (пара к ФОС), их нельзя считать в статистике ФОС.
+    /// Решает то, что стоит в начале раньше: «ФОНД ОЦЕНОЧНЫХ СРЕДСТВ» или «РАБОЧАЯ ПРОГРАММА».
+    /// </summary>
+    private static string KindOf(List<FosParagraph> paragraphs)
+    {
+        foreach (var p in paragraphs.Take(60))
+        {
+            var text = Norm(p.Text);
+            if (Regex.IsMatch(text, @"^рабочая\s+программа")) return "РПД";
+            if (Regex.IsMatch(text, @"^фонд\w*\s+оценочн")) return "ФОС";
+        }
+        return "?";
     }
 
     private static string FindDiscipline(List<FosParagraph> paragraphs)

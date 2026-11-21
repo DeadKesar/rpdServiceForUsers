@@ -21,9 +21,11 @@ public static class FosReader
     {
         var name = Path.GetFileName(path);
         var ext = Path.GetExtension(path).ToLowerInvariant();
+        if (ext is not (".doc" or ".docx" or ".pdf"))
+            return Failed(id, name, ext.TrimStart('.'), "формат не поддерживается");
         var real = ext == ".doc" ? convertedPath : path;
         if (real is null || !File.Exists(real))
-            return Failed(id, name, ext.TrimStart('.'), "преобразованной копии нет");
+            return Failed(id, name, ext.TrimStart('.'), "нужна копия .docx в _преобразовано\\ФОС");
         try
         {
             return Path.GetExtension(real).Equals(".pdf", StringComparison.OrdinalIgnoreCase)
@@ -35,6 +37,10 @@ public static class FosReader
             return Failed(id, name, ext.TrimStart('.'), e.GetType().Name + ": " + e.Message);
         }
     }
+
+    /// <summary>Номер закреплён за файлом, которого в папке больше нет: строка в отчётах остаётся, номер не выдаётся повторно.</summary>
+    public static FosDoc Missing(string id, string name) =>
+        Failed(id, name, Path.GetExtension(name).TrimStart('.').ToLowerInvariant(), "файла нет в папке");
 
     private static FosDoc Failed(string id, string name, string format, string error) =>
         new(id, name, format, "", [], [], null, 0, 0, 0, error);

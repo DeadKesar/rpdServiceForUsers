@@ -35,11 +35,18 @@ public static class FosReports
         var s = new StringBuilder();
         s.AppendLine($"# {d.Id} — {Md(MaskFileName(d.FileName))}");
         s.AppendLine();
+        if (d.Error == MissingMark)
+        {
+            s.AppendLine("Файла нет в папке корпуса. Номер закреплён за ним в реестре и повторно не выдаётся.");
+            return s.ToString();
+        }
         if (d.Error is not null)
         {
             s.AppendLine($"Файл не разобран: {d.Error}");
             return s.ToString();
         }
+        if (a.DocKind == "РПД") s.AppendLine("**Это рабочая программа, не ФОС** (лежит в папке ФОС): в статистику ФОС не входит.\n");
+        if (a.DuplicateOf is not null) s.AppendLine($"**Точная копия {a.DuplicateOf}**: содержимое файла совпадает, в статистику не входит.\n");
         s.AppendLine($"{d.Format} ({d.Source}) · страниц {d.Pages?.ToString() ?? "?"} · абзацев {d.Paragraphs.Count()} · таблиц {d.Tables.Count()} · " +
                      $"формул {a.Formulas} · крупных рисунков {a.Drawings} (мелких {a.SmallDrawings}) · знаков текста {d.TextChars}");
         s.AppendLine($"Направление {Or(a.Direction)} · {Or(a.Level)} · {Or(a.StudyForm)} · {Or(a.Year)} · ФГОС {a.Standard} · частей с шапкой вуза {a.Parts} · дисциплина: {Or(a.Discipline)}");
@@ -105,7 +112,7 @@ public static class FosReports
     private static string Summary(IReadOnlyList<FosAnalysis> items, FosAnalysis? template, TimeSpan elapsed, DateTimeOffset started)
     {
         var ok = items.Where(a => a.Doc.Error is null).ToList();
-        var text = ok.Where(a => a.Doc.TextChars >= 300).ToList();
+        var text = ok.Where(InStatistics).ToList();
         // «N (3++: M)»: ФГОС 3++ в корпусе мало, а файлов одной дисциплины много — число без разбивки вводит в заблуждение.
         string Cnt(Func<FosAnalysis, bool> pred)
         {
@@ -118,7 +125,8 @@ public static class FosReports
         var s = new StringBuilder();
         s.AppendLine("# Сводка по настоящим ФОС (режим --fos)");
         s.AppendLine();
-        s.AppendLine($"Запуск {started:yyyy-MM-dd HH:mm}, {elapsed.TotalSeconds:0} с. Файлов {items.Count}, разобрано {ok.Count}, с текстом {text.Count}. " +
+        s.AppendLine($"Запуск {started:yyyy-MM-dd HH:mm}, {elapsed.TotalSeconds:0} с. Номеров {items.Count}, файлов в папке {items.Count(a => a.Doc.Error != MissingMark)}, разобрано {ok.Count}. " +
+                     $"В статистике {text.Count} ФОС: не входят рабочие программы ({ok.Count(a => a.DocKind == "РПД")}), точные копии ({ok.Count(a => a.DuplicateOf is not null)}) и файлы без текста ({ok.Count(a => a.Doc.TextChars < 300)}). " +
                      "Правила отнесения к разделам — предложение инструмента; спорное названо ниже. В скобках «3++» — сколько из этих файлов по ФГОС 3++.");
 
         s.AppendLine("\n## 1. Корпус");
@@ -128,10 +136,10 @@ public static class FosReports
         s.AppendLine("\n| Дисциплина | Файлов | ФГОС | Формат | ID |\n|---|---|---|---|---|");
         foreach (var g in items.GroupBy(Family).OrderByDescending(g => g.Count()))
             s.AppendLine($"| {Md(g.Key)} | {g.Count()} | {string.Join(", ", g.Select(a => a.Standard).Distinct())} | {string.Join(", ", g.Select(a => a.Doc.Format).Distinct())} | {Ids(g)} |");
-        s.AppendLine("\n| ID | Формат | Стр. | Абз. | Табл. | Направление | Год | ФГОС | Частей | Заметка |\n|---|---|---|---|---|---|---|---|---|---|");
+        s.AppendLine("\n| ID | Вид | Формат | Стр. | Абз. | Табл. | Направление | Год | ФГОС | Частей | Заметка |\n|---|---|---|---|---|---|---|---|---|---|---|");
         foreach (var a in items)
-            s.AppendLine($"| [{a.Doc.Id}]({a.Doc.Id}.md) | {a.Doc.Format} | {a.Doc.Pages} | {a.Doc.Paragraphs.Count()} | {a.Doc.Tables.Count()} | {Or(a.Direction)} | {Or(a.Year)} | " +
-                         $"{a.Standard} | {a.Parts} | {Md(a.Doc.Error ?? (a.Doc.TextChars < 300 ? "текста нет" : ""))} |");
+            s.AppendLine($"| [{a.Doc.Id}]({a.Doc.Id}.md) | {a.DocKind} | {a.Doc.Format} | {a.Doc.Pages} | {a.Doc.Paragraphs.Count()} | {a.Doc.Tables.Count()} | {Or(a.Direction)} | {Or(a.Year)} | " +
+                         $"{a.Standard} | {a.Parts} | {Md(NoteOf(a))} |");
 
         s.AppendLine("\n## 2. Разделы настоящих ФОС и место в схеме");
         s.AppendLine($"\nФайлов с заголовком такого вида (из {text.Count}). Столбец «Файл оформления» — есть ли заголовок такого вида в `FOS_TemplateBookmarks.docx`. Слот «нет» — места в схеме нет.\n");
@@ -223,10 +231,22 @@ public static class FosReports
         return s.ToString();
     }
 
+    /// <summary>Пометка файла, чей номер закреплён, а самого файла в папке нет.</summary>
+    public const string MissingMark = "файла нет в папке";
+
+    /// <summary>В статистику идут ФОС с текстом; рабочие программы из этой папки и точные копии не считаются.</summary>
+    public static bool InStatistics(FosAnalysis a) =>
+        a.Doc.Error is null && a.Doc.TextChars >= 300 && a.DocKind != "РПД" && a.DuplicateOf is null;
+
+    private static string NoteOf(FosAnalysis a) =>
+        a.Doc.Error ?? (a.DuplicateOf is not null ? $"точная копия {a.DuplicateOf}" : a.DocKind == "РПД" ? "рабочая программа, не ФОС" : a.Doc.TextChars < 300 ? "текста нет" : "");
+
     /// <summary>Дисциплина без уточнения в скобках и после двоеточия: «Прикладная физическая культура: Спортивные игры» и «… (Интеллектуальные виды спорта)» — одна.</summary>
     private static string Family(FosAnalysis a)
     {
+        if (a.Doc.Error == MissingMark) return "(файла нет в папке)";
         if (a.Doc.Error is not null) return "(не прочитан)";
+        if (a.DocKind == "РПД") return "(рабочая программа, не ФОС)";
         if (a.Doc.TextChars < 300) return "(скан, текста нет)";
         var n = Norm(a.Discipline);
         var cut = n.IndexOfAny([':', '(']);
@@ -278,11 +298,11 @@ public static class FosReports
     private static string FilesCsv(IReadOnlyList<FosAnalysis> items)
     {
         var s = new StringBuilder();
-        s.AppendLine("id;файл;формат;страниц;абзацев;таблиц;направление;уровень;форма;год;фгос;частей;дисциплина;паспорт;индикаторы;билетов;серий;нумерация;формул;крупных рисунков;мелких рисунков;виды;ошибка");
+        s.AppendLine("id;файл;формат;вид;копия;страниц;абзацев;таблиц;направление;уровень;форма;год;фгос;частей;дисциплина;паспорт;индикаторы;билетов;серий;нумерация;формул;крупных рисунков;мелких рисунков;виды;ошибка");
         foreach (var a in items)
             s.AppendLine(string.Join(';', new[]
             {
-                a.Doc.Id, MaskFileName(a.Doc.FileName), a.Doc.Format, a.Doc.Pages?.ToString() ?? "", a.Doc.Paragraphs.Count().ToString(),
+                a.Doc.Id, MaskFileName(a.Doc.FileName), a.Doc.Format, a.DocKind, a.DuplicateOf ?? "", a.Doc.Pages?.ToString() ?? "", a.Doc.Paragraphs.Count().ToString(),
                 a.Doc.Tables.Count().ToString(), a.Direction, a.Level, a.StudyForm, a.Year, a.Standard, a.Parts.ToString(), a.Discipline,
                 a.Passport is null ? "" : $"{a.Passport.Rows}x{a.Passport.Cols}", a.IndicatorsTable is null ? "" : $"{a.IndicatorsTable.Rows}x{a.IndicatorsTable.Cols}",
                 a.Tickets.ToString(), a.Runs.Count(r => r.Length >= 3).ToString(), NumberingKind(a), a.Formulas.ToString(), a.Drawings.ToString(),
@@ -351,7 +371,7 @@ public static class FosReports
         s.AppendLine("\n## Разделы настоящих ФОС, которых нет среди заголовков файла оформления");
         s.AppendLine();
         var have = t.KindHeadings.Keys.ToHashSet();
-        var withText = items.Where(a => a.Doc.Error is null && a.Doc.TextChars >= 300).ToList();
+        var withText = items.Where(InStatistics).ToList();
         foreach (var k in Kinds.Where(k => !have.Contains(k.Id)))
             s.AppendLine($"- {k.Title}: в {withText.Count(a => a.KindHeadings.ContainsKey(k.Id))} из {withText.Count} файлов");
         return s.ToString();
