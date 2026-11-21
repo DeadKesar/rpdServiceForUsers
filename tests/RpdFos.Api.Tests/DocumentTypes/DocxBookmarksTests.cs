@@ -13,14 +13,17 @@ public class DocxBookmarksTests
 
     // Действующий шаблон РПД — третья версия файла оформления (этап 5.1): постоянные пункты списков вуза — значения
     // по умолчанию шаблона. Исходный и вторая версия остаются для истории и проверки каталога.
+    // Действующий шаблон ФОС — вторая версия (этап 7): образцы Положения убраны, добавлены закладки содержимого.
+    // Исходный остаётся для истории и проверки каталога.
     public const string Rpd = "DWP_TemplateBookmarks_v3.docx", RpdV2 = "DWP_TemplateBookmarks_v2.docx",
-        RpdOriginal = "DWP_TemplateBookmarks.docx", Fos = "FOS_TemplateBookmarks.docx";
+        RpdOriginal = "DWP_TemplateBookmarks.docx", Fos = "FOS_TemplateBookmarks_v2.docx", FosOriginal = "FOS_TemplateBookmarks.docx";
 
     [Theory]
     [InlineData(RpdOriginal, 52, 35)]
     [InlineData(RpdV2, 76, 57)] // вторая версия: +24 вхождения, +22 закладки — методическое содержимое, бланки протокола и составителей
     [InlineData(Rpd, 76, 57)]   // третья: закладки те же, убраны только постоянные пункты списков
-    [InlineData(Fos, 46, 24)]
+    [InlineData(FosOriginal, 46, 24)]
+    [InlineData(Fos, 50, 34)]   // вторая: −9 вхождений образцов и трёх приложений, +13 — содержимое, учебный год и подпись билета
     public void Real_templates_match_bookmark_catalog(string file, int bookmarks, int baseNames)
     {
         // Каталог закладок (docs/design/ВКР_2_Карта_закладок_DOCX.md): 52 в исходном шаблоне РПД и 46 в ФОС.
@@ -35,7 +38,7 @@ public class DocxBookmarksTests
     public void Fan_out_counts_follow_catalog()
     {
         var rpd = DocxBookmarks.Read(Template(Rpd)).ToDictionary(g => g.BaseName, g => g.Count);
-        var fos = DocxBookmarks.Read(Template(Fos)).ToDictionary(g => g.BaseName, g => g.Count);
+        var fos = DocxBookmarks.Read(Template(FosOriginal)).ToDictionary(g => g.BaseName, g => g.Count);
 
         Assert.Equal((7, 4, 4, 2), (rpd["AutofillDiscipline"], rpd["AutofillWayCode"], rpd["AutofillWayName"], rpd["AutofillWaySection"]));
         Assert.Equal((7, 3, 6, 6), (fos["AutofillDiscipline"], fos["AutofillWayName"], fos["AutofillYear"], fos["AutofillDepartment"]));
@@ -44,6 +47,29 @@ public class DocxBookmarksTests
         Assert.True(fos.ContainsKey("AutofillEducationLevel") && fos.ContainsKey("AutofillEducationLvl"));
         // MonitoringU1 и Monitoring2–3 — разные базовые имена.
         Assert.Equal((1, 2), (fos["AutofillMonitoringU"], fos["AutofillMonitoring"]));
+    }
+
+    [Fact]
+    public void Second_fos_template_drops_samples_and_keeps_title_bookmarks()
+    {
+        var original = DocxBookmarks.Read(Template(FosOriginal)).ToDictionary(g => g.BaseName, g => g.Count);
+        var v2 = DocxBookmarks.Read(Template(Fos)).ToDictionary(g => g.BaseName, g => g.Count);
+
+        // Титул, лист согласования и шапка билета — те же закладки; убраны вхождения образцов и трёх приложений.
+        Assert.Equal((4, 3, 6, 4), (v2["AutofillDiscipline"], v2["AutofillWayName"], v2["AutofillYear"], v2["AutofillDepartment"]));
+        Assert.Equal(3, v2["AutofillWayCode"]);
+        // Три приложения банка заменены блоком части: заголовок задаёт AutofillBankTitle, а не формы контроля.
+        Assert.Equal(["AutofillMonitoring", "AutofillMonitoringU"], original.Keys.Except(v2.Keys).Order());
+        // Новые закладки: паспорт, содержимое разделов, блок части банка, билеты.
+        string[] added =
+        [
+            "AutofillPassportSections", "AutofillCurrentControl", "AutofillMeans", "AutofillBankGroup", "AutofillBankTitle",
+            "AutofillBankTasks", "AutofillBankCompilers", "AutofillScale", "AutofillTicket", "AutofillTicketNumber",
+            "AutofillTicketQuestions", "AutofillAcademicYear"
+        ];
+        Assert.Equal(added.Order(), v2.Keys.Except(original.Keys).Order());
+        // Подпись заведующего под билетом — второе вхождение той же закладки, что и на титуле.
+        Assert.Equal(2, v2["AutofillPositionKafName"]);
     }
 
     [Fact]

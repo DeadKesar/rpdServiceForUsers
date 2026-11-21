@@ -37,6 +37,19 @@ public class TemplateCheckTests
     }
 
     [Fact]
+    public void First_fos_template_reports_form_bookmarks_dropped_in_the_second()
+    {
+        // В первой версии заголовки трёх приложений строили закладки форм контроля; во второй — один блок части,
+        // заголовок которого задаёт AutofillBankTitle. Первая версия остаётся в репозитории, но публиковать её нельзя.
+        var docx = DocxBookmarksTests.Template(DocxBookmarksTests.FosOriginal);
+        var t = WithPrintTemplate(DocumentTypeRegistry.Fos, docx);
+
+        var errors = TemplateCheck.Inspect(t, docx, Registry).Errors;
+
+        Assert.Equal(["Закладка AutofillMonitoring не сопоставлена", "Закладка AutofillMonitoringU не сопоставлена"], errors.Order());
+    }
+
+    [Fact]
     public void Print_template_of_other_type_has_unmapped_bookmarks()
     {
         // В шаблон РПД загружено оформление ФОС: закладок ФОС нет в сопоставлении РПД.

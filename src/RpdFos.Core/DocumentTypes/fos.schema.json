@@ -3,7 +3,7 @@
   "$id": "https://stankin.ru/schemas/fos/v1.json",
   "title": "Фонд оценочных средств (ФОС)",
   "type": "object",
-  "required": ["title_page", "linked_rpd", "competence_indicators", "passport", "evaluation_means", "approval_sheet"],
+  "required": ["title_page", "linked_rpd", "competence_indicators", "passport", "approval_sheet"],
   "properties": {
 
     "title_page": {
@@ -13,10 +13,77 @@
     "linked_rpd": {
       "type": "object",
       "title": "Связь с РПД",
+      "description": "Документ РПД и снимок наследуемых из неё данных на момент создания ФОС или обновления из РПД",
       "required": ["rpd_document_id", "rpd_version"],
       "properties": {
         "rpd_document_id": { "type": "string", "format": "uuid" },
-        "rpd_version": { "type": "integer" }
+        "rpd_version": { "type": "integer" },
+        "snapshot_at": { "type": "string", "format": "date-time", "readOnly": true, "description": "Когда снят снимок данных РПД" },
+        "competences": {
+          "type": "array",
+          "title": "Компетенции и индикаторы РПД",
+          "readOnly": true,
+          "items": {
+            "type": "object",
+            "required": ["code", "indicators"],
+            "properties": {
+              "code": { "$ref": "#/$defs/competence_code" },
+              "formulation": { "type": "string" },
+              "indicators": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": ["code"],
+                  "properties": {
+                    "code": { "$ref": "#/$defs/indicator_code" },
+                    "text": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "sections": {
+          "type": "array",
+          "title": "Разделы РПД",
+          "description": "Из тематического плана: название раздела для паспорта — темы раздела через запятую",
+          "readOnly": true,
+          "items": {
+            "type": "object",
+            "required": ["number"],
+            "properties": {
+              "number": { "type": "integer", "minimum": 1 },
+              "title": { "type": "string" },
+              "semesters": { "type": "array", "items": { "type": "integer", "minimum": 1, "maximum": 12 } },
+              "competence_codes": { "type": "array", "items": { "$ref": "#/$defs/competence_code" } },
+              "indicator_codes": { "type": "array", "items": { "$ref": "#/$defs/indicator_code" } },
+              "current_control_forms": { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        },
+        "semesters": {
+          "type": "array",
+          "title": "Виды промежуточной аттестации по семестрам РПД",
+          "readOnly": true,
+          "items": {
+            "type": "object",
+            "required": ["number"],
+            "properties": {
+              "number": { "type": "integer", "minimum": 1, "maximum": 12 },
+              "control_types": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": ["exam", "credit", "graded_credit", "course_project", "course_work"],
+                  "x-enum-titles": {
+                    "exam": "Экзамен", "credit": "Зачёт", "graded_credit": "Дифференцированный зачёт",
+                    "course_project": "Курсовой проект", "course_work": "Курсовая работа"
+                  }
+                }
+              }
+            }
+          }
+        }
       },
       "x-validation-rule": "linked_rpd_must_be_approved_or_under_review"
     },
@@ -49,7 +116,7 @@
             "properties": {
               "section_number": { "type": "integer", "minimum": 1 },
               "section_title": { "type": "string" },
-              "competence_codes": { "type": "array", "items": { "type": "string", "pattern": "^(УК|ОПК|ПК)-\\d+$" } },
+              "competence_codes": { "type": "array", "items": { "$ref": "#/$defs/competence_code" } },
               "tasks": { "type": "array", "items": { "$ref": "#/$defs/task_ref" } }
             }
           }
@@ -61,7 +128,7 @@
             "type": "object",
             "required": ["competence_code", "indicator_code", "tasks"],
             "properties": {
-              "competence_code": { "type": "string", "pattern": "^(УК|ОПК|ПК)-\\d+$" },
+              "competence_code": { "$ref": "#/$defs/competence_code" },
               "indicator_code": { "$ref": "#/$defs/indicator_code" },
               "rpd_section_numbers": { "type": "array", "items": { "type": "integer", "minimum": 1 } },
               "tasks": { "type": "array", "items": { "$ref": "#/$defs/task_ref" } }
@@ -109,19 +176,14 @@
 
     "evaluation_means": {
       "type": "array",
-      "title": "Оценочные средства по индикаторам",
+      "title": "Оценочные средства",
+      "description": "Необязательный раздел. В печати — «Методические материалы, определяющие процедуры оценивания»: по каждому средству описание и критерии оценок",
       "x-validation-rule": "all_indicators_have_means",
       "x-ui-widget": "evaluation_means_table",
       "items": {
         "type": "object",
-        "required": ["indicator_code", "control_form", "means_type", "description"],
+        "required": ["means_type", "title"],
         "properties": {
-          "indicator_code": { "$ref": "#/$defs/indicator_code" },
-          "control_form": {
-            "type": "string",
-            "enum": ["current", "intermediate"],
-            "description": "Текущий или промежуточный контроль"
-          },
           "means_type": {
             "type": "string",
             "enum": [
@@ -131,8 +193,10 @@
             ],
             "x-source-suggestion": "fos_means_recommender"
           },
-          "description": { "type": "string", "minLength": 10 },
-          "evaluation_criteria": { "type": "string" }
+          "title": { "type": "string", "description": "Наименование средства, например «Реферат»" },
+          "description": { "type": "string", "x-ui-widget": "richtext", "description": "Описание средства, структура и требования к оформлению" },
+          "criteria": { "type": "string", "x-ui-widget": "richtext", "description": "Критерии оценок по средству; их отсутствие — предупреждение" },
+          "indicator_codes": { "type": "array", "items": { "$ref": "#/$defs/indicator_code" }, "description": "Индикаторы, которые проверяет средство" }
         }
       }
     },
@@ -140,13 +204,29 @@
     "task_bank": {
       "type": "array",
       "title": "Банк заданий",
-      "description": "Именованные группы (уровень сложности, раздел, вид аттестации с семестром); нумерация — сквозная внутри группы",
+      "description": "Именованные группы вопросов, заданий и тестов; нумерация — внутри группы. Число заданий группы в паспорте вычисляется, а не вводится",
       "items": {
         "type": "object",
-        "required": ["group", "tasks"],
+        "required": ["group", "kind", "control_form", "tasks"],
         "properties": {
-          "group": { "type": "string", "description": "Например: «A», «вопросы к экзамену, 3 семестр»" },
-          "semester": { "type": "integer", "minimum": 1, "maximum": 12 },
+          "group": { "type": "string", "description": "Название группы: на него ссылается паспорт; например «Вопросы к зачёту», «Раздел 1»" },
+          "kind": {
+            "type": "string",
+            "enum": ["questions", "tasks", "tests"],
+            "x-enum-titles": { "questions": "Вопросы", "tasks": "Задания", "tests": "Тесты" }
+          },
+          "section_number": { "type": "integer", "minimum": 1, "description": "Раздел РПД; у группы тестов обязателен: номер задания печатается «раздел.номер»" },
+          "semesters": {
+            "type": "array",
+            "items": { "type": "integer", "minimum": 1, "maximum": 12 },
+            "description": "Семестры группы; вид промежуточной аттестации берётся из РПД по ним"
+          },
+          "control_form": {
+            "type": "string",
+            "enum": ["current", "intermediate"],
+            "x-enum-titles": { "current": "Текущий контроль", "intermediate": "Промежуточная аттестация" }
+          },
+          "title": { "type": "string", "description": "Подзаголовок группы в печати; без него — название группы" },
           "tasks": {
             "type": "array",
             "items": {
@@ -154,35 +234,37 @@
               "required": ["number", "text"],
               "properties": {
                 "number": { "type": "integer", "minimum": 1 },
-                "text": { "type": "string", "x-ui-widget": "richtext" },
-                "expected_answer": { "type": "string" },
+                "text": { "type": "string", "x-ui-widget": "richtext", "description": "Текст задания; у теста варианты ответов — списком в тексте" },
+                "expected_answer": { "type": "string", "description": "У теста — верные варианты" },
                 "max_score": { "type": "number" },
                 "indicator_codes": { "type": "array", "items": { "$ref": "#/$defs/indicator_code" } }
               }
             }
           }
-        }
+        },
+        "if": { "required": ["kind"], "properties": { "kind": { "const": "tests" } } },
+        "then": { "required": ["section_number"] }
       }
     },
 
     "exam_tickets": {
       "type": "array",
       "title": "Экзаменационные билеты",
-      "description": "Необязательный раздел: билеты с шапкой и подписью заведующего кафедрой",
+      "description": "Необязательный раздел: билеты с шапкой и подписью заведующего кафедрой. Число вопросов — по усмотрению кафедры",
       "items": {
         "type": "object",
         "required": ["number", "questions"],
         "properties": {
           "number": { "type": "integer", "minimum": 1 },
-          "questions": { "type": "array", "minItems": 2, "maxItems": 3, "items": { "type": "string" } }
+          "questions": { "type": "array", "minItems": 2, "items": { "type": "string" } }
         }
       }
     },
 
     "evaluation_scale": {
       "type": "object",
-      "title": "Шкала оценивания",
-      "description": "Необязательный раздел",
+      "title": "Критерии формирования оценок",
+      "description": "Необязательный раздел; пустой печатается типовыми критериями по виду аттестации РПД",
       "x-validation-rule": "scale_matches_control_type",
       "properties": {
         "type": {
@@ -194,10 +276,10 @@
           "type": "array",
           "items": {
             "type": "object",
-            "required": ["grade", "min_score", "max_score", "description"],
+            "required": ["grade", "description"],
             "properties": {
               "grade": { "type": "string" },
-              "min_score": { "type": "number" },
+              "min_score": { "type": "number", "description": "Нижняя граница баллов; в критериях Положения баллов нет" },
               "max_score": { "type": "number" },
               "description": { "type": "string" }
             }
@@ -212,17 +294,22 @@
   },
 
   "$defs": {
+    "competence_code": {
+      "type": "string",
+      "pattern": "^(УК|ОПК|ПК)-\\d+$"
+    },
     "indicator_code": {
       "type": "string",
       "pattern": "^(УК|ОПК|ПК)-\\d+(\\.\\d+){1,2}$"
     },
     "task_ref": {
       "type": "object",
-      "description": "Ссылка паспорта на задание банка: группа и номер",
-      "required": ["group", "number"],
+      "description": "Ссылка паспорта на задания банка: группа и диапазон номеров. Без from и to — вся группа, один номер — from равен to",
+      "required": ["group"],
       "properties": {
         "group": { "type": "string" },
-        "number": { "type": "integer", "minimum": 1 }
+        "from": { "type": "integer", "minimum": 1 },
+        "to": { "type": "integer", "minimum": 1 }
       }
     }
   }

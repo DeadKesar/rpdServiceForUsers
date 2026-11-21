@@ -46,8 +46,6 @@ public class PrintMappingTests
     [InlineData(DocumentTypeRegistry.Rpd, "AutofillEducationLevel", "AutofillEducationLevel2", null, "reference.direction.qualification")]
     [InlineData(DocumentTypeRegistry.Fos, "AutofillEducationForm", "AutofillEducationForm1", WordForms.Gen, null)]
     [InlineData(DocumentTypeRegistry.Fos, "AutofillEducationLvl", "AutofillEducationLvl1", WordForms.Gen, null)]
-    [InlineData(DocumentTypeRegistry.Fos, "AutofillMonitoringU", "AutofillMonitoringU1", WordForms.Dat, null)]
-    [InlineData(DocumentTypeRegistry.Fos, "AutofillMonitoring", "AutofillMonitoring3", WordForms.Gen, null)]
     public void Occurrences_follow_template_context(string type, string bookmark, string occurrence, string? form, string? target)
     {
         var o = Registry.Get(type).PrintMapping[bookmark].Occurrences![occurrence];

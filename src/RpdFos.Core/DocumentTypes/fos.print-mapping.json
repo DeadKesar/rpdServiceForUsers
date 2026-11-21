@@ -19,32 +19,73 @@
   },
   "AutofillCurs": { "kind": "source", "target": "parser.discipline.course" },
   "AutofillYear": { "kind": "source", "target": "document.year" },
+  "AutofillAcademicYear": {
+    "kind": "field", "target": "/title_page/academic_year",
+    "note": "Шапка экзаменационного билета: «2026/2027 учебный год»."
+  },
   "AutofillDepartment": { "kind": "field", "target": "/title_page/department_name" },
   "AutofillPassDestination": {
     "kind": "text", "target": "фонда оценочных средств по дисциплине «{parser.discipline.name}»"
   },
-  "AutofillMonitoringU": {
-    "kind": "field", "target": "/current_control/forms",
-    "note": "Формы текущего контроля через запятую: «Вопросы для подготовки к … по дисциплине …».",
-    "occurrences": { "AutofillMonitoringU1": { "form": "dat" } }
-  },
-  "AutofillMonitoring": {
-    "kind": "field", "target": "/current_control/forms",
-    "note": "Формы текущего контроля через запятую: «…используемых при проведении … по дисциплине …».",
-    "occurrences": { "AutofillMonitoring2": { "form": "gen" }, "AutofillMonitoring3": { "form": "gen" } }
-  },
-  "AutofillExaming": {
-    "kind": "source", "target": "parser.discipline.attestation",
-    "note": "Не подтверждено, сверка на этапе 5. Каталог: вид промежуточной аттестации в заголовке приложения с билетами; в шаблоне закладка стоит в строке «Приложение № 6» перед образцом теста."
+  "AutofillPassportSections": {
+    "kind": "table", "target": "fos_passport_sections",
+    "note": "Таблица 1 паспорта: разделы дисциплины, компетенции и число вопросов, заданий и тестов. Числа вычисляются по банку заданий, а не вводятся."
   },
   "AutofillCompetenciesTable": {
     "kind": "table", "target": "fos_passport",
-    "note": "В ФОС эта таблица — паспорт ФОС (разделы, компетенции, индикаторы, задания): шестой построитель."
+    "note": "Таблица 2 паспорта: компетенции, индикаторы, разделы РПД и задания (ссылки — группа и диапазон номеров)."
+  },
+  "AutofillCurrentControl": {
+    "kind": "field", "target": "/current_control",
+    "note": "Раздел «Текущий контроль»: формы, мероприятия по модулям, варианты, рейтинг. Пустой раздел печатается формулировкой-заглушкой."
+  },
+  "AutofillMeans": {
+    "kind": "field", "target": "/evaluation_means",
+    "note": "Раздел «Методические материалы, определяющие процедуры оценивания»: по каждому средству наименование, описание и критерии. Пустой раздел печатается формулировкой-заглушкой."
+  },
+  "AutofillBankGroup": {
+    "kind": "field", "target": "/task_bank",
+    "note": "Блок части банка от шапки вуза до разрыва раздела; повторяется по числу частей. Часть — вид заданий и вид аттестации (или текущий контроль); группы внутри части — подзаголовками, тесты — по разделам. Нет групп — блок убирается."
+  },
+  "AutofillBankTitle": {
+    "kind": "source", "target": "document.bank_part_title",
+    "note": "Заголовок части целиком. Вопросы: «Вопросы для подготовки к экзамену» (вид аттестации в дательном падеже). Задания и тесты: «Комплект практических (тестовых) заданий, используемых при проведении экзамена» (в родительном; у группы текущего контроля — «текущего контроля»). Вид аттестации — из РПД по семестру группы, «дифференцированный зачёт» вместо «зачёт с оценкой»; без семестра — заголовок группы."
+  },
+  "AutofillBankTasks": {
+    "kind": "field", "target": "/task_bank",
+    "note": "Содержимое части: подзаголовок группы и её задания с номерами; у теста номер печатается «раздел.номер»."
+  },
+  "AutofillBankCompilers": {
+    "kind": "field", "target": "/approval_sheet/developers",
+    "note": "«Составитель … (ученая степень, ученое звание) (Ф.И.О.)» — по строке на составителя; без составителей остаётся бланк."
+  },
+  "AutofillScale": {
+    "kind": "field", "target": "/evaluation_scale",
+    "note": "Раздел «Критерии формирования оценок». Пустой печатается типовыми критериями по виду аттестации РПД: экзамен и дифференцированный зачёт — пятибалльная шкала, зачёт — «зачтено / не зачтено»."
+  },
+  "AutofillExaming": {
+    "kind": "field", "target": "/exam_tickets",
+    "note": "Приложение с билетами целиком, вместе с разрывом раздела перед ним: нет билетов — блок убирается."
+  },
+  "AutofillTicket": {
+    "kind": "field", "target": "/exam_tickets",
+    "note": "Блок билета от шапки вуза до подписи заведующего; повторяется по числу билетов, каждый на своей странице."
+  },
+  "AutofillTicketNumber": {
+    "kind": "field", "target": "/exam_tickets/0/number",
+    "note": "Номер 0 — образец: в каждом экземпляре блока подставляется свой билет."
+  },
+  "AutofillTicketQuestions": {
+    "kind": "field", "target": "/exam_tickets/0/questions",
+    "note": "Вопросы билета нумерованными абзацами: «1.», «2.», …"
   },
   "AutofillProOD": { "kind": "signature", "target": "vice_rector_edu", "part": "position" },
   "AutofillProODName": { "kind": "signature", "target": "vice_rector_edu", "part": "name" },
   "AutofillPositionKaf": { "kind": "signature", "target": "department_head", "part": "position" },
-  "AutofillPositionKafName": { "kind": "signature", "target": "department_head", "part": "name" },
+  "AutofillPositionKafName": {
+    "kind": "signature", "target": "department_head", "part": "name",
+    "note": "На титуле и в подписи под билетом («Зав. кафедрой … И. О. Фамилия»)."
+  },
   "AutofillPositionKafForDoc": { "kind": "signature", "target": "department_head", "part": "document_title" },
   "AutofillPositionInst": { "kind": "signature", "target": "institute_director", "part": "position" },
   "AutofillPositionInstName": { "kind": "signature", "target": "institute_director", "part": "name" },

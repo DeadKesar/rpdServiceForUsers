@@ -133,12 +133,14 @@ public class DocumentValidatorTests
     public void Every_assertion_keyword_of_schema_has_message(string type)
     {
         // Валидатор сообщает только об известных утверждениях: новое ключевое слово в схеме — расширить список.
+        // Условие if само ошибки не даёт (отказ условия — не отказ документа): его ветка then отказывает утверждением
+        // внутри, например required у тестовой группы банка ФОС, и сообщает о нём это утверждение.
         string[] validation =
         [
             "type", "enum", "const", "pattern", "format", "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum",
             "multipleOf", "minLength", "maxLength", "minItems", "maxItems", "uniqueItems", "minContains", "maxContains",
             "required", "minProperties", "maxProperties", "dependentRequired", "additionalProperties",
-            "unevaluatedProperties", "unevaluatedItems", "not", "oneOf", "anyOf", "if", "contains", "propertyNames"
+            "unevaluatedProperties", "unevaluatedItems", "not", "oneOf", "anyOf", "contains", "propertyNames"
         ];
         var used = new HashSet<string>();
         Collect(Registry.Get(type).Schema, names: false);

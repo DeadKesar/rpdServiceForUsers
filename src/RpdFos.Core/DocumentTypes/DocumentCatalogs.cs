@@ -34,7 +34,10 @@ public static class DocumentSources
         // Подписантов в содержимом нет: их определяют правила листа согласования шаблона (SignatureResolvers).
         ["db.user.current"] = "Текущий пользователь — первый составитель (users: id, name_for_document, position)",
         ["linked_rpd.competences.indicators"] = "Индикаторы из связанной РПД (для ФОС)",
-        ["document.year"] = "Год документа"
+        ["document.year"] = "Год документа",
+        // Заголовок части банка заданий ФОС складывается из вида заданий и вида аттестации РПД в нужном падеже:
+        // одним полем схемы его не выразить.
+        ["document.bank_part_title"] = "Заголовок части банка заданий ФОС: вид заданий и вид аттестации РПД в нужном падеже"
     };
 
     public static bool IsKnown(string path) => All.ContainsKey(path);
@@ -60,7 +63,7 @@ public static class ValidationRules
     };
 }
 
-/// <summary>Именованные построители таблиц DOCX (цели вида <c>table</c>); реализация — Printing/DocxTables, fos_passport — этап 6.</summary>
+/// <summary>Именованные построители таблиц DOCX (цели вида <c>table</c>); реализация — Printing/DocxTables, построители паспорта ФОС — этап 7 (B9).</summary>
 public static class TableBuilders
 {
     public static readonly IReadOnlyDictionary<string, string> All = new Dictionary<string, string>
@@ -71,7 +74,8 @@ public static class TableBuilders
         ["practical_classes"] = "Практические занятия",
         ["lab_works"] = "Лабораторные работы",
         ["discipline_contents"] = "Содержание разделов дисциплины (тематический план)",
-        ["fos_passport"] = "Паспорт ФОС: компетенции, индикаторы, разделы и задания"
+        ["fos_passport_sections"] = "Паспорт ФОС, таблица 1: разделы дисциплины, компетенции и число вопросов, заданий и тестов",
+        ["fos_passport"] = "Паспорт ФОС, таблица 2: компетенции, индикаторы, разделы РПД и задания"
     };
 }
 
