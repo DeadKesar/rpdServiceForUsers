@@ -213,3 +213,28 @@ textarea.auto-grow {
     font-size: .875em;
     margin-left: .35em;
 }
+
+/* Таблицы в форматированном тексте (этап 7, B4). Санитайзер оставляет в таблице строки, ячейки и объединение, а
+   стили и рамки снимает, поэтому рамки и ширину задаёт приложение — одинаково в редакторе и в режиме чтения.
+   Печать рисует рамки сама. */
+.rich-text table,
+.rz-html-editor-content table {
+    border-collapse: collapse;
+    width: 100%;
+    margin-bottom: .5rem;
+}
+
+.rich-text td,
+.rich-text th,
+.rz-html-editor-content td,
+.rz-html-editor-content th {
+    border: 1px solid #6c757d;
+    padding: .25rem .5rem;
+    vertical-align: top;
+    min-width: 2rem;
+}
+
+.rich-text th,
+.rz-html-editor-content th {
+    text-align: center;
+}

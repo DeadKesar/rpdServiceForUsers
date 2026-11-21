@@ -16,7 +16,7 @@ public class PrintingTests
         var id = 0;
         var paragraphs = RichTextBlocks.Parse(
             "<p>Знания <strong>математики</strong> и <em>физики</em></p>текст вне абзаца<br>после переноса" +
-            "<ul><li>Алгебра</li><li>Геометрия</li></ul><ol><li>Первый</li></ol>", () => ++id);
+            "<ul><li>Алгебра</li><li>Геометрия</li></ul><ol><li>Первый</li></ol>", () => ++id).Cast<PrintParagraph>().ToList();
 
         Assert.Equal(["Знания математики и физики", "текст вне абзаца", "после переноса", "Алгебра", "Геометрия", "Первый"],
             paragraphs.Select(p => p.PlainText));
@@ -63,9 +63,9 @@ public class PrintingTests
             DocumentMetadata.Hidden(schema, facts.Semesters, registry.FindSchema));
 
         // Литература — нумерованным списком, только библиографическая запись: год в ней уже есть.
-        var main = context.Field("/literature/main");
+        var main = Assert.IsType<PrintParagraph>(Assert.Single(context.Field("/literature/main").Blocks));
         Assert.Equal(("Советов Б. Я. Моделирование систем. — М. : Юрайт, 2023. — 343 с.", PrintListKind.Numbered),
-            (main.Paragraphs.Single().PlainText, main.Paragraphs[0].List));
+            (main.PlainText, main.List));
         Assert.Equal("ЭБС // Режим доступа URL: https://example.org", context.Field("/literature/internet_resources").Inline);
         Assert.Equal("«05» октября 2026 г.", context.Field("/approval_sheet/department_protocol/date").Inline);
         // Курсового проекта по плану нет — стандартная формулировка вместо содержимого раздела.

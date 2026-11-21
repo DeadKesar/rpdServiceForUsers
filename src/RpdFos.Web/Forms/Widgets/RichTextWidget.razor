@@ -2,26 +2,36 @@
 @using System.Text.RegularExpressions
 @inherits FieldBase
 
-@* Форматированный текст: только полужирный, курсив и списки (решение этапа 4); разметку на сервере чистит санитайзер. *@
+@* Форматированный текст: полужирный, курсив, списки и таблицы (решение этапа 4 и B4 этапа 7); разметку на сервере
+   чистит санитайзер. Таблицы — встроенные инструменты редактора: вставка, строки, столбцы, объединение ячеек. *@
 <div class="mb-3">
     <label class="form-label">@Title</label>
     @if (ReadOnly)
     {
-        <div class="border rounded p-2 bg-light">@((MarkupString)(Text(Value) ?? ""))</div>
+        <div class="border rounded p-2 bg-light rich-text">@((MarkupString)(Text(Value) ?? ""))</div>
     }
     else
     {
         <RadzenHtmlEditor Value="@(Text(Value) ?? "")" Input="@((string html) => OnInput(html))"
-                          ValueChanged="@((string html) => OnChanged(html))" Style="height: 220px;">
+                          ValueChanged="@((string html) => OnChanged(html))" TableStrings="@TableTexts" Style="height: 220px;">
             <RadzenHtmlEditorBold Title="Полужирный" />
             <RadzenHtmlEditorItalic Title="Курсив" />
             <RadzenHtmlEditorUnorderedList Title="Маркированный список" />
             <RadzenHtmlEditorOrderedList Title="Нумерованный список" />
+            <RadzenHtmlEditorSeparator />
+            <RadzenHtmlEditorTableTools />
         </RadzenHtmlEditor>
     }
     @if (Hint is not null)
     {
         <div class="form-text">@Hint</div>
+    }
+    @if (!ReadOnly)
+    {
+        <div class="form-text">
+            Формулы — линейной записью, символами Unicode: x² + y₁ ≤ √z. В таблице сохраняются строки, столбцы и
+            объединение ячеек; цвет, ширина и выравнивание не сохраняются — печатается таблица с рамками на всю ширину.
+        </div>
     }
 </div>
 
@@ -32,6 +42,57 @@
     private void OnInput(string? html) => InputValue(Html(html));
 
     // Пустой редактор отдаёт «<br>» или пустой абзац — это не текст: поле удаляется из содержимого.
+    // Таблица без текста — не пустое поле: она пока без слов, но уже есть.
     private static JsonValue? Html(string? html) =>
-        string.IsNullOrWhiteSpace(Regex.Replace(html ?? "", "<[^>]*>|&nbsp;", "")) ? null : JsonValue.Create(html);
+        string.IsNullOrWhiteSpace(Regex.Replace(html ?? "", "<[^>]*>|&nbsp;", "")) && !Regex.IsMatch(html ?? "", "<table", RegexOptions.IgnoreCase)
+            ? null : JsonValue.Create(html);
+
+    // Подписи инструментов таблицы по-русски. Редактор предлагает и цвет, ширину, рамки и выравнивание ячеек:
+    // санитайзер их снимает (см. подсказку под полем), печать рисует таблицу сама.
+    private static readonly HtmlEditorTableStrings TableTexts = new()
+    {
+        DialogTitle = "Таблица",
+        DefaultColumnHeader = "Столбец {0}",
+        Rows = "Строк",
+        Columns = "Столбцов",
+        Width = "Ширина",
+        Border = "Рамка",
+        HeaderRow = "Строка заголовка",
+        Edit = "Правка таблицы",
+        OK = "Вставить",
+        Update = "Применить",
+        Cancel = "Отмена",
+        CopyCells = "Копировать ячейки",
+        PasteCells = "Вставить ячейки",
+        InsertRowAbove = "Вставить строку выше",
+        InsertRowBelow = "Вставить строку ниже",
+        InsertColumnLeft = "Вставить столбец слева",
+        InsertColumnRight = "Вставить столбец справа",
+        DeleteRow = "Удалить строку",
+        DeleteColumn = "Удалить столбец",
+        MergeRight = "Объединить с ячейкой справа",
+        MergeDown = "Объединить с ячейкой снизу",
+        SplitCell = "Разделить ячейку",
+        DeleteTable = "Удалить таблицу",
+        ColumnWidth = "Ширина столбца",
+        CellBackground = "Цвет ячейки",
+        CellPadding = "Отступ в ячейке",
+        CellTextAlign = "Выравнивание по горизонтали",
+        CellVerticalAlign = "Выравнивание по вертикали",
+        CellBorder = "Рамка ячейки",
+        ColumnWidthPx = "Ширина столбца, px",
+        CellPaddingPx = "Отступ в ячейке, px",
+        BorderStyle = "Вид рамки",
+        BorderWidthPx = "Толщина рамки, px",
+        BorderColor = "Цвет рамки",
+        BorderTop = "Сверху",
+        BorderRight = "Справа",
+        BorderBottom = "Снизу",
+        BorderLeft = "Слева",
+        ActionBlocked = "Действие недоступно",
+        ActionRequiresTable = "Поставьте курсор в ячейку таблицы",
+        CopyInvalidSelection = "Выделите ячейки одной таблицы",
+        PasteBlocked = "Вставка ячеек сейчас недоступна",
+        MergeInvalidSelection = "Эти ячейки нельзя объединить"
+    };
 }

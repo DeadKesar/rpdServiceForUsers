@@ -200,7 +200,7 @@ public static partial class DocxGenerator
             if (value.IsEmpty) unfilled.Add($"{name} — {missing}");
             var paragraph = text.Ancestors<Paragraph>().FirstOrDefault();
             var whole = paragraph is not null && paragraph.Descendants<Text>().Count() == 1 && text.Text.Trim() == baseName;
-            if (whole && (value.IsMultiline || value.Paragraphs.Any(p => p.Runs.Any(r => r.Bold || r.Italic))))
+            if (whole && (value.IsMultiline || value.Blocks.OfType<PrintParagraph>().Any(p => p.Runs.Any(r => r.Bold || r.Italic))))
                 ReplaceParagraph(paragraph!, text.Ancestors<Run>().First(), value);
             else
             {
@@ -241,7 +241,8 @@ public static partial class DocxGenerator
 
         /// <summary>
         /// Абзац закладки — первый абзац значения (метки закладки и свойства абзаца остаются), остальные — следом
-        /// с теми же свойствами. Оформление текста — как у заглушки, плюс полужирный и курсив значения.
+        /// с теми же свойствами. Таблица значения — настоящая таблица DOCX: стоящая до первого абзаца — перед абзацем
+        /// закладки, остальные — по порядку. Оформление текста — как у заглушки, плюс полужирный и курсив значения.
         /// </summary>
         private void ReplaceParagraph(Paragraph paragraph, Run placeholder, PrintValue value)
         {
@@ -250,17 +251,151 @@ public static partial class DocxGenerator
             foreach (var child in paragraph.ChildElements.ToList())
                 if (child is not ParagraphProperties and not BookmarkStart and not BookmarkEnd) child.Remove();
 
-            var current = paragraph;
-            for (var i = 0; i < value.Paragraphs.Count; i++)
-            {
-                var target = i == 0 ? paragraph : new Paragraph { ParagraphProperties = paragraphProperties?.CloneNode(true) as ParagraphProperties };
-                Write(target, value.Paragraphs[i], runProperties);
-                if (i > 0)
+            var width = TextWidth(paragraph);
+            var tables = new List<Table>();
+            OpenXmlElement current = paragraph;
+            var used = false;
+            foreach (var block in value.Blocks)
+                switch (block)
                 {
-                    current.InsertAfterSelf(target);
-                    current = target;
+                    case PrintParagraph content when !used:
+                        Write(paragraph, content, runProperties);
+                        used = true;
+                        break;
+                    case PrintParagraph content:
+                        var next = new Paragraph { ParagraphProperties = paragraphProperties?.CloneNode(true) as ParagraphProperties };
+                        Write(next, content, runProperties);
+                        current.InsertAfterSelf(next);
+                        current = next;
+                        break;
+                    case PrintTable table:
+                        foreach (var element in BuildTable(table, width, runProperties, paragraphProperties))
+                        {
+                            if (used)
+                            {
+                                current.InsertAfterSelf(element);
+                                current = element;
+                            }
+                            else paragraph.InsertBeforeSelf(element);
+                            if (element is Table inserted) tables.Add(inserted);
+                        }
+                        break;
                 }
+
+            // После таблицы — абзац: Word сливает таблицы, между которыми ничего нет, а ячейка (и конец документа)
+            // не должна заканчиваться таблицей.
+            foreach (var table in tables)
+                if (table.NextSibling() is null or Table or SectionProperties)
+                    table.InsertAfterSelf(new Paragraph());
+        }
+
+        // Таблица значения: рамки, ширина места закладки, столбцы поровну; объединения — gridSpan и vMerge.
+        private IReadOnlyList<OpenXmlElement> BuildTable(PrintTable table, int width, RunProperties? runProperties, ParagraphProperties? paragraphProperties)
+        {
+            if (PrintTableGrid.Build(table) is not { } grid)
+                // Строк нет или столбцов больше, чем бывает в Word: строки текста, слова не теряются.
+                return table.Rows.Select(row =>
+                {
+                    var line = new Paragraph { ParagraphProperties = paragraphProperties?.CloneNode(true) as ParagraphProperties };
+                    Write(line, PrintParagraph.Plain(string.Join(" | ", row.Cells.Select(c => c.PlainText))), runProperties);
+                    return (OpenXmlElement)line;
+                }).ToList();
+
+            var columnWidth = Math.Max(width / grid.Columns, 1);
+            var result = new Table(
+                new TableProperties
+                {
+                    TableWidth = new TableWidth { Width = (columnWidth * grid.Columns).ToString(), Type = TableWidthUnitValues.Dxa },
+                    TableBorders = Borders(),
+                    TableLayout = new TableLayout { Type = TableLayoutValues.Fixed }
+                },
+                new TableGrid(Enumerable.Range(0, grid.Columns).Select(_ => new GridColumn { Width = columnWidth.ToString() })));
+            foreach (var row in grid.Rows)
+            {
+                var tableRow = new TableRow();
+                foreach (var placed in row) tableRow.AppendChild(BuildCell(placed, columnWidth, runProperties, paragraphProperties));
+                result.AppendChild(tableRow);
             }
+            return [result];
+        }
+
+        private TableCell BuildCell(PlacedCell placed, int columnWidth, RunProperties? runProperties, ParagraphProperties? paragraphProperties)
+        {
+            var properties = new TableCellProperties
+            {
+                TableCellWidth = new TableCellWidth { Width = (columnWidth * placed.Span).ToString(), Type = TableWidthUnitValues.Dxa }
+            };
+            if (placed.Span > 1) properties.GridSpan = new GridSpan { Val = placed.Span };
+            if (placed.Merge == MergeKind.Restart) properties.VerticalMerge = new VerticalMerge { Val = MergedCellValues.Restart };
+            else if (placed.Merge == MergeKind.Continue) properties.VerticalMerge = new VerticalMerge();
+            var cell = new TableCell(properties);
+
+            var header = placed.Cell?.Header == true;
+            // Продолжение объединения пусто: текст ячейки напечатан выше.
+            if (placed is { Merge: not MergeKind.Continue, Cell: { } source })
+                foreach (var content in source.Paragraphs)
+                {
+                    var line = new Paragraph(CellParagraphProperties(paragraphProperties, header));
+                    Write(line, header ? content with { Runs = content.Runs.Select(r => r with { Bold = true }).ToList() } : content, runProperties);
+                    cell.AppendChild(line);
+                }
+            // Ячейка без абзаца — файл неверный.
+            if (!cell.Elements<Paragraph>().Any()) cell.AppendChild(new Paragraph(CellParagraphProperties(paragraphProperties, header)));
+            return cell;
+        }
+
+        // Абзац закладки мог быть пунктом списка, с красной строкой, по ширине или с разрывом раздела — в ячейке
+        // ничего этого не нужно; шрифт и интервалы остаются, как у текста вокруг.
+        private static ParagraphProperties CellParagraphProperties(ParagraphProperties? template, bool header)
+        {
+            var properties = template?.CloneNode(true) as ParagraphProperties ?? new ParagraphProperties();
+            properties.NumberingProperties = null;
+            properties.Indentation = null;
+            properties.SectionProperties = null;
+            properties.PageBreakBefore = null;
+            properties.KeepNext = null;
+            properties.Justification = new Justification { Val = header ? JustificationValues.Center : JustificationValues.Left };
+            return properties;
+        }
+
+        private static TableBorders Borders() => new(
+            new TopBorder { Val = BorderValues.Single, Size = 4, Space = 0, Color = "auto" },
+            new LeftBorder { Val = BorderValues.Single, Size = 4, Space = 0, Color = "auto" },
+            new BottomBorder { Val = BorderValues.Single, Size = 4, Space = 0, Color = "auto" },
+            new RightBorder { Val = BorderValues.Single, Size = 4, Space = 0, Color = "auto" },
+            new InsideHorizontalBorder { Val = BorderValues.Single, Size = 4, Space = 0, Color = "auto" },
+            new InsideVerticalBorder { Val = BorderValues.Single, Size = 4, Space = 0, Color = "auto" });
+
+        // Поля ячейки Word по умолчанию слева и справа, наименьшая ширина таблицы и ширина текста A4 с полями
+        // 3 и 1,5 см — на случай шаблона без размеров страницы.
+        private const int CellPadding = 216, MinTableWidth = 1000, DefaultTextWidth = 9355;
+
+        // Таблица занимает ширину места закладки: ячейки, в которой стоит абзац, иначе — текста страницы раздела.
+        private static int TextWidth(Paragraph paragraph)
+        {
+            var cellWidth = paragraph.Ancestors<TableCell>().FirstOrDefault()?.TableCellProperties?.TableCellWidth;
+            if (cellWidth is { Type: { } type, Width: { } w } && type.Value == TableWidthUnitValues.Dxa && int.TryParse(w.Value, out var inner))
+                return Math.Max(inner - CellPadding, MinTableWidth);
+
+            var section = SectionOf(paragraph);
+            var size = section?.GetFirstChild<PageSize>();
+            var margin = section?.GetFirstChild<PageMargin>();
+            if (size?.Width is { } page && margin is not null)
+            {
+                var text = (long)page.Value - (margin.Left?.Value ?? 0) - (margin.Right?.Value ?? 0);
+                if (text >= MinTableWidth) return (int)text;
+            }
+            return DefaultTextWidth;
+        }
+
+        // Свойства раздела, в котором стоит абзац: ближайшие следом — в конце раздела (абзац с разрывом) или в конце тела.
+        private static SectionProperties? SectionOf(Paragraph paragraph)
+        {
+            var block = paragraph.Ancestors().FirstOrDefault(a => a.Parent is Body) ?? paragraph;
+            for (OpenXmlElement? element = block; element is not null; element = element.NextSibling())
+                if (element is SectionProperties section) return section;
+                else if (element is Paragraph { ParagraphProperties.SectionProperties: { } inner }) return inner;
+            return null;
         }
 
         private void Write(Paragraph paragraph, PrintParagraph content, RunProperties? runProperties)

@@ -136,6 +136,33 @@ public class DocumentEditingApiTests(DatabaseFixture app)
     }
 
     [Fact]
+    public async Task Table_in_rich_text_is_saved_without_styles_and_keeps_merging()
+    {
+        // Этап 7, B4: таблица, вставленная из Word, сохраняется — строки, ячейки, объединение, слова; стили, рамки,
+        // обработчики событий и вложенная таблица (она становится текстом) — нет.
+        var (client, _) = await DocumentData.UserAsync(app);
+        var created = await DocumentData.CreateAsync(app, client, (await DocumentData.PublishedTemplateAsync(app)).Id, "Б1.О.13");
+        var place = JsonNode.Parse(created.Payload.GetProperty("place_in_structure").GetRawText())!;
+        place["prior_outcomes"] = new JsonObject
+        {
+            ["knows"] = "<table class=MsoTableGrid border=1 style='border-collapse:collapse'><tr><td width=319 colspan=2 style='border:solid windowtext 1.0pt'>" +
+                        "<p class=MsoNormal><b>Вход</b><o:p></o:p></p></td></tr>" +
+                        "<tr><td>0</td><td onclick=\"steal()\">1<table><tr><td>2</td><td>3</td></tr></table></td></tr></table>"
+        };
+
+        var response = await PatchAsync(client, created, "place_in_structure", 1, place);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        await app.WithDbAsync(async db =>
+        {
+            var payload = JsonNode.Parse((await db.Documents.SingleAsync(d => d.Id == created.Document.Id)).Payload)!;
+            Assert.Equal("<table><tbody><tr><td colspan=\"2\"><p><b>Вход</b></p></td></tr>" +
+                         "<tr><td>0</td><td>1<br>2 3</td></tr></tbody></table>",
+                payload["place_in_structure"]!["prior_outcomes"]!["knows"]!.GetValue<string>());
+        });
+    }
+
+    [Fact]
     public async Task Hidden_and_unknown_sections_are_refused()
     {
         var (client, _) = await DocumentData.UserAsync(app);
