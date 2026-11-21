@@ -97,6 +97,12 @@ public static class FosReports
         var tables = a.Tables.Where(t => t.Role != "layout").ToList();
         s.AppendLine($"Таблиц {a.Tables.Count}, из них оформительских (1 строка) {a.Tables.Count(t => t.Role == "layout")}; с формулами {a.FormulaTables}; " +
                      $"абзацев с символами формул (∑, ≤, ∈ …) {a.MathSymbolParagraphs}.");
+        if (a.Images.Count > 0)
+        {
+            s.AppendLine($"Рисунки вне шапок: {a.Images.Count} — {ImageSummary(a.Images.Select(i => i.Image), withInline: a.Doc.Format != "pdf")}.");
+            s.AppendLine("Где стоят: " + string.Join(", ", a.Images.GroupBy(i => i.Where).OrderByDescending(g => g.Count()).Select(g => $"{Md(g.Key)} — {g.Count()}")) + ".");
+        }
+        if (a.PageScans > 0) s.AppendLine($"Страниц, занятых картинкой целиком (скан): {a.PageScans}.");
         foreach (var t in tables.Take(25))
             s.AppendLine($"- блок {t.Block}: {t.Role}, {t.Rows}×{t.Cols}{(t.Merged > 0 ? $", объединённых ячеек {t.Merged}" : "")}{(t.Formulas > 0 ? $", формул {t.Formulas}" : "")}{(t.Drawings > 0 ? $", рисунков {t.Drawings}" : "")}; шапка: {Md(t.Header)}");
         if (tables.Count > 25) s.AppendLine($"- … ещё {tables.Count - 25} таблиц");
@@ -204,7 +210,14 @@ public static class FosReports
 
         s.AppendLine("\n## 8. Таблицы, формулы, рисунки");
         s.AppendLine($"\n- Формулы (OMML, MathType, поля EQ): {Cnt(a => a.Formulas > 0)} файлов, всего {text.Sum(a => a.Formulas)}; символы формул в тексте: {Cnt(a => a.MathSymbolParagraphs > 0)} файлов.");
-        s.AppendLine($"- Крупные рисунки (от 4,5 см): {Cnt(a => a.Drawings > 0)} файлов, всего {text.Sum(a => a.Drawings)}; мелких (эмблемы): {text.Sum(a => a.SmallDrawings)}. Для PDF размер взят по картинке на странице.");
+        var docxImages = text.Where(a => a.Doc.Format != "pdf").SelectMany(a => a.Images).ToList();
+        var pdfImages = text.Where(a => a.Doc.Format == "pdf").SelectMany(a => a.Images).ToList();
+        s.AppendLine($"- **Рисунки вне шапок** (эмблемы вуза не в счёт): {Cnt(a => a.Images.Count > 0)} файлов, всего {text.Sum(a => a.Images.Count)}, из них крупных (от 4,5 см) {text.Sum(a => a.Drawings)}. " +
+                     $"Страниц PDF, занятых картинкой целиком (сканы, не рисунки): {text.Sum(a => a.PageScans)} в {Cnt(a => a.PageScans > 0)} файлах.");
+        s.AppendLine($"  - DOCX ({text.Count(a => a.Doc.Format != "pdf" && a.Images.Count > 0)} файлов): {ImageSummary(docxImages.Select(i => i.Image), withInline: true)}.");
+        s.AppendLine($"  - PDF ({text.Count(a => a.Doc.Format == "pdf" && a.Images.Count > 0)} файлов, картинки на страницах): {ImageSummary(pdfImages.Select(i => i.Image), withInline: false)}.");
+        s.AppendLine("  - Где стоят (ближайший заголовок выше): " + string.Join(", ", docxImages.GroupBy(i => i.Where).OrderByDescending(g => g.Count()).Take(8).Select(g => $"{g.Key} — {g.Count()}")) + ".");
+        s.AppendLine("  - Файлы: " + string.Join(", ", text.Where(a => a.Images.Count > 0).Select(a => $"{a.Doc.Id} ({a.Images.Count})")) + ".");
         s.AppendLine($"- Таблицы вне паспорта, подписей, шкал и рейтинга: {Cnt(a => a.TaskTables > 0)} файлов, всего {text.Sum(a => a.TaskTables)}; PDF таблиц не показывает.");
         s.AppendLine($"- Таблицы с объединёнными ячейками (кроме подписей и оформительских): {Cnt(a => a.MergedTables > 0)} файлов, всего {text.Sum(a => a.MergedTables)}.");
 
@@ -383,6 +396,20 @@ public static class FosReports
     private static string Or(string v) => v.Length > 0 ? v : "?";
     private static string YesNo(bool v) => v ? "да" : "нет";
     private static string Trim(string s, int max) => s.Length > max ? s[..max] + "…" : s;
+
+    /// <summary>Рисунки одной строкой: виды и форматы, размер файла, размер на странице, встроены в строку или плавают.</summary>
+    public static string ImageSummary(IEnumerable<FosImage> images, bool withInline)
+    {
+        var list = images.ToList();
+        if (list.Count == 0) return "нет";
+        var kinds = string.Join(", ", list.GroupBy(i => i.MediaType.Length > 0 ? $"{i.Kind} {i.MediaType.Replace("image/", "")}" : i.Kind)
+            .OrderByDescending(g => g.Count()).Select(g => $"{g.Key} ×{g.Count()}"));
+        var kb = list.Where(i => i.Bytes > 0).Select(i => i.Bytes / 1024.0).OrderBy(x => x).ToList();
+        var width = list.Select(i => i.WidthCm).OrderBy(x => x).ToList();
+        var file = kb.Count > 0 ? $"; файл, КБ: медиана {kb[kb.Count / 2]:0}, макс {kb[^1]:0}" : "";
+        var inline = withInline ? $"; в строке {list.Count(i => i.Inline)}, плавающих {list.Count(i => !i.Inline)}" : "";
+        return $"{kinds}{file}; ширина на странице, см: медиана {width[width.Count / 2]:0.0}, макс {width[^1]:0.0}{inline}";
+    }
     private static string Md(string v) => v.Replace("|", "\\|").Replace("\n", " ");
     private static string Csv(string v) => v.Contains(';') || v.Contains('"') || v.Contains('\n') ? "\"" + v.Replace("\"", "\"\"") + "\"" : v;
 }

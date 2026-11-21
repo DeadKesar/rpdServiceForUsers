@@ -64,6 +64,8 @@ public sealed class FosAnalysis
     public int FormulaTables { get; set; }                       // таблиц, в которых есть формулы
     public int Drawings { get; set; }                            // крупные рисунки; эмблемы в шапках не входят
     public int SmallDrawings { get; set; }
+    public List<(FosImage Image, string Where)> Images { get; } = [];   // рисунки вне шапок любого размера и раздел, где стоят
+    public int PageScans { get; set; }                           // страниц PDF, занятых картинкой целиком (скан), — это не рисунки заданий
     public int MathSymbolParagraphs { get; set; }
     public int TaskTables { get; set; }
     public int MergedTables { get; set; }                        // таблиц с объединёнными ячейками (без оформительских и подписей)
@@ -278,6 +280,23 @@ public static class FosAnalyzer
                       + a.Doc.Tables.Where(t => t.Drawings > 0 && t.Rows.Count <= 3 && t.Cols <= 1).Sum(t => t.Drawings);
         a.Drawings = a.Doc.Images - emblems;
         a.SmallDrawings = a.Doc.SmallImages + emblems;
+
+        // Рисунки вне шапок — каждый с ближайшим заголовком выше: по нему видно, в каких приложениях они стоят.
+        string Where(int block)
+        {
+            var h = paragraphs.LastOrDefault(x => x.Heading && x.Index < block);
+            return h is null ? "до первого заголовка" : MatchKinds(h.Text).FirstOrDefault()?.Title ?? "заголовок без вида";
+        }
+        foreach (var b in a.Doc.Blocks)
+        {
+            var images = b is FosParagraph fp ? fp.Images : ((FosTable)b).Images;
+            var emblem = b is FosParagraph para ? IsEmblem(para) : ((FosTable)b) is { Rows.Count: <= 3, Cols: <= 1 };
+            if (images.Count > 0 && !emblem)
+                foreach (var image in images) a.Images.Add((image, Where(b.Index)));
+        }
+        // В PDF «картинки» — ещё и мелкие обрывки страницы (линии, значки): рисунками заданий считаются только крупные.
+        foreach (var image in a.Doc.PageImages.Where(i => !i.PageScan && i.Big)) a.Images.Add((image, "страницы PDF"));
+        a.PageScans = a.Doc.PageImages.Count(i => i.PageScan);
         foreach (var q in paragraphs.Select(p => LmsQuestion.Match(p.Text)).Where(m => m.Success))
         {
             a.LmsQuestions++;
@@ -397,8 +416,8 @@ public static class FosAnalyzer
                 $"вопросов {a.LmsQuestions}, типы {string.Join("/", a.LmsTypes)}, ответов с весом {a.LmsAnswers}"));
         if (a.Formulas > 0)
             a.NoSlot.Add(("формулы (не линейная запись)", $"{a.Formulas}; FR-DOC-20 допускает только линейную запись"));
-        if (a.Drawings > 0)
-            a.NoSlot.Add(("крупные рисунки (4,5 см и больше)", $"{a.Drawings}; решение 10: изображений в тексте нет"));
+        if (a.Images.Count > 0)
+            a.NoSlot.Add(("рисунки в заданиях (вне шапок)", $"{a.Images.Count}; нужна вставка изображений в текст (решение 10 пересмотрено автором 21.11.2026)"));
         if (a.TaskTables > 0)
             a.NoSlot.Add(("таблицы внутри приложений", $"{a.TaskTables}; нужна поддержка таблиц в форматированном тексте (шаг B4)"));
         if (a.Tickets > 0 && a.TicketQuestions.Keys.Any(q => q is < 2 or > 3))

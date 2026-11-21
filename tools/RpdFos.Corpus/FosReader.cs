@@ -4,9 +4,11 @@ using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Wordprocessing;
 using UglyToad.PdfPig;
+using A = DocumentFormat.OpenXml.Drawing;
 using DW = DocumentFormat.OpenXml.Drawing.Wordprocessing;
 using PdfLetter = UglyToad.PdfPig.Content.Letter;
 using M = DocumentFormat.OpenXml.Math;
+using V = DocumentFormat.OpenXml.Vml;
 using Vml = DocumentFormat.OpenXml.Vml.Office;
 
 namespace RpdFos.Corpus;
@@ -74,13 +76,13 @@ public static class FosReader
                 case Paragraph p:
                     foreach (var b in p.Descendants<BookmarkStart>())
                         if (b.Id?.Value is { } bid && b.Name?.Value is { } bn) starts[bid] = (bn, index);
-                    blocks.Add(ReadParagraph(index, p, styles, numFormats));
+                    blocks.Add(ReadParagraph(index, p, styles, numFormats, main));
                     foreach (var e in p.Descendants<BookmarkEnd>()) CloseBookmark(e.Id?.Value, index);
                     break;
                 case Table t:
                     foreach (var b in t.Descendants<BookmarkStart>())
                         if (b.Id?.Value is { } bid && b.Name?.Value is { } bn) starts[bid] = (bn, index);
-                    blocks.Add(ReadTable(index, t));
+                    blocks.Add(ReadTable(index, t, main));
                     foreach (var e in t.Descendants<BookmarkEnd>()) CloseBookmark(e.Id?.Value, index);
                     break;
                 case BookmarkStart b2 when b2.Id?.Value is { } bid2 && b2.Name?.Value is { } bn2:
@@ -104,22 +106,64 @@ public static class FosReader
     }
 
     /// <summary>
-    /// Граница «крупного» рисунка — 4,5 см по любой стороне. Эмблема вуза в шапке каждой части ФОС меньше,
-    /// рисунки и снимки экрана в заданиях — больше; без этого эмблемы дали бы сотни «рисунков в заданиях».
+    /// Копия рисунка «для старых версий Word» лежит в <c>mc:Fallback</c> рядом с настоящим: считать её нельзя,
+    /// иначе каждая фигура или схема посчитана дважды.
     /// </summary>
-    private const long BigEmu = 1_620_000;
+    private static bool Original(OpenXmlElement e) => !e.Ancestors<AlternateContentFallback>().Any();
 
-    private static (int Big, int Small) CountDrawings(OpenXmlElement e)
+    private static double Cm(long? emu) => (emu ?? 0) / 360000.0;
+
+    /// <summary>Размер из стиля VML-фигуры («width:123.4pt;height:80pt»); единицы по умолчанию — пункты.</summary>
+    private static double StyleCm(string? style, string property)
     {
-        int big = 0, small = 0;
-        foreach (var d in e.Descendants<Drawing>())
+        var m = Regex.Match(style ?? "", property + @":\s*([\d.]+)\s*(pt|cm|mm|in)?", RegexOptions.IgnoreCase);
+        if (!m.Success) return 0;
+        var value = double.Parse(m.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
+        return m.Groups[2].Value.ToLowerInvariant() switch { "cm" => value, "mm" => value / 10, "in" => value * 2.54, _ => value / 28.35 };
+    }
+
+    /// <summary>Тип и размер файла картинки по связи; ссылки на внешний файл и битые связи дают «нет файла».</summary>
+    private static (string? MediaType, long Bytes) PartInfo(MainDocumentPart main, string? relationshipId)
+    {
+        if (relationshipId is null) return (null, 0);
+        try
+        {
+            var part = main.GetPartById(relationshipId);
+            using var stream = part.GetStream();
+            return (part.ContentType, stream.Length);
+        }
+        catch (ArgumentOutOfRangeException) { return (null, 0); }
+    }
+
+    /// <summary>
+    /// Рисунки элемента: DrawingML (в том числе фигуры Word без файла картинки), VML-картинки старых документов и встроенные
+    /// объекты кроме формул. Формулы (Equation, MathType) — не рисунки, они считаются отдельно.
+    /// </summary>
+    private static List<FosImage> ReadImages(MainDocumentPart main, OpenXmlElement e)
+    {
+        var result = new List<FosImage>();
+        foreach (var d in e.Descendants<Drawing>().Where(Original))
         {
             var ext = d.Descendants<DW.Extent>().FirstOrDefault();
-            if (ext is { Cx: { } cx, Cy: { } cy } && cx.Value < BigEmu && cy.Value < BigEmu) small++;
-            else big++;
+            var (type, bytes) = PartInfo(main, d.Descendants<A.Blip>().FirstOrDefault()?.Embed?.Value);
+            result.Add(new FosImage(type is null ? "фигура Word" : "картинка", type ?? "", bytes, Cm(ext?.Cx?.Value), Cm(ext?.Cy?.Value), d.Inline is not null));
         }
-        big += e.Descendants<Picture>().Count() + e.Descendants<EmbeddedObject>().Count(o => !IsEquationObject(o));
-        return (big, small);
+        foreach (var pic in e.Descendants<Picture>().Where(x => Original(x) && !x.Ancestors<EmbeddedObject>().Any()))
+        {
+            var style = pic.Descendants<V.Shape>().FirstOrDefault()?.Style?.Value;
+            var (type, bytes) = PartInfo(main, pic.Descendants<V.ImageData>().FirstOrDefault()?.RelationshipId?.Value);
+            result.Add(new FosImage(type is null ? "фигура Word" : "картинка", type ?? "", bytes, StyleCm(style, "width"), StyleCm(style, "height"),
+                !(style ?? "").Contains("position:absolute", StringComparison.OrdinalIgnoreCase)));
+        }
+        foreach (var o in e.Descendants<EmbeddedObject>().Where(x => Original(x) && !IsEquationObject(x)))
+        {
+            var style = o.Descendants<V.Shape>().FirstOrDefault()?.Style?.Value;
+            var (type, bytes) = PartInfo(main, o.Descendants<V.ImageData>().FirstOrDefault()?.RelationshipId?.Value);
+            var program = o.Descendants<Vml.OleObject>().FirstOrDefault()?.ProgId?.Value ?? "?";
+            result.Add(new FosImage("объект OLE: " + program, type ?? "", bytes, StyleCm(style, "width"), StyleCm(style, "height"),
+                !(style ?? "").Contains("position:absolute", StringComparison.OrdinalIgnoreCase)));
+        }
+        return result;
     }
 
     private static IEnumerable<OpenXmlElement> Flatten(OpenXmlElement parent)
@@ -133,7 +177,7 @@ public static class FosReader
     }
 
     private static FosParagraph ReadParagraph(int index, Paragraph p, Dictionary<string, StyleInfo> styles,
-        Dictionary<(int NumId, int Level), string> numFormats)
+        Dictionary<(int NumId, int Level), string> numFormats, MainDocumentPart main)
     {
         var text = Clean(TextOf(p));
         var pr = p.ParagraphProperties;
@@ -153,13 +197,13 @@ public static class FosReader
         var level = numPr?.NumberingLevelReference?.Val?.Value ?? 0;
         var format = numId is { } nid && numFormats.TryGetValue((nid, level), out var f) ? f : "";
 
-        var equations = p.Descendants<M.OfficeMath>().Count() + p.Descendants<EmbeddedObject>().Count(IsEquationObject) +
+        var equations = p.Descendants<M.OfficeMath>().Count() + p.Descendants<EmbeddedObject>().Count(o => Original(o) && IsEquationObject(o)) +
                         p.Descendants<FieldCode>().Count(c => c.Text.TrimStart().StartsWith("EQ ", StringComparison.Ordinal));
-        var (drawings, small) = CountDrawings(p);
+        var images = ReadImages(main, p);
         var pageBreak = pr?.PageBreakBefore is not null || p.Descendants<Break>().Any(b => b.Type?.Value == BreakValues.Page);
         var heading = FosHeuristics.LooksLikeHeading(text, styleHeading, bold, centered);
-        return new FosParagraph(index, text, heading, bold, centered, numId, level, format, equations, drawings, small,
-            pr?.SectionProperties is not null, pageBreak);
+        return new FosParagraph(index, text, heading, bold, centered, numId, level, format, equations, images.Count(i => i.Big), images.Count(i => !i.Big),
+            pr?.SectionProperties is not null, pageBreak) { Images = images };
     }
 
     private static bool IsEquationObject(EmbeddedObject o) =>
@@ -167,15 +211,15 @@ public static class FosReader
             (id.Contains("Equation", StringComparison.OrdinalIgnoreCase) || id.Contains("DSMT", StringComparison.OrdinalIgnoreCase) ||
              id.Contains("MathType", StringComparison.OrdinalIgnoreCase)));
 
-    private static FosTable ReadTable(int index, Table t)
+    private static FosTable ReadTable(int index, Table t, MainDocumentPart main)
     {
         var rows = t.Elements<TableRow>()
             .Select(r => (IReadOnlyList<string>)r.Elements<TableCell>().Select(c => Clean(string.Join(" ", c.Descendants<Paragraph>().Select(TextOf)))).ToList())
             .ToList();
-        var equations = t.Descendants<M.OfficeMath>().Count() + t.Descendants<EmbeddedObject>().Count(IsEquationObject);
-        var (drawings, small) = CountDrawings(t);
+        var equations = t.Descendants<M.OfficeMath>().Count() + t.Descendants<EmbeddedObject>().Count(o => Original(o) && IsEquationObject(o));
+        var images = ReadImages(main, t);
         var merged = t.Descendants<TableCell>().Count(c => c.TableCellProperties is { } p && (p.GridSpan?.Val?.Value > 1 || p.VerticalMerge is not null));
-        return new FosTable(index, rows, equations, drawings, small, t.Descendants<Table>().Count(), merged);
+        return new FosTable(index, rows, equations, images.Count(i => i.Big), images.Count(i => !i.Big), t.Descendants<Table>().Count(), merged) { Images = images };
     }
 
     /// <summary>Текст абзаца: табуляция и перенос строки дают пробел, иначе слова слипаются.</summary>
@@ -229,11 +273,17 @@ public static class FosReader
     {
         using var pdf = PdfDocument.Open(path);
         var blocks = new List<FosBlock>();
-        int big = 0, small = 0, chars = 0;
+        var pageImages = new List<FosImage>();
+        var chars = 0;
         foreach (var page in pdf.GetPages())
         {
             foreach (var image in page.GetImages())
-                if (image.BoundingBox.Width >= 128 || image.BoundingBox.Height >= 128) big++; else small++;   // 128 pt ≈ 4,5 см
+            {
+                var box = image.BoundingBox;
+                // Картинка почти во всю страницу — скан страницы (текст поверх добавило распознавание), а не рисунок задания.
+                var scan = box.Width * box.Height >= 0.7 * page.Width * page.Height;
+                pageImages.Add(new FosImage("картинка", "pdf", image.RawMemory.Length, box.Width / 28.35, box.Height / 28.35, Inline: false, PageScan: scan));
+            }
             foreach (var line in Lines(page))
             {
                 chars += line.Text.Length;
@@ -241,7 +291,9 @@ public static class FosReader
                     line.Bold, line.Centered, null, 0, "", 0, 0, 0, false, false));
             }
         }
-        return new FosDoc(id, name, "pdf", "исходный", blocks, [], pdf.NumberOfPages, big, small, chars, null);
+        var content = pageImages.Where(i => !i.PageScan).ToList();
+        return new FosDoc(id, name, "pdf", "исходный", blocks, [], pdf.NumberOfPages, content.Count(i => i.Big), content.Count(i => !i.Big), chars, null)
+            { PageImages = pageImages };
     }
 
     private sealed record PdfLine(string Text, bool Bold, bool Centered);
