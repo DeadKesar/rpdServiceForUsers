@@ -18,8 +18,13 @@ public sealed record ReturnedFromApproval(string By, DateTimeOffset At);
 /// Статус показанного документа дисциплины (этап 7, A11): у дисциплины с согласованным документом новый создаётся только на его
 /// основе.
 /// </param>
+/// <param name="RpdId">
+/// Для шаблона ФОС (этап 7, B3) — РПД, по которой ФОС создаётся, её автор и статус; null — у дисциплины нет РПД, по которой можно
+/// создать ФОС.
+/// </param>
 public sealed record DisciplineOption(Guid Id, string Code, string Name, Guid? DocumentId, string? DocumentAuthor, bool CanOpen,
-    string? AssignedTo = null, bool CanCreate = true, string? DocumentStatus = null);
+    string? AssignedTo = null, bool CanCreate = true, string? DocumentStatus = null, Guid? RpdId = null, string? RpdAuthor = null,
+    string? RpdStatus = null);
 
 public sealed record DocumentItem(Guid Id, string Type, string Title, string Status, string StatusTitle, bool IsOutdated, int Version,
     Guid TemplateId, int TemplateRevision, Guid DisciplineId, string DisciplineCode, string DisciplineName, Guid AuthorId,
@@ -33,12 +38,14 @@ public sealed record DocumentItem(Guid Id, string Type, string Title, string Sta
 /// переводит документ принудительно (null — не администратор), этап 7, A8. <paramref name="Archive"/> — автор, методист или
 /// администратор отправляют согласованный документ в архив; <paramref name="Transfer"/> — методист или администратор
 /// передают документ другому автору (этап 7, A9). <paramref name="CreateBasedOn"/> — «Создать на основе» в согласованном и
-/// архивном документе: автор, методист, администратор и закреплённый за дисциплиной (этап 7, A11).
+/// архивном документе: автор, методист, администратор и закреплённый за дисциплиной (этап 7, A11). <paramref name="CreateFos"/> —
+/// «Создать ФОС» в РПД, <paramref name="RefreshFromRpd"/> — «Обновить из РПД» в ФОС, когда данные РПД изменились (этап 7, B3).
 /// </summary>
 public sealed record DocumentActions(bool Submit, bool Review, bool ResolveComments, bool Print, bool CorrectPlan = false,
     bool TakeForReview = false, bool ResolveOwnComments = false, bool Delete = false, bool Approve = false,
     bool Comment = false, bool ResolveApprovalComments = false, bool ReturnForCorrection = false,
-    List<StatusOption>? ForceTargets = null, bool Archive = false, bool Transfer = false, bool CreateBasedOn = false);
+    List<StatusOption>? ForceTargets = null, bool Archive = false, bool Transfer = false, bool CreateBasedOn = false,
+    bool CreateFos = false, bool RefreshFromRpd = false);
 
 /// <summary>Статус и его название для списка «Сменить статус».</summary>
 public sealed record StatusOption(string Status, string Title);
@@ -75,9 +82,22 @@ public sealed record MarkedApprovalItem(Guid Id, string Type, string DisciplineC
 public sealed record PlanCorrection(string Path, JsonElement? Before, JsonElement? After, string? ChangedBy, DateTimeOffset ChangedAt);
 
 /// <param name="BasedOn">Документ создан на основе другого (этап 7, A11): основа и список неперенесённого; иначе null.</param>
+/// <param name="LinkedRpd">У ФОС (этап 7, B3): связанная РПД, снимок и пометка «РПД изменилась»; у остальных null.</param>
+/// <param name="LinkedFos">У РПД (B3): созданные по ней ФОС, новейшие первыми; у остальных null.</param>
 public sealed record DocumentDetails(DocumentItem Document, JsonElement Payload, JsonElement Schema, DocumentMetadata Metadata,
     bool Editable, DocumentActions Actions, JsonElement? TemplateDefaults = null, List<PlanCorrection>? PlanCorrections = null,
-    Guid? ViewerId = null, ApprovalState? Approval = null, DocumentBasis? BasedOn = null);
+    Guid? ViewerId = null, ApprovalState? Approval = null, DocumentBasis? BasedOn = null, LinkedRpdItem? LinkedRpd = null,
+    List<LinkedFosItem>? LinkedFos = null);
+
+/// <summary>
+/// Связанная РПД ФОС (этап 7, B3): название и статус сейчас, открывается ли зрителю, версия и время снимка. <paramref name="Changed"/> —
+/// данные РПД изменились после снимка («РПД изменилась»); <paramref name="Deleted"/> — РПД удалена, обновлять не из чего.
+/// </summary>
+public sealed record LinkedRpdItem(Guid Id, string? Title, string Status, string StatusTitle, string? AuthorName, bool CanOpen,
+    bool Deleted, bool Changed, int SnapshotVersion, int? CurrentVersion, DateTimeOffset? SnapshotAt);
+
+/// <summary>ФОС, созданный по РПД (этап 7, B3).</summary>
+public sealed record LinkedFosItem(Guid Id, string Title, string Status, string StatusTitle, string AuthorName, bool CanOpen);
 
 /// <summary>
 /// Основа документа («Создать на основе», этап 7, A11): название и статус сейчас (<c>null</c> — основа удалена), открывается ли
@@ -146,7 +166,8 @@ public static class DocumentTitles
 /// Статус сменился: новая версия и статус; при отправке — предупреждения полной проверки. Тот же ответ читается и у
 /// действий согласования — там предупреждений нет.
 /// </summary>
-public sealed record DocumentReviewed(int Version, string Status, string StatusTitle, List<FieldError>? Warnings = null);
+public sealed record DocumentReviewed(int Version, string Status, string StatusTitle, List<FieldError>? Warnings = null,
+    string? Notice = null);
 
 /// <summary>
 /// Замечание к полю: кто и когда оставил, разрешено ли и кем. <paramref name="FromApproval"/> — оставлено на согласовании

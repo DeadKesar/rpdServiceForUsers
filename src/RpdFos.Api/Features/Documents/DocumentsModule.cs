@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Carter;
 using Microsoft.EntityFrameworkCore;
 using RpdFos.Api.Features.Plans;
@@ -22,7 +23,9 @@ namespace RpdFos.Api.Features.Documents;
 /// чтения, и они же — вторым списком «Документы моих дисциплин»; у дисциплины с закреплениями создают документы закреплённые
 /// преподаватели, этап 7, A10. «Создать на основе» (A11): создание принимает документ-основу, из которого переносится ввод
 /// автора; ответ и документ несут список неперенесённого, а согласование документа с основой той же дисциплины помечает
-/// основу «устарел». Правила, предзаполнение и проверки — в ядре
+/// основу «устарел». ФОС и РПД (B3; FR-DOC-19): создание принимает РПД, по которой создаётся ФОС; ответ ФОС называет связанную
+/// РПД и пометку «РПД изменилась», ответ РПД — её ФОС; «Обновить из РПД» заменяет снимок наследуемых данных; автор ФОС читает
+/// связанную РПД, не правя её. Правила, предзаполнение и проверки — в ядре
 /// (<see cref="DocumentCreation"/>, <see cref="DocumentEditing"/>, <see cref="DocumentReview"/>,
 /// <see cref="DocumentApproval"/>, <see cref="DocumentReopening"/>, <see cref="DocumentArchiving"/>,
 /// <see cref="DocumentTransfer"/>, <see cref="DocumentTransitions"/>).
@@ -53,6 +56,8 @@ public class DocumentsModule : ICarterModule
         // отказывает сама операция; передают методист и администратор.
         g.MapPost("/{id:guid}/archive", Archive).RequireAuthorization(Policies.DocumentAuthors);
         g.MapPost("/{id:guid}/transfer", Transfer).RequireAuthorization(Policies.MethodistOrAdmin);
+        // «Обновить из РПД» (этап 7, B3): автор ФОС в статусах правки и методист на проверке; решает сама операция.
+        g.MapPost("/{id:guid}/refresh-from-rpd", RefreshFromRpd).RequireAuthorization(Policies.DocumentAuthors);
         g.MapGet("/{id:guid}/comments", Comments);
         g.MapPost("/{id:guid}/comments", AddComment).RequireAuthorization(Policies.Commenters);
         g.MapPost("/{id:guid}/comments/{commentId:guid}/resolve", ResolveComment).RequireAuthorization(Policies.CommentResolvers);
@@ -146,7 +151,7 @@ public class DocumentsModule : ICarterModule
     /// шаблона — для экрана «Создание документа».
     /// </summary>
     private static async Task<IResult> Disciplines(
-        Guid templateId, HttpContext http, AppDbContext db, DirectoryAccounts directory, CancellationToken ct)
+        Guid templateId, HttpContext http, AppDbContext db, DirectoryAccounts directory, LinkedDocuments links, CancellationToken ct)
     {
         var template = await db.DocumentTemplates.AsNoTracking().SingleOrDefaultAsync(t => t.Id == templateId, ct);
         if (template?.CurriculumPlanId is not Guid planId)
@@ -182,71 +187,95 @@ public class DocumentsModule : ICarterModule
                 .ToListAsync(ct))
             .GroupBy(x => x.DisciplineId).ToDictionary(g => g.Key, g => g.Select(x => x.Holder).ToList());
 
+        // ФОС создаётся по РПД дисциплины (этап 7, B3): у каждой дисциплины — РПД, по которой он создаётся, и её автор. Без РПД
+        // создавать нечего. Создаёт автор РПД, а у дисциплины с закреплениями — закреплённые; методист и администратор — любой.
+        var isFos = template.Type == TemplateTypes.Fos;
+        var rpds = isFos ? await links.DefaultRpdsAsync(disciplines.Select(d => d.Id).ToList(), ct) : new Dictionary<Guid, Document>();
+        var rpdAuthorIds = rpds.Values.Select(r => r.AuthorId).Distinct().ToList();
+        var rpdAuthors = await db.Employees.AsNoTracking().Where(e => rpdAuthorIds.Contains(e.Id))
+            .ToDictionaryAsync(e => e.Id, e => e.ShortName, ct);
+
         return Results.Ok(disciplines.Select(d =>
         {
             var assigned = holders.GetValueOrDefault(d.Id);
             var isHolder = me is Guid employeeId && assigned?.Any(h => h.EmployeeId == employeeId) == true;
-            var (assignedTo, canCreate) = (assigned is null ? null : DisciplineAssignments.Names(assigned), seesAll || assigned is null || isHolder);
+            var rpd = rpds.GetValueOrDefault(d.Id);
+            var canCreate = isFos
+                ? rpd is not null && (seesAll || (assigned is null ? rpd.AuthorId == me : isHolder))
+                : seesAll || assigned is null || isHolder;
+            var assignedTo = assigned is null ? null : DisciplineAssignments.Names(assigned);
+            var rpdAuthor = rpd is null ? null : rpdAuthors.GetValueOrDefault(rpd.AuthorId);
             return existing.TryGetValue(d.Id, out var doc)
                 ? new DisciplineOption(d.Id, d.Code, d.Name, doc.Id, doc.ShortName, seesAll || doc.AuthorId == me || isHolder, assignedTo,
-                    canCreate, doc.Status)
-                : new DisciplineOption(d.Id, d.Code, d.Name, null, null, false, assignedTo, canCreate);
+                    canCreate, doc.Status, rpd?.Id, rpdAuthor, rpd?.Status)
+                : new DisciplineOption(d.Id, d.Code, d.Name, null, null, false, assignedTo, canCreate, null, rpd?.Id, rpdAuthor, rpd?.Status);
         }).ToList());
     }
 
     private static async Task<IResult> Get(
         Guid id, HttpContext http, AppDbContext db, DirectoryAccounts directory, IDocumentValidator validator,
         ValidationRuleSet rules, DocumentTypeRegistry registry, DocumentApproval approval, DisciplineAssignments assignments,
-        CancellationToken ct)
+        LinkedDocuments links, CancellationToken ct)
     {
-        var (document, viewer, refusal) = await VisibleDocumentAsync(id, http, db, directory, approval, assignments, ct);
+        var (document, viewer, refusal) = await VisibleDocumentAsync(id, http, db, directory, approval, assignments, links, ct);
         if (refusal is not null) return refusal;
-        return Results.Ok(await DetailsAsync(document!, viewer!, db, validator, rules, registry, approval, assignments, ct));
+        return Results.Ok(await DetailsAsync(document!, viewer!, db, validator, rules, registry, approval, assignments, links, ct));
     }
 
     private static async Task<IResult> Create(
         CreateDocumentRequest rq, HttpContext http, DirectoryAccounts directory, DocumentCreation creation, AppDbContext db,
         IDocumentValidator validator, ValidationRuleSet rules, DocumentTypeRegistry registry, DocumentApproval approval,
-        DisciplineAssignments assignments, CancellationToken ct)
+        DisciplineAssignments assignments, LinkedDocuments links, CancellationToken ct)
     {
         // Автор — запись справочника текущего пользователя: она же первый составитель.
         var authorId = await directory.FindIdAsync(http.User, ct);
         if (authorId is null) return NoDirectoryRecord();
 
         // Закрепления дисциплин ограничивают преподавателей; методист и администратор создают «за кафедру» (этап 7, A10) и видят
-        // все документы — любой подходит им в основы («Создать на основе», A11).
+        // все документы — любой подходит им в основы («Создать на основе», A11) и в РПД для ФОС (B3).
         var result = await creation.CreateAsync(
-            rq.TemplateId, rq.DisciplineId, authorId.Value, isCorrector: IsCorrector(http.User), rq.BasedOnDocumentId, ct);
+            rq.TemplateId, rq.DisciplineId, authorId.Value, isCorrector: IsCorrector(http.User), rq.BasedOnDocumentId,
+            rq.RpdDocumentId, ct);
         return result switch
         {
             { Document: { } document } => Results.Created($"/api/documents/{document.Id}",
                 await DetailsAsync(document,
                     new DocumentViewer(authorId, IsAuthor: true, IsReviewer(http.User), IsCorrector(http.User), IsSignatory: false,
                         IsAdmin: http.User.IsInRole(AppRoles.Admin)),
-                    db, validator, rules, registry, approval, assignments, ct)),
+                    db, validator, rules, registry, approval, assignments, links, ct)),
             { Problem: DocumentCreationProblem.Duplicate } => Results.Problem(statusCode: StatusCodes.Status409Conflict,
                 title: "Документ уже есть", detail: result.Detail,
                 extensions: new Dictionary<string, object?>
                 {
                     ["documentId"] = result.ExistingId, ["location"] = $"/api/documents/{result.ExistingId}"
                 }),
-            // Доступ, а не данные запроса: дисциплину закрепили за другими преподавателями (этап 7, A10) или основа — чужой
-            // документ (A11).
+            // Доступ, а не данные запроса: дисциплину закрепили за другими преподавателями (этап 7, A10), основа — чужой
+            // документ (A11) или ФОС создаёт не автор РПД и не закреплённый (B3).
             { Problem: DocumentCreationProblem.DisciplineAssigned } => Results.Problem(statusCode: StatusCodes.Status403Forbidden,
                 title: "Дисциплина закреплена", detail: result.Detail),
             { Problem: DocumentCreationProblem.BaseNotAvailable } => Results.Problem(statusCode: StatusCodes.Status403Forbidden,
                 title: "Основа недоступна", detail: result.Detail),
+            { Problem: DocumentCreationProblem.RpdNotAvailable } => Results.Problem(statusCode: StatusCodes.Status403Forbidden,
+                title: "РПД недоступна для ФОС", detail: result.Detail),
+            // Состояние РПД, а не данные запроса: РПД в архиве или её у дисциплины нет (B3).
+            { Problem: DocumentCreationProblem.RpdArchived } => Results.Problem(statusCode: StatusCodes.Status409Conflict,
+                title: "РПД в архиве", detail: result.Detail),
+            { Problem: DocumentCreationProblem.NoRpd } => Results.Problem(statusCode: StatusCodes.Status409Conflict,
+                title: "РПД нет", detail: result.Detail),
             _ => Results.Problem(statusCode: StatusCodes.Status422UnprocessableEntity,
                 title: result.Problem switch
                 {
                     DocumentCreationProblem.TemplateNotFound => "Шаблон не найден",
                     DocumentCreationProblem.TemplateNotPublished => "Шаблон не опубликован",
-                    DocumentCreationProblem.TypeNotSupported => "Тип документа пока не создаётся",
+                    DocumentCreationProblem.TypeNotSupported => "Тип документа не создаётся",
                     DocumentCreationProblem.DisciplineNotFound => "Дисциплина не найдена",
                     DocumentCreationProblem.DisciplineNotInPlan => "Дисциплина не из плана шаблона",
                     DocumentCreationProblem.BaseNotFound => "Основа не найдена",
                     DocumentCreationProblem.BaseOtherType => "Основа другого типа",
                     DocumentCreationProblem.BaseSamePlan => "Основа из того же плана",
+                    DocumentCreationProblem.RpdNotFound => "РПД не найдена",
+                    DocumentCreationProblem.RpdOtherDiscipline => "РПД другой дисциплины",
+                    DocumentCreationProblem.BaseNotSupported => "ФОС на основе документа пока не создаётся",
                     _ => "Для этой строки плана документ не создаётся"
                 },
                 detail: result.Detail)
@@ -557,6 +586,40 @@ public class DocumentsModule : ICarterModule
         return Results.Ok(new DocumentReviewed(document.Version, document.Status, DocumentStatuses.Title(document.Status), []));
     }
 
+    /// <summary>
+    /// «Обновить из РПД» (этап 7, B3; решение 8): снимок наследуемых данных ФОС заменяется нынешним содержимым РПД. Обновляют
+    /// автор ФОС в статусах правки и методист на проверке; не автор и не методист — 403 раньше проверки статуса, документ
+    /// другого типа и другой статус — 409. РПД удалена или данные не менялись — 409. Ответ — новая версия и, в
+    /// <c>notice</c>, что изменилось в снимке и какие строки паспорта стоит проверить.
+    /// </summary>
+    private static async Task<IResult> RefreshFromRpd(
+        Guid id, DocumentVersionRequest rq, HttpContext http, AppDbContext db, DirectoryAccounts directory, FosRefresh refresh,
+        DocumentReview review, CancellationToken ct)
+    {
+        var document = await db.Documents.SingleOrDefaultAsync(d => d.Id == id, ct);
+        if (document is null) return NotFound();
+        if (await directory.FindIdAsync(http.User, ct) is not Guid me) return NoDirectoryRecord();
+        var (isAuthor, isReviewer) = (document.AuthorId == me, IsReviewer(http.User));
+        if (!isAuthor && !isReviewer)
+            return Results.Problem(statusCode: StatusCodes.Status403Forbidden, title: "Обновляет только автор",
+                detail: "Данные РПД в ФОС обновляет его автор, а на проверке — методист.");
+        if (document.Type != TemplateTypes.Fos)
+            return Results.Problem(statusCode: StatusCodes.Status409Conflict, title: "Действие недоступно для РПД",
+                detail: "«Обновить из РПД» есть только у ФОС.");
+        if (!DocumentTransitions.CanRefreshFromRpd(document.Status, isAuthor, isReviewer))
+            return await AuthorRefusedAsync(document, isAuthor, review, DocumentTransitions.RefreshFromRpdAction, ct);
+
+        db.Entry(document).Property(d => d.Version).OriginalValue = rq.Version;
+        var result = await refresh.RefreshAsync(document, me, ct);
+        if (result.Problem is { } problem)
+            return Results.Problem(statusCode: StatusCodes.Status409Conflict,
+                title: problem == FosRefreshProblem.RpdMissing ? "РПД удалена" : "Снимок актуален", detail: result.Detail);
+
+        await db.SaveChangesAsync(ct);
+        return Results.Ok(new DocumentReviewed(
+            document.Version, document.Status, DocumentStatuses.Title(document.Status), [], result.Notice));
+    }
+
     private static IResult TransferRefused(TransferProblem problem) => problem switch
     {
         TransferProblem.EmptyReason => Results.Problem(statusCode: StatusCodes.Status422UnprocessableEntity, title: "Не указана причина",
@@ -579,9 +642,9 @@ public class DocumentsModule : ICarterModule
     /// <summary>Замечания к документу — всем, кто его видит: от старых к новым.</summary>
     private static async Task<IResult> Comments(
         Guid id, HttpContext http, AppDbContext db, DirectoryAccounts directory, DocumentApproval approval,
-        DisciplineAssignments assignments, CancellationToken ct)
+        DisciplineAssignments assignments, LinkedDocuments links, CancellationToken ct)
     {
-        var (_, _, refusal) = await VisibleDocumentAsync(id, http, db, directory, approval, assignments, ct);
+        var (_, _, refusal) = await VisibleDocumentAsync(id, http, db, directory, approval, assignments, links, ct);
         if (refusal is not null) return refusal;
         return Results.Ok(await CommentItem.Query(db, db.DocumentComments.Where(c => c.DocumentId == id)).ToListAsync(ct));
     }
@@ -667,22 +730,27 @@ public class DocumentsModule : ICarterModule
     }
 
     // Документ видят автор, методист, администратор, согласующий со строкой согласования в нём (этап 6, B1) и сотрудник,
-    // за которым закреплена дисциплина документа (этап 7, A10). Закреплённый — последним: запрос к базе только тем, кто
-    // иначе документа не видит.
+    // за которым закреплена дисциплина документа (этап 7, A10), и автор ФОС, созданного по этой РПД (B3). Закреплённый и автор
+    // ФОС — последними: запрос к базе только тем, кто иначе документа не видит.
     private static async Task<(Document? Document, DocumentViewer? Viewer, IResult? Refusal)> VisibleDocumentAsync(
         Guid id, HttpContext http, AppDbContext db, DirectoryAccounts directory, DocumentApproval approval,
-        DisciplineAssignments assignments, CancellationToken ct)
+        DisciplineAssignments assignments, LinkedDocuments links, CancellationToken ct)
     {
         var document = await db.Documents.AsNoTracking().SingleOrDefaultAsync(d => d.Id == id, ct);
         if (document is null) return (null, null, NotFound());
         var me = await directory.FindIdAsync(http.User, ct);
         var viewer = await DocumentViewer.OfAsync(http.User, me, document, approval, ct);
-        if (!viewer.Sees && me is Guid employeeId && await assignments.IsAssignedAsync(document.DisciplineId, employeeId, ct))
-            viewer = viewer with { IsAssigned = true };
+        if (!viewer.Sees && me is Guid employeeId)
+        {
+            if (await assignments.IsAssignedAsync(document.DisciplineId, employeeId, ct))
+                viewer = viewer with { IsAssigned = true };
+            else if (document.Type == TemplateTypes.Rpd && await links.IsFosAuthorAsync(document, employeeId, ct))
+                viewer = viewer with { IsFosAuthor = true };
+        }
         if (!viewer.Sees)
             return (null, null, Results.Problem(statusCode: StatusCodes.Status403Forbidden, title: "Чужой документ",
-                detail: "Документ видят его автор, методист, администратор, назначенные согласующие и сотрудники, " +
-                        "за которыми закреплена дисциплина."));
+                detail: "Документ видят его автор, методист, администратор, назначенные согласующие, сотрудники, " +
+                        "за которыми закреплена дисциплина, и авторы ФОС по этой РПД."));
         return (document, viewer, null);
     }
 
@@ -743,7 +811,8 @@ public class DocumentsModule : ICarterModule
 
     private static async Task<DocumentDetails> DetailsAsync(
         Document document, DocumentViewer viewer, AppDbContext db, IDocumentValidator validator, ValidationRuleSet rules,
-        DocumentTypeRegistry registry, DocumentApproval approval, DisciplineAssignments assignments, CancellationToken ct)
+        DocumentTypeRegistry registry, DocumentApproval approval, DisciplineAssignments assignments, LinkedDocuments links,
+        CancellationToken ct)
     {
         var (isAuthor, isReviewer, isCorrector) = (viewer.IsAuthor, viewer.IsReviewer, viewer.IsCorrector);
         var template = await db.DocumentTemplates.IgnoreQueryFilters().Where(t => t.Id == document.TemplateId)
@@ -759,9 +828,16 @@ public class DocumentsModule : ICarterModule
         var awaiting = viewer.IsSignatory && panel is not null && panel.Seats.Any(s => s.Mine && s.Status == SignatureStatuses.Pending);
         var signs = awaiting && DocumentTransitions.CanSign(status);
         // «Создать на основе» (этап 7, A11): автор, методист, администратор и закреплённый за дисциплиной — как и сама основа.
-        // Закрепление проверяется последним: запрос к базе только тем, кому иначе кнопка не положена.
-        var canBase = DocumentTransitions.CanBaseNew(status) && (isAuthor || isCorrector || viewer.IsAssigned ||
-            viewer.Id is Guid me && await assignments.IsAssignedAsync(document.DisciplineId, me, ct));
+        // Закрепление проверяется последним: запрос к базе только тем, кому иначе кнопка не положена. У ФОС её пока нет — она
+        // придёт с циклом ФОС (B10): экран создания берёт основой только РПД.
+        var canBase = document.Type == TemplateTypes.Rpd && DocumentTransitions.CanBaseNew(status) && (isAuthor || isCorrector ||
+            viewer.IsAssigned || viewer.Id is Guid me && await assignments.IsAssignedAsync(document.DisciplineId, me, ct));
+
+        // ФОС и РПД (этап 7, B3): у ФОС — связанная РПД и пометка «РПД изменилась», у РПД — её ФОС и право создать новый.
+        var linkedRpd = document.Type == TemplateTypes.Fos ? await LinkedRpdAsync(document, viewer, db, assignments, links, ct) : null;
+        var linkedFos = document.Type == TemplateTypes.Rpd ? await LinkedFosAsync(document, viewer, db, assignments, links, ct) : null;
+        var createFos = linkedFos is not null && DocumentTransitions.CanCreateFosFrom(status) &&
+            linkedFos.All(f => f.Status == DocumentStatuses.Archived) && await MayCreateFosAsync(document, viewer, assignments, ct);
 
         return new DocumentDetails(
             DocumentItem.From(document, facts.Discipline),
@@ -790,9 +866,67 @@ public class DocumentsModule : ICarterModule
                     : null,
                 Archive: (isAuthor || isCorrector) && DocumentTransitions.CanArchive(status),
                 Transfer: isCorrector && DocumentTransitions.CanTransfer(status),
-                CreateBasedOn: canBase),
+                CreateBasedOn: canBase,
+                CreateFos: createFos,
+                // Кнопка — когда обновлять есть что: данные РПД изменились, а сама РПД на месте.
+                RefreshFromRpd: linkedRpd is { Changed: true } && DocumentTransitions.CanRefreshFromRpd(status, isAuthor, isReviewer)),
             template.DefaultPayload is { } defaults ? JsonDocument.Parse(defaults).RootElement : null,
-            corrections, viewer.Id, panel, await BasisAsync(document, viewer, db, assignments, ct));
+            corrections, viewer.Id, panel, await BasisAsync(document, viewer, db, assignments, ct), linkedRpd, linkedFos);
+    }
+
+    /// <summary>
+    /// Связанная РПД ФОС (этап 7, B3): название и статус сейчас, открывается ли зрителю, снимок и пометка «РПД изменилась» —
+    /// наследуемые данные РПД отличаются от снимка. Удалённая РПД называется: ФОС остаётся, а обновлять его не из чего.
+    /// Открыть РПД может автор ФОС (читает связанную РПД, не правя), методист, администратор, автор РПД и закреплённый за её
+    /// дисциплиной.
+    /// </summary>
+    private static async Task<LinkedRpdItem?> LinkedRpdAsync(
+        Document fos, DocumentViewer viewer, AppDbContext db, DisciplineAssignments assignments, LinkedDocuments links,
+        CancellationToken ct)
+    {
+        if (FosSnapshot.RpdIdOf(fos.Payload) is not Guid rpdId) return null;
+        var stored = JsonNode.Parse(fos.Payload)?[FosSnapshot.LinkSection];
+        var (version, at) = FosSnapshot.Taken(stored);
+        var rpd = await links.RpdOfAsync(fos, ct);
+        if (rpd is null || rpd.IsDeleted)
+            return new LinkedRpdItem(rpdId, rpd?.Title, DocumentStatuses.Deleted, DocumentStatuses.Title(DocumentStatuses.Deleted), null,
+                CanOpen: false, Deleted: true, Changed: false, version, rpd?.Version, at);
+
+        var author = await db.Employees.AsNoTracking().Where(e => e.Id == rpd.AuthorId).Select(e => e.ShortName).SingleOrDefaultAsync(ct);
+        var canOpen = viewer.IsAuthor || viewer.IsCorrector || viewer.IsAssigned || rpd.AuthorId == viewer.Id ||
+            viewer.Id is Guid me && await assignments.IsAssignedAsync(rpd.DisciplineId, me, ct);
+        var changed = FosSnapshot.Differs(stored, FosSnapshot.Take(JsonNode.Parse(rpd.Payload)));
+        return new LinkedRpdItem(rpd.Id, rpd.Title, rpd.Status, DocumentStatuses.Title(rpd.Status), author, canOpen, Deleted: false,
+            changed, version, rpd.Version, at);
+    }
+
+    /// <summary>
+    /// ФОС, созданные по РПД (этап 7, B3), — новейшие первыми, с признаком, открывается ли ФОС зрителю: методисту и
+    /// администратору, его автору и закреплённому за дисциплиной.
+    /// </summary>
+    private static async Task<List<LinkedFosItem>> LinkedFosAsync(
+        Document rpd, DocumentViewer viewer, AppDbContext db, DisciplineAssignments assignments, LinkedDocuments links,
+        CancellationToken ct)
+    {
+        var found = await links.FosOfAsync(rpd, ct);
+        if (found.Count == 0) return [];
+        var authorIds = found.Select(f => f.AuthorId).Distinct().ToList();
+        var authors = await db.Employees.AsNoTracking().Where(e => authorIds.Contains(e.Id)).ToDictionaryAsync(e => e.Id, e => e.ShortName, ct);
+        var assigned = viewer.IsAssigned || viewer.Id is Guid me && await assignments.IsAssignedAsync(rpd.DisciplineId, me, ct);
+        return found.Select(f => new LinkedFosItem(f.Id, f.Title, f.Status, DocumentStatuses.Title(f.Status),
+            authors.GetValueOrDefault(f.AuthorId) ?? "", viewer.IsCorrector || assigned || f.AuthorId == viewer.Id)).ToList();
+    }
+
+    /// <summary>
+    /// Может ли зритель создать ФОС по этой РПД (этап 7, B3): автор РПД, а у дисциплины с закреплениями — закреплённые;
+    /// методист и администратор — «за кафедру». Те же правила, что у самого создания (<see cref="DocumentCreation"/>).
+    /// </summary>
+    private static async Task<bool> MayCreateFosAsync(
+        Document rpd, DocumentViewer viewer, DisciplineAssignments assignments, CancellationToken ct)
+    {
+        if (viewer.IsCorrector) return true;
+        var holders = await assignments.HoldersAsync(rpd.DisciplineId, ct);
+        return holders.Count > 0 ? holders.Any(h => h.EmployeeId == viewer.Id) : viewer.IsAuthor;
     }
 
     /// <summary>
@@ -887,7 +1021,11 @@ public class DocumentsModule : ICarterModule
 }
 
 /// <param name="BasedOnDocumentId">Документ-основа («Создать на основе», этап 7, A11); пусто — документ создаётся с нуля.</param>
-public record CreateDocumentRequest(Guid TemplateId, Guid DisciplineId, Guid? BasedOnDocumentId = null);
+/// <param name="RpdDocumentId">
+/// РПД, по которой создаётся ФОС (этап 7, B3); пусто — РПД дисциплины подбирается сама: незавершённая, иначе новейшая согласованная.
+/// У шаблона РПД не используется.
+/// </param>
+public record CreateDocumentRequest(Guid TemplateId, Guid DisciplineId, Guid? BasedOnDocumentId = null, Guid? RpdDocumentId = null);
 
 /// <summary>Значение раздела целиком и версия документа, которую видел клиент.</summary>
 /// <param name="ConfirmReturn">Исправляющий подтвердил возврат принятого документа автору, если исправление сделает его неполным.</param>
@@ -925,7 +1063,9 @@ public record SectionSaved(int Version, string Status, string StatusTitle, Secti
 public record DocumentSaved(int Version, string Status, string StatusTitle, DateTimeOffset SavedAt);
 
 /// <summary>Статус сменился: новая версия и статус; при отправке — предупреждения полной проверки.</summary>
-public record DocumentReviewed(int Version, string Status, string StatusTitle, IReadOnlyList<DocumentValidationError> Warnings);
+/// <param name="Notice">Сообщение автору о сделанном (этап 7, B3): что изменилось в снимке после «Обновить из РПД».</param>
+public record DocumentReviewed(
+    int Version, string Status, string StatusTitle, IReadOnlyList<DocumentValidationError> Warnings, string? Notice = null);
 
 /// <param name="FromApproval">Документ на проверке вернулся с согласования — методисту и администратору (этап 6.1, C4).</param>
 public record DocumentListItem(
@@ -941,11 +1081,13 @@ public record ReturnedFromApproval(string By, DateTimeOffset At);
 /// <paramref name="AssignedTo"/> — за кем дисциплина закреплена (этап 7, A10; null — ни за кем), <paramref name="CanCreate"/> —
 /// может ли создать документ пользователь: закреплений нет, он закреплён или это методист или администратор.
 /// <paramref name="DocumentStatus"/> — статус показанного документа (этап 7, A11): у дисциплины с согласованным документом новый
-/// создаётся только на его основе, и экран выбирает кнопку по статусу.
+/// создаётся только на его основе, и экран выбирает кнопку по статусу. Для шаблона ФОС (B3) <paramref name="RpdId"/>,
+/// <paramref name="RpdAuthor"/> и <paramref name="RpdStatus"/> — РПД, по которой ФОС создаётся (null — у дисциплины нет РПД, по
+/// которой можно создать ФОС), и <paramref name="CanCreate"/> — может ли пользователь создать ФОС по ней.
 /// </summary>
 public record DisciplineOption(
     Guid Id, string Code, string Name, Guid? DocumentId, string? DocumentAuthor, bool CanOpen, string? AssignedTo = null,
-    bool CanCreate = true, string? DocumentStatus = null);
+    bool CanCreate = true, string? DocumentStatus = null, Guid? RpdId = null, string? RpdAuthor = null, string? RpdStatus = null);
 
 public record DocumentItem(
     Guid Id, string Type, string Title, string Status, string StatusTitle, bool IsOutdated, int Version, Guid TemplateId,
@@ -979,10 +1121,19 @@ public record DocumentItem(
 /// «Создать на основе» в согласованном и архивном документе (этап 7, A11; S-13): автор, методист, администратор и закреплённый
 /// за дисциплиной документа.
 /// </param>
+/// <param name="CreateFos">
+/// «Создать ФОС» в РПД (этап 7, B3): РПД не удалена и не в архиве, у неё нет незавершённого или согласованного ФОС, а зритель —
+/// автор РПД (у дисциплины с закреплениями — закреплённый), методист или администратор.
+/// </param>
+/// <param name="RefreshFromRpd">
+/// «Обновить из РПД» в ФОС (B3): данные РПД изменились после снимка, а зритель — автор ФОС в статусах правки или методист на
+/// проверке.
+/// </param>
 public record DocumentActions(bool Submit, bool Review, bool ResolveComments, bool Print, bool CorrectPlan = false,
     bool TakeForReview = false, bool ResolveOwnComments = false, bool Delete = false, bool Approve = false,
     bool Comment = false, bool ResolveApprovalComments = false, bool ReturnForCorrection = false,
-    IReadOnlyList<StatusOption>? ForceTargets = null, bool Archive = false, bool Transfer = false, bool CreateBasedOn = false);
+    IReadOnlyList<StatusOption>? ForceTargets = null, bool Archive = false, bool Transfer = false, bool CreateBasedOn = false,
+    bool CreateFos = false, bool RefreshFromRpd = false);
 
 /// <summary>Статус и его название для списка «Сменить статус».</summary>
 public record StatusOption(string Status, string Title);
@@ -1019,10 +1170,25 @@ public record PlanCorrection(string Path, JsonElement? Before, JsonElement? Afte
 /// шаблона — из них редактор берёт стандартные пункты для подсказок (виды самостоятельной работы).
 /// </summary>
 /// <param name="BasedOn">Документ создан на основе другого (этап 7, A11): основа и список неперенесённого; иначе null.</param>
+/// <param name="LinkedRpd">У ФОС (этап 7, B3): связанная РПД, снимок и пометка «РПД изменилась»; у остальных null.</param>
+/// <param name="LinkedFos">У РПД (B3): созданные по ней ФОС, новейшие первыми; у остальных null.</param>
 public record DocumentDetails(
     DocumentItem Document, JsonElement Payload, JsonElement Schema, DocumentMetadata Metadata, bool Editable, DocumentActions Actions,
     JsonElement? TemplateDefaults = null, IReadOnlyList<PlanCorrection>? PlanCorrections = null, Guid? ViewerId = null,
-    ApprovalPanel? Approval = null, DocumentBasis? BasedOn = null);
+    ApprovalPanel? Approval = null, DocumentBasis? BasedOn = null, LinkedRpdItem? LinkedRpd = null,
+    IReadOnlyList<LinkedFosItem>? LinkedFos = null);
+
+/// <summary>
+/// Связанная РПД ФОС (этап 7, B3): название и статус сейчас (у удалённой — <paramref name="Deleted"/>), открывается ли она
+/// зрителю, и снимок: версия РПД и время, когда он снят. <paramref name="Changed"/> — наследуемые данные РПД отличаются от снимка
+/// («РПД изменилась»); <paramref name="CurrentVersion"/> — версия РПД сейчас, только для справки: сравниваются данные.
+/// </summary>
+public record LinkedRpdItem(
+    Guid Id, string? Title, string Status, string StatusTitle, string? AuthorName, bool CanOpen, bool Deleted, bool Changed,
+    int SnapshotVersion, int? CurrentVersion, DateTimeOffset? SnapshotAt);
+
+/// <summary>ФОС, созданный по РПД (этап 7, B3): в списке РПД — название, статус, автор и ссылка, если ФОС открывается зрителю.</summary>
+public record LinkedFosItem(Guid Id, string Title, string Status, string StatusTitle, string AuthorName, bool CanOpen);
 
 /// <summary>
 /// Основа документа («Создать на основе», этап 7, A11): название и статус сейчас (null — основа удалена), открывается ли она

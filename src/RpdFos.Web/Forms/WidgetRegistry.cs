@@ -21,7 +21,9 @@ public static class WidgetRegistry
         ["developer_picker"] = typeof(DeveloperPickerWidget),
         ["discipline_picker"] = typeof(DisciplinePickerWidget),
         ["class_table"] = typeof(ObjectTableWidget),
-        ["literature_list"] = typeof(ObjectTableWidget)
+        ["literature_list"] = typeof(ObjectTableWidget),
+        // Снимок данных РПД в ФОС (этап 7, B3): только для чтения.
+        ["linked_rpd"] = typeof(LinkedRpdWidget)
     };
 
     /// <summary>Виджет поля: по имени из схемы, а для списков без имени — список строк или таблица записей.</summary>

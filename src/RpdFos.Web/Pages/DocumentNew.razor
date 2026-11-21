@@ -24,9 +24,39 @@
     </div>
 }
 
+@* Тип документа (этап 7, B3; S-11): РПД создаётся для дисциплины плана, ФОС — по РПД дисциплины. *@
+<div class="mb-3" style="max-width: 960px">
+    <label class="form-label d-block">Тип документа</label>
+    <div class="btn-group" role="group" aria-label="Тип документа">
+        <button type="button" class="btn @(docType == RpdType ? "btn-primary" : "btn-outline-primary")" disabled="@busy"
+                aria-pressed="@(docType == RpdType ? "true" : "false")" @onclick="() => SelectTypeAsync(RpdType)">РПД</button>
+        <button type="button" class="btn @(docType == FosType ? "btn-primary" : "btn-outline-primary")" disabled="@busy"
+                aria-pressed="@(docType == FosType ? "true" : "false")" @onclick="() => SelectTypeAsync(FosType)">ФОС</button>
+    </div>
+    @if (docType == FosType)
+    {
+        <div class="form-text">
+            ФОС создаётся по РПД дисциплины — не удалённой и не архивной. Создаёт автор РПД или сотрудник, закреплённый за
+            дисциплиной. Наследуемое от РПД (индикаторы, разделы, формы текущего контроля, виды аттестации) — снимок: он обновляется
+            кнопкой в самом ФОС.
+        </div>
+    }
+</div>
+
+@if (fosRpd is { } source)
+{
+    <div class="alert alert-secondary py-2" style="max-width: 960px" role="status">
+        ФОС создаётся по РПД
+        <a href="@($"documents/{source.Id}")"><strong>«@source.Title»</strong></a>
+        · @StatusTitle(source.Status) · @source.AuthorName
+    </div>
+}
+
 @* Основа (этап 7, A11; S-11): ввод автора переносится из неё в новый документ — для той же дисциплины или для дисциплины
    другого плана; поля из учебного плана берутся заново. Основа названа ссылкой «Создать на основе» из согласованного или
-   архивного документа либо выбрана здесь. *@
+   архивного документа либо выбрана здесь. У ФОС основы пока нет — она придёт с циклом ФОС (B10). *@
+@if (docType == RpdType)
+{
 <div class="mb-3" style="max-width: 960px">
     <label class="form-label">Основа</label>
     @if (basis is { } chosen)
@@ -67,9 +97,10 @@
         }
     }
 </div>
+}
 
 <div class="mb-3" style="max-width: 960px">
-    <label class="form-label">Опубликованный шаблон РПД</label>
+    <label class="form-label">Опубликованный шаблон @TypeTitle</label>
     <select class="form-select" @bind="templateId" @bind:after="LoadDisciplinesAsync">
         <option value="">— выберите шаблон —</option>
         @foreach (var t in templates)
@@ -79,24 +110,43 @@
     </select>
     @if (templates.Count == 0)
     {
-        <div class="form-text">Опубликованных шаблонов РПД нет — их публикует методист на странице «Шаблоны».</div>
+        <div class="form-text">Опубликованных шаблонов @TypeTitle нет — их публикует методист на странице «Шаблоны».</div>
     }
 </div>
 
 @if (disciplines is not null)
 {
     <p class="text-muted">
-        Дисциплины учебного плана, для которых создаётся РПД: модули, группы дисциплин по выбору, практики и ГИА
-        в списке не показываются.
+        @if (docType == FosType)
+        {
+            <span>
+                Дисциплины учебного плана, для которых создаётся ФОС. ФОС создаётся по РПД дисциплины: у дисциплины без РПД
+                сначала создают РПД.
+            </span>
+        }
+        else
+        {
+            <span>
+                Дисциплины учебного плана, для которых создаётся РПД: модули, группы дисциплин по выбору, практики и ГИА
+                в списке не показываются.
+            </span>
+        }
     </p>
     @* Узкий экран: таблица прокручивается в обёртке, а не рвёт слова по буквам (общее правило — app.css). *@
     <div class="table-responsive">
     <table class="table table-sm align-middle">
         <thead>
-            <tr><th>Индекс</th><th>Дисциплина</th><th></th></tr>
+            <tr>
+                <th>Индекс</th><th>Дисциплина</th>
+                @if (docType == FosType)
+                {
+                    <th>РПД</th>
+                }
+                <th></th>
+            </tr>
         </thead>
         <tbody>
-            @foreach (var d in disciplines)
+            @foreach (var d in Rows)
             {
                 <tr>
                     <td>@d.Code</td>
@@ -108,8 +158,49 @@
                             <div class="small text-muted">Закреплена за: @holders</div>
                         }
                     </td>
+                    @* ФОС (этап 7, B3): РПД, по которой он создаётся, — незавершённая дисциплины, иначе новейшая согласованная. *@
+                    @if (docType == FosType)
+                    {
+                        <td class="small">
+                            @if (d.RpdId is Guid rpdId)
+                            {
+                                <a href="@($"documents/{rpdId}")">РПД</a>
+                                <span>· @StatusTitle(d.RpdStatus) · @d.RpdAuthor</span>
+                            }
+                            else
+                            {
+                                <span class="text-muted">нет</span>
+                            }
+                        </td>
+                    }
                     <td class="text-end">
-                        @if (d.DocumentId is Guid documentId)
+                        @if (docType == FosType)
+                        {
+                            @if (d.DocumentId is Guid fosId)
+                            {
+                                @if (d.CanOpen)
+                                {
+                                    <a class="btn btn-sm btn-outline-secondary" href="@($"documents/{fosId}")">Открыть ФОС</a>
+                                }
+                                else
+                                {
+                                    <span class="small text-muted">ФОС уже есть (автор — @d.DocumentAuthor)</span>
+                                }
+                            }
+                            else if (d.RpdId is null)
+                            {
+                                <span class="small text-muted">Сначала создайте РПД</span>
+                            }
+                            else if (d.CanCreate)
+                            {
+                                <button class="btn btn-sm btn-primary" disabled="@busy" @onclick="() => CreateAsync(d)">Создать ФОС</button>
+                            }
+                            else
+                            {
+                                <span class="small text-muted">Создают автор РПД и закреплённые преподаватели</span>
+                            }
+                        }
+                        else if (d.DocumentId is Guid documentId)
                         {
                             @if (d.CanOpen)
                             {
@@ -166,6 +257,28 @@
     [SupplyParameterFromQuery(Name = "basedOn")]
     public Guid? BasedOnId { get; set; }
 
+    /// <summary>Тип документа из ссылки: <c>fos</c> открывает создание ФОС (этап 7, B3).</summary>
+    [SupplyParameterFromQuery(Name = "type")]
+    public string? TypeParam { get; set; }
+
+    /// <summary>РПД из ссылки «Создать ФОС» в самой РПД (этап 7, B3): ФОС создаётся по ней, список дисциплин сужается до её дисциплины.</summary>
+    [SupplyParameterFromQuery(Name = "rpd")]
+    public Guid? RpdId { get; set; }
+
+    private const string RpdType = "rpd", FosType = "fos";
+
+    private string docType = RpdType;
+    private DocumentListItem? fosRpd;
+    private string TypeTitle => docType == FosType ? "ФОС" : "РПД";
+
+    // С выбранной РПД — только её дисциплина: остальные ФОС создают по другим РПД.
+    private IEnumerable<DisciplineOption> Rows => fosRpd is { } source
+        ? disciplines!.Where(d => d.Code == source.DisciplineCode)
+        : disciplines!;
+
+    private static string StatusTitle(string? status) =>
+        DocumentTitles.Statuses.Where(s => s.Code == status).Select(s => s.Title).FirstOrDefault() ?? status ?? "";
+
     private List<TemplateItem> templates = [];
     private List<DisciplineOption>? disciplines;
     private List<DocumentListItem> bases = [];
@@ -188,8 +301,22 @@
     {
         try
         {
-            templates = await Http.GetFromJsonAsync<List<TemplateItem>>("api/templates?type=rpd&status=published") ?? [];
-            if (BasedOnId is Guid basedOn)
+            if (RpdId is not null || TypeParam == FosType) docType = FosType;
+            templates = await LoadTemplatesAsync();
+            if (RpdId is Guid sourceId)
+            {
+                // «Создать ФОС» из РПД: у плана РПД один опубликованный шаблон ФОС — он уже выбран.
+                await LoadBasesAsync();
+                fosRpd = bases.FirstOrDefault(b => b.Id == sourceId);
+                if (fosRpd is null)
+                    (messageIsError, message) = (true, "РПД недоступна: она удалена или не открыта вам. Выберите дисциплину из списка.");
+                else if (fosRpd.Plan is { } rpdPlan && templates.Where(t => t.Plan?.Id == rpdPlan.Id).ToList() is [var onlyOne])
+                {
+                    templateId = onlyOne.Id.ToString();
+                    await LoadDisciplinesAsync();
+                }
+            }
+            else if (BasedOnId is Guid basedOn)
             {
                 await LoadBasesAsync();
                 basis = bases.FirstOrDefault(b => b.Id == basedOn);
@@ -202,6 +329,24 @@
                     await LoadDisciplinesAsync();
                 }
             }
+        }
+        catch (AccessTokenNotAvailableException e)
+        {
+            e.Redirect();
+        }
+    }
+
+    private async Task<List<TemplateItem>> LoadTemplatesAsync() =>
+        await Http.GetFromJsonAsync<List<TemplateItem>>($"api/templates?type={docType}&status=published") ?? [];
+
+    // Смена типа начинает выбор заново: у РПД и ФОС свои шаблоны, а у ФОС нет основы (этап 7, B3).
+    private async Task SelectTypeAsync(string type)
+    {
+        if (type == docType) return;
+        (docType, templateId, disciplines, basis, fosRpd, choosing, message, existingId) = (type, "", null, null, null, false, null, null);
+        try
+        {
+            templates = await LoadTemplatesAsync();
         }
         catch (AccessTokenNotAvailableException e)
         {
@@ -272,8 +417,13 @@
         existingId = null;
         try
         {
-            var response = await Http.PostAsJsonAsync("api/documents",
-                new { templateId = Guid.Parse(templateId), disciplineId = discipline.Id, basedOnDocumentId = basis?.Id });
+            // У ФОС вместо основы — РПД: названная в ссылке «Создать ФОС» или РПД дисциплины, которую показал список.
+            var response = await Http.PostAsJsonAsync("api/documents", new
+            {
+                templateId = Guid.Parse(templateId), disciplineId = discipline.Id,
+                basedOnDocumentId = docType == RpdType ? basis?.Id : null,
+                rpdDocumentId = docType == FosType ? fosRpd?.Id ?? discipline.RpdId : null
+            });
             if (response.StatusCode == HttpStatusCode.Created && await response.Content.ReadFromJsonAsync<DocumentDetails>() is { } created)
             {
                 // Редактор покажет, на чём основан документ и что из основы не перенесено.

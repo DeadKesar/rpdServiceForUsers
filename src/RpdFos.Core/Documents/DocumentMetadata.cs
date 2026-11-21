@@ -150,7 +150,8 @@ public sealed record DocumentMetadata(
     }
 
     /// <summary>
-    /// Поля только для чтения: из учебного плана (<c>readOnly</c>) — всегда, с <c>x-readonly-after</c> — когда документ
+    /// Поля только для чтения: из учебного плана (<c>readOnly</c>) — всегда, производные от других данных документа
+    /// (<c>x-readonly</c>: снимок РПД в ФОС, этап 7, B3) — всегда и для всех, с <c>x-readonly-after</c> — когда документ
     /// продвинулся дальше указанного статуса. Черновик, сохранённый черновик и возврат на доработку — одна ступень:
     /// автор редактирует.
     /// </summary>
@@ -175,8 +176,10 @@ public sealed record DocumentMetadata(
         }
     }
 
+    // x-readonly — не поле плана (PlanFields его не видит): исправляющему оно не открыто, значения по плану у него нет.
     private static bool IsReadOnly(JsonElement field, string status) =>
         field.TryGetProperty("readOnly", out var r) && r.ValueKind == JsonValueKind.True ||
+        field.TryGetProperty("x-readonly", out var derived) && derived.ValueKind == JsonValueKind.True ||
         field.TryGetProperty("x-readonly-after", out var after) && after.GetString() is { } s &&
         DocumentStatuses.Progress(status) > DocumentStatuses.Progress(s);
 

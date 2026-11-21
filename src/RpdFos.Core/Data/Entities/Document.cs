@@ -361,6 +361,21 @@ public static class DocumentTransitions
     public static bool CanBaseNew(string status) => status is DocumentStatuses.Approved or DocumentStatuses.Archived;
 
     /// <summary>
+    /// ФОС создаётся по РПД в любом статусе, кроме удалённого и архивного (этап 7, B3, решение 8): ФОС начинают, пока РПД ещё
+    /// пишется, а отправить его можно, когда РПД на проверке или дальше (B8).
+    /// </summary>
+    public static bool CanCreateFosFrom(string rpdStatus) => rpdStatus is not (DocumentStatuses.Deleted or DocumentStatuses.Archived);
+
+    /// <summary>
+    /// «Обновить из РПД» — автор ФОС в статусах правки и методист на проверке (этап 7, B3, решение 8): те же, в которых
+    /// правят содержимое. После отправки и приёма снимок закрыт, как и остальное содержимое.
+    /// </summary>
+    public static bool CanRefreshFromRpd(string status, bool isAuthor, bool isReviewer) =>
+        isAuthor && CanEdit(status, DocumentRole.Author) || isReviewer && CanEdit(status, DocumentRole.Reviewer);
+
+    public const string RefreshFromRpdAction = "обновить из РПД";
+
+    /// <summary>
     /// «Вернуть на исправление» — методист возвращает согласованный документ на проверку (этап 7, A8, решение 2). Другого
     /// пути к правке согласованного документа нет: после согласования она закрыта для всех. Время согласования
     /// сбрасывается, следующий приём начинает новый круг.

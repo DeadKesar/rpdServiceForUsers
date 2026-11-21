@@ -1,0 +1,118 @@
+@using System.Text.Json.Nodes
+@inherits FieldBase
+
+@* Данные РПД в ФОС (этап 7, B3; FR-DOC-19): снимок компетенций с индикаторами, разделов тематического плана и видов
+   промежуточной аттестации. Только для чтения — снимок заменяет кнопка «Обновить из РПД» на странице документа; из него
+   паспорт и оценочные средства берут индикаторы и разделы. *@
+@{
+    var link = Value as JsonObject;
+    var competences = (link?["competences"] as JsonArray)?.OfType<JsonObject>().ToList() ?? [];
+    var sections = (link?["sections"] as JsonArray)?.OfType<JsonObject>().ToList() ?? [];
+    var semesters = (link?["semesters"] as JsonArray)?.OfType<JsonObject>().ToList() ?? [];
+}
+<div class="mb-3">
+    <p class="text-muted small">
+        Наследуется из РПД: изменить здесь нельзя. Если РПД изменилась, над разделами появится пометка и кнопка «Обновить из РПД».
+    </p>
+
+    <h3 class="h6">Компетенции и индикаторы</h3>
+    @if (competences.Count == 0)
+    {
+        <p class="text-muted small">В РПД компетенции ещё не выбраны.</p>
+    }
+    else
+    {
+        <div class="table-responsive">
+            <table class="table table-sm align-top">
+                <thead><tr><th>Компетенция</th><th>Индикаторы</th></tr></thead>
+                <tbody>
+                    @foreach (var competence in competences)
+                    {
+                        var indicators = (competence["indicators"] as JsonArray)?.OfType<JsonObject>().ToList() ?? [];
+                        <tr>
+                            <td>
+                                <strong>@Text(competence["code"])</strong>
+                                <div class="small text-muted">@Text(competence["formulation"])</div>
+                            </td>
+                            <td>
+                                @if (indicators.Count == 0)
+                                {
+                                    <span class="text-muted small">индикаторы не выбраны</span>
+                                }
+                                @foreach (var indicator in indicators)
+                                {
+                                    <div><strong>@Text(indicator["code"])</strong> @Text(indicator["text"])</div>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+
+    <h3 class="h6 mt-3">Разделы дисциплины</h3>
+    @if (sections.Count == 0)
+    {
+        <p class="text-muted small">В тематическом плане РПД разделов ещё нет.</p>
+    }
+    else
+    {
+        <div class="table-responsive">
+            <table class="table table-sm align-top">
+                <thead><tr><th>№</th><th>Название</th><th>Семестры</th><th>Индикаторы</th><th>Формы текущего контроля</th></tr></thead>
+                <tbody>
+                    @foreach (var section in sections)
+                    {
+                        <tr>
+                            <td>@Text(section["number"])</td>
+                            <td>@Text(section["title"])</td>
+                            <td>@Join(section["semesters"])</td>
+                            <td>@Join(section["indicator_codes"])</td>
+                            <td>@Join(section["current_control_forms"])</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+
+    <h3 class="h6 mt-3">Промежуточная аттестация по семестрам</h3>
+    @if (semesters.Count == 0)
+    {
+        <p class="text-muted small">Семестров в РПД нет.</p>
+    }
+    else
+    {
+        <div class="table-responsive">
+            <table class="table table-sm align-top">
+                <thead><tr><th>Семестр</th><th>Вид аттестации</th></tr></thead>
+                <tbody>
+                    @foreach (var semester in semesters)
+                    {
+                        <tr>
+                            <td>@Text(semester["number"])</td>
+                            <td>@ControlTypes(semester["control_types"])</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</div>
+
+@code {
+    // Названия видов аттестации — как в РПД; «зачёт с оценкой» в ФОС называется дифференцированным зачётом (Положение о ФОС).
+    private static readonly Dictionary<string, string> ControlTitles = new()
+    {
+        ["exam"] = "Экзамен", ["credit"] = "Зачёт", ["graded_credit"] = "Дифференцированный зачёт",
+        ["course_project"] = "Курсовой проект", ["course_work"] = "Курсовая работа"
+    };
+
+    private static string Join(JsonNode? list) =>
+        list is JsonArray items ? string.Join(", ", items.Select(i => i?.ToString())) : "";
+
+    private static string ControlTypes(JsonNode? list) => list is JsonArray { Count: > 0 } items
+        ? string.Join(", ", items.Select(i => ControlTitles.GetValueOrDefault(i?.ToString() ?? "") ?? i?.ToString()))
+        : "—";
+}

@@ -13,16 +13,17 @@
     "linked_rpd": {
       "type": "object",
       "title": "Связь с РПД",
-      "description": "Документ РПД и снимок наследуемых из неё данных на момент создания ФОС или обновления из РПД",
+      "description": "Документ РПД и снимок наследуемых из неё данных на момент создания ФОС или обновления из РПД. Раздел целиком только для чтения: снимок меняет лишь «Обновить из РПД» (x-readonly, а не readOnly: это не поле учебного плана)",
+      "x-readonly": true,
+      "x-ui-widget": "linked_rpd",
       "required": ["rpd_document_id", "rpd_version"],
       "properties": {
         "rpd_document_id": { "type": "string", "format": "uuid" },
         "rpd_version": { "type": "integer" },
-        "snapshot_at": { "type": "string", "format": "date-time", "readOnly": true, "description": "Когда снят снимок данных РПД" },
+        "snapshot_at": { "type": "string", "format": "date-time", "description": "Когда снят снимок данных РПД" },
         "competences": {
           "type": "array",
           "title": "Компетенции и индикаторы РПД",
-          "readOnly": true,
           "items": {
             "type": "object",
             "required": ["code", "indicators"],
@@ -47,7 +48,6 @@
           "type": "array",
           "title": "Разделы РПД",
           "description": "Из тематического плана: название раздела для паспорта — темы раздела через запятую",
-          "readOnly": true,
           "items": {
             "type": "object",
             "required": ["number"],
@@ -64,7 +64,6 @@
         "semesters": {
           "type": "array",
           "title": "Виды промежуточной аттестации по семестрам РПД",
-          "readOnly": true,
           "items": {
             "type": "object",
             "required": ["number"],

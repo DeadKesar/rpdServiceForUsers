@@ -219,25 +219,19 @@ public class DocumentsApiTests(DatabaseFixture app)
     }
 
     [Fact]
-    public async Task Only_published_rpd_template_creates_documents()
+    public async Task Only_a_published_template_creates_documents()
     {
+        // ФОС по шаблону ФОС создаётся с этапа 7 (B3) — по РПД; его проверки — в FosCreationApiTests.
         var (client, _) = await TeacherAsync();
-        var planId = await app.RealPlanIdAsync();
-        DocumentTemplate? draft = null, fos = null;
-        await app.WithDbAsync(async db =>
-        {
-            draft = await TemplateData.AddDraftAsync(db);
-            fos = await TemplateData.AddPublishedAsync(db, planId, DocumentTypeRegistry.Fos);
-        });
+        DocumentTemplate? draft = null;
+        await app.WithDbAsync(async db => draft = await TemplateData.AddDraftAsync(db));
         var discipline = await DisciplineAsync("Б1.О.05");
 
         var fromDraft = await client.PostAsJsonAsync("/api/documents", new CreateDocumentRequest(draft!.Id, discipline));
-        var fromFos = await client.PostAsJsonAsync("/api/documents", new CreateDocumentRequest(fos!.Id, discipline));
         var foreign = await client.PostAsJsonAsync("/api/documents",
             new CreateDocumentRequest((await PublishedTemplateAsync()).Id, Guid.NewGuid()));
 
         Assert.Equal(HttpStatusCode.UnprocessableEntity, fromDraft.StatusCode);
-        Assert.Equal(HttpStatusCode.UnprocessableEntity, fromFos.StatusCode);
         Assert.Equal(HttpStatusCode.UnprocessableEntity, foreign.StatusCode);
     }
 

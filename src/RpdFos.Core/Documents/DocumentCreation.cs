@@ -30,7 +30,28 @@ public enum DocumentCreationProblem
     /// Основа — документ другой дисциплины того же плана (A11): на основе создают для той же дисциплины или для дисциплины
     /// другого плана (решение 4) — 422.
     /// </summary>
-    BaseSamePlan
+    BaseSamePlan,
+
+    /// <summary>ФОС: названная РПД не найдена, удалена или документ не РПД (этап 7, B3) — 422.</summary>
+    RpdNotFound,
+
+    /// <summary>ФОС: названная РПД — другой дисциплины, чем в запросе (B3) — 422.</summary>
+    RpdOtherDiscipline,
+
+    /// <summary>
+    /// ФОС создаёт автор РПД или закреплённый за дисциплиной (B3, решение 5): у дисциплины без закреплений посторонний
+    /// преподаватель — 403.
+    /// </summary>
+    RpdNotAvailable,
+
+    /// <summary>РПД в архиве: ФОС по архивной РПД не создаётся (решение 8) — 409.</summary>
+    RpdArchived,
+
+    /// <summary>У дисциплины нет РПД, по которой можно создать ФОС: не создана, удалена или в архиве (B3) — 409.</summary>
+    NoRpd,
+
+    /// <summary>ФОС «на основе» другого документа появится вместе с циклом ФОС (B10) — 422.</summary>
+    BaseNotSupported
 }
 
 public sealed record DocumentCreationResult(Document? Document, DocumentCreationProblem? Problem = null, string? Detail = null,
@@ -62,9 +83,17 @@ public static class DocumentRules
 /// Создание документа по опубликованному шаблону для дисциплины его плана: проверки, предзаполнение, нормализованные
 /// таблицы и первая запись истории статусов — одним сохранением. «Создать на основе» (этап 7, A11) — то же создание, где
 /// к предзаполнению из плана добавляется перенос ввода автора из документа-основы (<see cref="DocumentBasing"/>).
+/// <para>
+/// ФОС (этап 7, B3; FR-DOC-19, решения 5 и 8) создаётся по РПД той же дисциплины — не удалённой и не архивной, в любом другом
+/// статусе. Создаёт автор РПД или закреплённый за дисциплиной (у дисциплины с закреплениями — только закреплённые, как у любого
+/// документа, A10); методист и администратор — «за кафедру». К титулу из плана добавляется снимок данных РПД
+/// (<see cref="FosSnapshot"/>), а составителем становится автор ФОС. Правило «один незавершённый документ на дисциплину и
+/// линию редакций» действует и здесь: линия у ФОС своя, поэтому РПД и ФОС дисциплины друг другу не мешают.
+/// </para>
 /// </summary>
 public sealed class DocumentCreation(
-    AppDbContext db, DocumentTypeRegistry registry, DocumentProjections projections, DisciplineAssignments assignments, TimeProvider clock)
+    AppDbContext db, DocumentTypeRegistry registry, DocumentProjections projections, DisciplineAssignments assignments,
+    LinkedDocuments links, TimeProvider clock)
 {
     private static readonly JsonSerializerOptions Json = new() { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
 
@@ -76,10 +105,15 @@ public sealed class DocumentCreation(
     /// </param>
     /// <param name="basedOnId">
     /// Документ-основа (этап 7, A11; решение 4): неудалённый документ того же типа — для той же дисциплины или для дисциплины
-    /// другого плана. У дисциплины с согласованным документом новый создаётся только на основе согласованного.
+    /// другого плана. У дисциплины с согласованным документом новый создаётся только на основе согласованного. ФОС на основе
+    /// другого документа создаётся в цикле ФОС (B10): пока отказ.
+    /// </param>
+    /// <param name="rpdId">
+    /// РПД, по которой создаётся ФОС (этап 7, B3). Не названа — берётся РПД дисциплины
+    /// (<see cref="LinkedDocuments.DefaultRpdAsync"/>). У шаблона РПД не используется.
     /// </param>
     public async Task<DocumentCreationResult> CreateAsync(
-        Guid templateId, Guid disciplineId, Guid authorId, bool isCorrector = false, Guid? basedOnId = null,
+        Guid templateId, Guid disciplineId, Guid authorId, bool isCorrector = false, Guid? basedOnId = null, Guid? rpdId = null,
         CancellationToken ct = default)
     {
         var template = await db.DocumentTemplates.AsNoTracking().SingleOrDefaultAsync(t => t.Id == templateId, ct);
@@ -87,8 +121,9 @@ public sealed class DocumentCreation(
         if (template.Status != TemplateStatuses.Published)
             return new(null, DocumentCreationProblem.TemplateNotPublished,
                 $"Шаблон в статусе «{TemplateStatuses.Title(template.Status)}»: документы создаются только по опубликованному.");
-        if (template.Type != TemplateTypes.Rpd)
-            return new(null, DocumentCreationProblem.TypeNotSupported, "ФОС создаются на этапе 6; сейчас — только РПД.");
+        if (template.Type is not (TemplateTypes.Rpd or TemplateTypes.Fos))
+            return new(null, DocumentCreationProblem.TypeNotSupported, $"Документы типа «{template.Type}» не создаются.");
+        var isFos = template.Type == TemplateTypes.Fos;
 
         var facts = await DisciplineFacts.LoadAsync(db, disciplineId, ct);
         if (facts is null) return new(null, DocumentCreationProblem.DisciplineNotFound);
@@ -99,9 +134,40 @@ public sealed class DocumentCreation(
 
         // Закрепления — до проверки «документ уже есть»: чужому преподавателю закреплённая дисциплина отвечает отказом доступа,
         // а не рассказом о документе, к которому у него нет доступа (как «в архив» чужого документа, A9).
-        if (!isCorrector && await assignments.HoldersAsync(disciplineId, ct) is { Count: > 0 } holders &&
-            holders.All(h => h.EmployeeId != authorId))
+        IReadOnlyList<AssignmentHolder> holders = isCorrector ? [] : await assignments.HoldersAsync(disciplineId, ct);
+        if (holders.Count > 0 && holders.All(h => h.EmployeeId != authorId))
             return new(null, DocumentCreationProblem.DisciplineAssigned, DisciplineAssignments.Refusal(holders));
+
+        // РПД для ФОС (этап 7, B3). Порядок отказов: не найдена (422), недоступна (403), другой дисциплины (422), в архиве (409) —
+        // доступ раньше данных, данные запроса раньше состояния. Без закреплений ФОС создаёт автор РПД; с закреплениями — только
+        // закреплённые, это проверено выше.
+        Document? rpd = null;
+        if (isFos)
+        {
+            if (basedOnId is not null)
+                return new(null, DocumentCreationProblem.BaseNotSupported,
+                    "ФОС на основе другого документа создаётся в цикле ФОС и пока недоступен: создайте ФОС по РПД.");
+            if (rpdId is Guid named)
+            {
+                rpd = await db.Documents.AsNoTracking().SingleOrDefaultAsync(d => d.Id == named && d.Type == TemplateTypes.Rpd, ct);
+                if (rpd is null)
+                    return new(null, DocumentCreationProblem.RpdNotFound, "РПД не найдена: возможно, она удалена. ФОС создаётся по РПД.");
+            }
+            else
+            {
+                rpd = await links.DefaultRpdAsync(disciplineId, ct);
+                if (rpd is null)
+                    return new(null, DocumentCreationProblem.NoRpd,
+                        "У дисциплины нет РПД, по которой можно создать ФОС: она не создана, удалена или в архиве. Сначала создайте РПД.");
+            }
+            if (!isCorrector && holders.Count == 0 && rpd.AuthorId != authorId)
+                return new(null, DocumentCreationProblem.RpdNotAvailable,
+                    "ФОС создаёт автор РПД или сотрудник, закреплённый за дисциплиной: обратитесь к методисту.");
+            if (rpd.DisciplineId != disciplineId)
+                return new(null, DocumentCreationProblem.RpdOtherDiscipline, "РПД относится к другой дисциплине, чем выбрана для ФОС.");
+            if (rpd.Status == DocumentStatuses.Archived)
+                return new(null, DocumentCreationProblem.RpdArchived, "РПД в архиве: ФОС по архивной РПД не создаётся.");
+        }
 
         // Основа (этап 7, A11). Порядок отказов: не найдена (422), недоступна (403), другого типа (422), другая дисциплина
         // того же плана (422) — данные запроса раньше состояния дисциплины (409), доступ раньше данных.
@@ -150,6 +216,12 @@ public sealed class DocumentCreation(
         var hidden = DocumentMetadata.Hidden(schema, facts.Semesters, registry.FindSchema);
         TemplateDefaults.Apply(payload, template.DefaultPayload, TemplateDefaults.Fields(schema, registry.FindSchema), hidden);
 
+        var now = clock.GetUtcNow();
+        // Титул — из плана (предзаполнение выше), наследуемое от РПД — снимком: связь, индикаторы, разделы, формы текущего
+        // контроля, виды аттестации (этап 7, B3). Паспорт и оценочные средства ведёт автор ФОС.
+        if (rpd is not null)
+            FosSnapshot.Apply(payload, rpd.Id, rpd.Version, now, FosSnapshot.Take(JsonNode.Parse(rpd.Payload)));
+
         // Ввод автора основы — поверх предзаполненного для цели; что не перенесено, попадёт в аудит и в плашку редактора.
         IReadOnlyList<string> notTransferred = [];
         if (basis is not null)
@@ -161,7 +233,6 @@ public sealed class DocumentCreation(
                 JsonNode.Parse(basis.Payload) as JsonObject ?? [], facts, author.Id, hidden, registry.FindSchema).NotTransferred;
         }
 
-        var now = clock.GetUtcNow();
         var document = new Document
         {
             Type = template.Type,

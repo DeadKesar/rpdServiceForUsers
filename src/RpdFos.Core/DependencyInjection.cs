@@ -51,6 +51,9 @@ public static class DependencyInjection
         services.AddSingleton<IValidationRule, LiteratureYearNotFuture>();
         services.AddSingleton<ValidationRuleSet>();
         services.AddScoped<DocumentProjections>();
+        // Связь ФОС и РПД (этап 7, B3): создание ФОС, чтение связанной РПД автором ФОС, обновление снимка.
+        services.AddScoped<LinkedDocuments>();
+        services.AddScoped<FosRefresh>();
         services.AddScoped<DocumentCreation>();
         services.AddScoped<DocumentHistory>();
         services.AddScoped<DocumentNotifications>();

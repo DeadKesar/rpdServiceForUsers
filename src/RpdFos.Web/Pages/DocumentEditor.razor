@@ -84,6 +84,69 @@ else
         </div>
     }
 
+    @* ФОС и РПД (этап 7, B3; FR-DOC-19). У ФОС — связанная РПД (автор ФОС читает её, не правя) и пометка «РПД изменилась» с
+       кнопкой «Обновить из РПД»: наследуемое от РПД — снимок. *@
+    @if (details.LinkedRpd is { } rpd)
+    {
+        <div class="alert @(rpd.Changed ? "alert-warning" : "alert-secondary") py-2" role="status">
+            Создан по РПД
+            @if (rpd.CanOpen)
+            {
+                <a href="@($"documents/{rpd.Id}")">«@(rpd.Title ?? "РПД")»</a>
+            }
+            else
+            {
+                <span>«@(rpd.Title ?? "РПД")»</span>
+            }
+            <span class="text-muted">(@rpd.StatusTitle.ToLowerInvariant())</span>.
+            @if (rpd.Deleted)
+            {
+                <div class="small">РПД удалена: в ФОС остались данные последнего снимка, обновлять их не из чего.</div>
+            }
+            else
+            {
+                <div class="small text-muted">
+                    Данные РПД в ФОС — снимок@(rpd.SnapshotAt is { } snapshotAt ? $" от {snapshotAt.ToLocalTime():dd.MM.yyyy HH:mm}" : "")
+                    (версия РПД @rpd.SnapshotVersion@(rpd.CurrentVersion is { } current ? $", сейчас {current}" : "")).
+                </div>
+            }
+            @if (rpd.Changed)
+            {
+                <div class="mt-1">
+                    <span class="badge text-bg-warning" title="Индикаторы, разделы, формы текущего контроля или виды аттестации РПД отличаются от снимка в этом ФОС">РПД изменилась</span>
+                    @if (details.Actions.RefreshFromRpd)
+                    {
+                        <button class="btn btn-sm btn-warning ms-2" disabled="@(busy || conflict)" @onclick="RefreshFromRpdAsync">Обновить из РПД</button>
+                    }
+                    else
+                    {
+                        <span class="small ms-1">Обновляет данные автор ФОС, пока документ в работе, или методист на проверке.</span>
+                    }
+                </div>
+            }
+        </div>
+    }
+    @if (details.LinkedFos is { Count: > 0 } fosList)
+    {
+        <div class="alert alert-secondary py-2" role="status">
+            ФОС по этой РПД:
+            @foreach (var fos in fosList)
+            {
+                <div>
+                    @if (fos.CanOpen)
+                    {
+                        <a href="@($"documents/{fos.Id}")">«@fos.Title»</a>
+                    }
+                    else
+                    {
+                        <span>«@fos.Title»</span>
+                    }
+                    <span class="text-muted">· @fos.StatusTitle.ToLowerInvariant() · @fos.AuthorName</span>
+                </div>
+            }
+        </div>
+    }
+
     <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
         @if (details.Editable)
         {
@@ -129,6 +192,11 @@ else
         @if (details.Actions.CreateBasedOn)
         {
             <a class="btn btn-outline-primary @(busy ? "disabled" : "")" href="@($"documents/new?basedOn={Id}")">Создать на основе</a>
+        }
+        @* «Создать ФОС» (этап 7, B3; S-11): тип и РПД названы, остаётся выбрать шаблон ФОС плана, если их несколько. *@
+        @if (details.Actions.CreateFos)
+        {
+            <a class="btn btn-outline-primary @(busy ? "disabled" : "")" href="@($"documents/new?type=fos&rpd={Id}")">Создать ФОС</a>
         }
         @if (details.Actions.Approve)
         {
@@ -811,6 +879,16 @@ else
                 "а по дисциплине можно будет создать новый документ. Из архива документ вернёт только администратор.",
                 "Отправка в архив")) return;
         await ChangeStatusAsync("archive", new { version }, "Документ отправлен в архив.");
+    }
+
+    // «Обновить из РПД» (этап 7, B3, решение 8): сначала сохраняется открытый раздел, затем снимок заменяется нынешними данными
+    // РПД. Паспорт и оценочные средства не меняются — ответ называет, что исчезло из РПД и что проверить.
+    private async Task RefreshFromRpdAsync()
+    {
+        if (!await confirm.AskAsync("Данные РПД в ФОС будут заменены нынешними: индикаторы, разделы, формы текущего контроля и виды " +
+                "аттестации. Строки паспорта и оценочных средств останутся как есть. Обновить?", "Обновление из РПД")) return;
+        if (!await SaveSectionAsync()) return;
+        await ChangeStatusAsync("refresh-from-rpd", new { version }, "Данные РПД обновлены.", r => r.Notice ?? "Данные РПД обновлены.");
     }
 
     private Task OnTransferSearchKeyAsync(KeyboardEventArgs e) => e.Key == "Enter" ? SearchTeachersAsync() : Task.CompletedTask;

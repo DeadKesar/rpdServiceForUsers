@@ -54,6 +54,13 @@ public static class AuditEvents
     public const string DocumentBasedOn = "document.based_on", DocumentOutdated = "document.outdated";
 
     /// <summary>
+    /// «Обновить из РПД» в ФОС (этап 7, B3; NFR-SEC-07): объект — ФОС, в содержимом <c>{ "rpd", "from_version", "to_version",
+    /// "added_indicators", "removed_indicators", "added_sections", "removed_sections" }</c> — РПД, версии, с которой снят прежний
+    /// снимок и нынешней, и что в снимке добавилось и исчезло.
+    /// </summary>
+    public const string RpdSnapshotRefreshed = "document.rpd_snapshot_refreshed";
+
+    /// <summary>
     /// Закрепление дисциплины за сотрудником и его снятие (этап 7, A10; NFR-SEC-07): объект — дисциплина, в содержимом
     /// <c>{ "employee" }</c> — закреплённый. Закрепление при передаче документа (A9) — ещё <c>"document"</c>: документ, из-за
     /// которого оно появилось.

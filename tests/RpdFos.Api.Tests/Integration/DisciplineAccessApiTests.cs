@@ -39,10 +39,11 @@ public class DisciplineAccessApiTests(DatabaseFixture fixture) : AssignmentTestB
 
         await AssignedAsync(methodist, holderRecord, ids);
 
-        // Закреплённому документ открыт — только для чтения: ни правки, ни действий; замечания он читает.
+        // Закреплённому документ открыт — только для чтения: ни правки, ни действий с самим документом; замечания он читает.
+        // Новый ФОС по этой РПД создать может (этап 7, B3, решение 5).
         var seen = await DetailsAsync(holder, id);
         Assert.Equal((id, authorRecord.Id, false), (seen.Document.Id, seen.Document.AuthorId, seen.Editable));
-        Assert.Equal(new DocumentActions(Submit: false, Review: false, ResolveComments: false, Print: false), seen.Actions);
+        Assert.Equal(new DocumentActions(Submit: false, Review: false, ResolveComments: false, Print: false, CreateFos: true), seen.Actions);
         await ExpectStatusAsync(HttpStatusCode.OK, holder.GetAsync(Url(id, "comments")));
         foreach (var path in new[] { "", "comments" })
             await ExpectStatusAsync(HttpStatusCode.Forbidden, stranger.GetAsync(Url(id, path)));

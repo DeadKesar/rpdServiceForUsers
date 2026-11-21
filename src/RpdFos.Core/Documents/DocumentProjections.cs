@@ -78,7 +78,7 @@ public sealed class DocumentProjections(AppDbContext db)
             .ToDictionaryAsync(i => (i.CompetenceId, i.Code), i => i.Id, ct);
 
         var wanted = new HashSet<(Guid? Competence, Guid? Indicator)>();
-        if (payload.TryGetProperty("competences", out var competences) && competences.ValueKind == JsonValueKind.Array)
+        if (CompetencesOf(payload) is { ValueKind: JsonValueKind.Array } competences)
             foreach (var c in competences.EnumerateArray())
             {
                 if (Text(c, "code") is not { } code || !candidates.TryGetValue(code, out var competenceId)) continue;
@@ -98,6 +98,17 @@ public sealed class DocumentProjections(AppDbContext db)
             new DocumentCompetenceLink { DocumentId = document.Id, CompetenceId = w.Competence, IndicatorId = w.Indicator }));
         return result;
     }
+
+    /// <summary>
+    /// Компетенции с выбранными индикаторами: у РПД — раздел <c>competences</c>, у ФОС — снимок РПД в <c>linked_rpd</c>
+    /// (этап 7, B3: часов у ФОС нет, связи с индикаторами берутся из снимка). Снимок — копия данных РПД, в нём тот же вид:
+    /// код, индикаторы с кодами.
+    /// </summary>
+    private static JsonElement? CompetencesOf(JsonElement payload) =>
+        payload.TryGetProperty("competences", out var own) ? own
+        : payload.TryGetProperty("linked_rpd", out var link) && link.ValueKind == JsonValueKind.Object &&
+          link.TryGetProperty("competences", out var snapshot) ? snapshot
+        : null;
 
     private static int? Int(JsonElement node, string name) =>
         node.ValueKind == JsonValueKind.Object && node.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Number &&
