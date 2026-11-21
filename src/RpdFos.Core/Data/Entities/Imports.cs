@@ -46,7 +46,9 @@ public class ParserRun
 public static class UploadedFileTypes
 {
     public const string CurriculumPlan = "curriculum_plan", CompetenceMatrix = "competence_matrix",
-        CompetenceReference = "competence_reference", Employees = "employees", Other = "other";
+        CompetenceReference = "competence_reference", Employees = "employees", Other = "other",
+        // Рисунок в форматированном тексте документа (этап 7, B4а): PNG или JPEG, связь с документом — document_images.
+        Image = "image";
 }
 
 public static class ParserRunStatuses

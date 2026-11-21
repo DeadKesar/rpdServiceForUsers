@@ -1,8 +1,11 @@
 @using System.Text.Json.Nodes
 @using System.Text.RegularExpressions
+@using Microsoft.AspNetCore.Components.WebAssembly.Authentication
 @inherits FieldBase
+@implements IDisposable
 @inject DialogService DialogService
 @inject NotificationService Notifications
+@inject IAccessTokenProvider TokenProvider
 
 @* Форматированный текст: полужирный, курсив, списки и таблицы (решение этапа 4 и B4 этапа 7); разметку на сервере
    чистит санитайзер. Таблица: своя кнопка со вставкой (диалог «строк, столбцов, заголовок») и команды Radzen над
@@ -18,12 +21,20 @@
     {
         <RadzenHtmlEditor @ref="editor" Value="@(Text(Value) ?? "")" Input="@((string html) => OnInput(html))"
                           ValueChanged="@((string html) => OnChanged(html))" TableStrings="@TableTexts"
+                          UploadUrl="@UploadUrl" UploadHeaders="@uploadHeaders" UploadError="@OnUploadError"
                           Execute="@OnExecute" Style="height: 220px;">
             <RadzenHtmlEditorBold Title="Полужирный" />
             <RadzenHtmlEditorItalic Title="Курсив" />
             <RadzenHtmlEditorUnorderedList Title="Маркированный список" />
             <RadzenHtmlEditorOrderedList Title="Нумерованный список" />
             <RadzenHtmlEditorSeparator />
+            @* Рисунок — только из файла: адреса не принимаются. У значений по умолчанию шаблона документа нет, рисунки не вставляются. *@
+            @if (Context.DocumentId is not null)
+            {
+                <RadzenHtmlEditorImage Title="Рисунок" SelectText="Файл рисунка (PNG или JPEG, до 2 МБ)" UploadChooseText="Выбрать файл"
+                                       ShowSrc="false" AltText="Описание рисунка (необязательно)" OkText="Вставить" CancelText="Отмена"
+                                       WidthText="Ширина, точек" HeightText="Высота, точек" />
+            }
             @* Таблицы в ячейке таблицы не бывает: в ячейке кнопка недоступна. *@
             <RadzenHtmlEditorCustomTool CommandName="@InsertTable" Icon="table_chart" Title="Таблица"
                                         Disabled="@(editor?.TableSelection?.InTable == true)" />
@@ -49,6 +60,14 @@
             объединение ячеек; цвет, ширина и выравнивание не сохраняются — печатается таблица с рамками на всю ширину.
             Таблицы внутри ячейки нет: вставленная туда таблица становится текстом.
         </div>
+        @if (Context.DocumentId is not null)
+        {
+            <div class="form-text">
+                Рисунки — PNG и JPEG, до 2 МБ, не больше 100 на документ; вставляются из файла, из буфера и перетаскиванием,
+                размер меняется ручками на рисунке. Подпись «Рисунок N» пишется текстом. Формулу можно вставить рисунком.
+                Рисунок из Word вместе с текстом не переносится — вставьте его отдельно.
+            </div>
+        }
     }
 </div>
 
@@ -63,10 +82,51 @@
     private void OnInput(string? html) => InputValue(Html(html));
 
     // Пустой редактор отдаёт «<br>» или пустой абзац — это не текст: поле удаляется из содержимого.
-    // Таблица без текста — не пустое поле: она пока без слов, но уже есть.
+    // Таблица без текста и рисунок без слов — не пустое поле: слов пока нет, но содержимое уже есть.
     private static JsonValue? Html(string? html) =>
-        string.IsNullOrWhiteSpace(Regex.Replace(html ?? "", "<[^>]*>|&nbsp;", "")) && !Regex.IsMatch(html ?? "", "<table", RegexOptions.IgnoreCase)
+        string.IsNullOrWhiteSpace(Regex.Replace(html ?? "", "<[^>]*>|&nbsp;", "")) && !Regex.IsMatch(html ?? "", "<(table|img)", RegexOptions.IgnoreCase)
             ? null : JsonValue.Create(html);
+
+    // ---- Рисунки (этап 7, B4а) ----
+    // Редактор Radzen сам загружает файл на этот адрес (из диалога, из буфера, перетаскиванием) и вставляет <img> с адресом из
+    // ответа. Загрузка идёт с токеном: заголовки берутся при каждой загрузке, поэтому токен обновляется по таймеру.
+    private string? UploadUrl => Context.DocumentId is { } id ? $"/api/documents/{id}/images" : null;
+
+    private Dictionary<string, string> uploadHeaders = [];
+    private System.Threading.Timer? tokenTimer;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (Context.DocumentId is null || ReadOnly) return;
+        await RefreshTokenAsync();
+        tokenTimer = new System.Threading.Timer(_ => _ = InvokeAsync(RefreshTokenAsync), null, TimeSpan.FromMinutes(4), TimeSpan.FromMinutes(4));
+    }
+
+    private async Task RefreshTokenAsync()
+    {
+        var result = await TokenProvider.RequestAccessToken();
+        if (result.TryGetToken(out var token))
+            uploadHeaders = new Dictionary<string, string> { ["Authorization"] = $"Bearer {token.Value}" };
+    }
+
+    // Ответ сервера — ProblemDetails с причиной на русском («Рисунок больше 2 МБ»); иное показывается как есть.
+    private void OnUploadError(UploadErrorEventArgs args)
+    {
+        var message = args.Message ?? "";
+        try
+        {
+            if (System.Text.Json.JsonDocument.Parse(message).RootElement is { ValueKind: System.Text.Json.JsonValueKind.Object } root &&
+                root.TryGetProperty("detail", out var detail) && detail.GetString() is { Length: > 0 } text)
+                message = text;
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            message = "Не удалось загрузить рисунок. Проверьте связь и повторите.";
+        }
+        Notifications.Notify(NotificationSeverity.Warning, "Рисунок не вставлен", message);
+    }
+
+    public void Dispose() => tokenTimer?.Dispose();
 
     private async Task OnExecute(HtmlEditorExecuteEventArgs args)
     {

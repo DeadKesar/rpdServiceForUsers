@@ -8,7 +8,8 @@ namespace RpdFos.Core.Documents;
 /// <summary>
 /// Санитайзер форматированного текста документа (NFR-SEC-10) — только на сервере, клиенту не доверяем.
 /// Белый список: абзацы, перенос строки, полужирный, курсив, маркированный и нумерованный списки, таблицы
-/// (строки, ячейки, объединение ячеек) — без стилей, ссылок и прочих атрибутов. Остальная разметка снимается,
+/// (строки, ячейки, объединение ячеек) и рисунки (только собственный адрес, размер, описание) — без стилей, ссылок и
+/// прочих атрибутов. Остальная разметка снимается,
 /// текст внутри неё сохраняется (вставка из Word не теряет слов); содержимое исполняемых и служебных элементов
 /// удаляется целиком.
 /// </summary>
@@ -19,7 +20,9 @@ public sealed partial class RichTextSanitizer
         "p", "br", "strong", "b", "em", "i", "ul", "ol", "li",
         // Группы строк — не ради оформления: разбор HTML (браузер, редактор) создаёт их сам, и без них структура
         // таблицы после повторного разбора менялась бы.
-        "table", "thead", "tbody", "tfoot", "tr", "th", "td"
+        "table", "thead", "tbody", "tfoot", "tr", "th", "td",
+        // Рисунок (этап 7, B4а): адрес, размер и описание проверяет Images; остальные атрибуты снимаются.
+        "img"
     };
 
     /// <summary>
@@ -29,6 +32,15 @@ public sealed partial class RichTextSanitizer
     public const int MaxSpan = 100;
 
     private static readonly string[] SpanAttributes = ["colspan", "rowspan"];
+
+    /// <summary>Наибольший размер рисунка в разметке, точек: как наибольшая сторона принимаемого файла.</summary>
+    public const int MaxImageSide = ImageFiles.MaxSide;
+
+    private const int MaxAltLength = 500;
+
+    // Адрес рисунка целиком: только собственный путь системы и номер; внешние адреса, data: и file: не подходят.
+    [GeneratedRegex("^/api/images/[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}$", RegexOptions.CultureInvariant)]
+    private static partial Regex ImageAddress();
 
     // Их содержимое — не текст документа: код, стили, встроенные объекты.
     private static readonly HashSet<string> DroppedWithContent =
@@ -44,6 +56,9 @@ public sealed partial class RichTextSanitizer
     [GeneratedRegex("^[0-9]{1,3}$")]
     private static partial Regex Digits();
 
+    [GeneratedRegex("^[0-9]{1,5}$")]
+    private static partial Regex Digits5();
+
     private readonly HtmlSanitizer _sanitizer;
 
     public RichTextSanitizer()
@@ -54,6 +69,8 @@ public sealed partial class RichTextSanitizer
         _sanitizer.AllowedAttributes.Clear();
         // Список атрибутов общий для всех элементов; «только у ячеек и только числом» проверяет Tables.
         _sanitizer.AllowedAttributes.UnionWith(SpanAttributes);
+        // Атрибуты рисунка: «только у img» и значения проверяет Images — так же, как объединение ячеек у Tables.
+        _sanitizer.AllowedAttributes.UnionWith(["src", "width", "height", "alt"]);
         _sanitizer.AllowedCssProperties.Clear();
         _sanitizer.AllowedAtRules.Clear();
         _sanitizer.AllowedClasses.Clear();
@@ -66,9 +83,58 @@ public sealed partial class RichTextSanitizer
         };
     }
 
-    /// <summary>Безопасная разметка из присланной клиентом; null и пустая строка — как есть.</summary>
-    public string? Sanitize(string? html) =>
-        string.IsNullOrEmpty(html) ? html : Tables(_sanitizer.Sanitize(StylesToTags(html))).Trim();
+    /// <summary>
+    /// Безопасная разметка из присланной клиентом; null и пустая строка — как есть.
+    /// </summary>
+    /// <param name="keepImage">
+    /// Остаётся ли рисунок с этим номером (связан с документом или читается правящим); без предиката остаются все
+    /// рисунки с правильным адресом. Рисунок с чужим адресом снимается в любом случае.
+    /// </param>
+    public string? Sanitize(string? html, Func<Guid, bool>? keepImage = null) =>
+        string.IsNullOrEmpty(html) ? html : Images(Tables(_sanitizer.Sanitize(StylesToTags(html))), keepImage).Trim();
+
+    /// <summary>
+    /// Рисунки после белого списка: адрес — только <c>/api/images/{номер}</c>, <c>width</c> и <c>height</c> — целые числа
+    /// от 1 до <see cref="MaxImageSide"/>, <c>alt</c> — текст; иное снимается, а рисунок с чужим адресом, <c>data:</c>,
+    /// <c>file:</c> или не из разрешённых — убирается целиком. У остальных элементов размеров нет.
+    /// </summary>
+    private static string Images(string html, Func<Guid, bool>? keep)
+    {
+        if (!html.Contains("<img", StringComparison.OrdinalIgnoreCase) && !html.Contains("width=", StringComparison.OrdinalIgnoreCase) &&
+            !html.Contains("height=", StringComparison.OrdinalIgnoreCase))
+            return html;
+        var body = new HtmlParser().ParseDocument("").Body!;
+        body.InnerHtml = html;
+
+        foreach (var element in body.QuerySelectorAll("[width], [height], [src], [alt]").Where(e => e.LocalName != "img").ToList())
+            foreach (var name in new[] { "width", "height", "src", "alt" }) element.RemoveAttribute(name);
+
+        foreach (var image in body.QuerySelectorAll("img").ToList())
+        {
+            var source = image.GetAttribute("src")?.Trim() ?? "";
+            if (!ImageAddress().IsMatch(source) || !Guid.TryParse(source["/api/images/".Length..], out var id) ||
+                keep is not null && !keep(id))
+            {
+                image.Remove();
+                continue;
+            }
+            foreach (var name in image.Attributes.Select(a => a.Name).Where(n => n is not ("src" or "width" or "height" or "alt")).ToList())
+                image.RemoveAttribute(name);
+            image.SetAttribute("src", DocumentImages.Address(id));
+            foreach (var name in new[] { "width", "height" })
+            {
+                if (image.GetAttribute(name) is not { } value) continue;
+                if (Digits5().IsMatch(value) && int.Parse(value) is var size and >= 1 and <= MaxImageSide)
+                    image.SetAttribute(name, size.ToString());
+                else image.RemoveAttribute(name);
+            }
+            // Описание — простой текст: угловые скобки в значении атрибута безвредны, но разметке в нём делать нечего.
+            var alt = image.GetAttribute("alt")?.Replace("<", "").Replace(">", "").Trim();
+            if (string.IsNullOrEmpty(alt)) image.RemoveAttribute("alt");
+            else image.SetAttribute("alt", alt.Length > MaxAltLength ? alt[..MaxAltLength] : alt);
+        }
+        return body.InnerHtml;
+    }
 
     /// <summary>
     /// Полужирный и курсив, заданные стилем, — в теги. Редактор Radzen (execCommand браузера) оформляет их

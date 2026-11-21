@@ -5,7 +5,7 @@ using RpdFos.Core.Documents;
 namespace RpdFos.Core.Printing;
 
 /// <summary>
-/// Форматированный текст документа (разметка после санитайзера: p, br, strong/b, em/i, ul, ol, li, table) — в блоки
+/// Форматированный текст документа (разметка после санитайзера: p, br, strong/b, em/i, ul, ol, li, table, img) — в блоки
 /// печатной формы. Текст вне абзацев — свой абзац, br — новый абзац, элементы списков — абзацы списка
 /// (вложенный список — тоже элементы, без уровней). Таблица — один блок: строки, ячейки с объединением и своими
 /// абзацами; вложенной таблицы санитайзер не оставляет, а пришедшая в ячейку иным путём печатается её текстом.
@@ -86,6 +86,9 @@ public static class RichTextBlocks
                 case IText text:
                     if (text.Data.Length > 0) _runs.Add(new PrintRun(text.Data, bold, italic));
                     break;
+                case IElement { LocalName: "img" } image:
+                    if (Image(image) is { } printed) _runs.Add(new PrintRun("", Image: printed));
+                    break;
                 case IElement { LocalName: "br" }:
                     Flush(PrintListKind.None, 0);
                     break;
@@ -103,11 +106,11 @@ public static class RichTextBlocks
         // Абзац из накопленных фрагментов; пробелы по краям абзаца не печатаются.
         private void Flush(PrintListKind kind, int listId)
         {
-            if (_runs.Count > 0 && !string.IsNullOrWhiteSpace(string.Concat(_runs.Select(r => r.Text))))
+            if (_runs.Count > 0 && (_runs.Any(r => r.Image is not null) || !string.IsNullOrWhiteSpace(string.Concat(_runs.Select(r => r.Text)))))
             {
                 _runs[0] = _runs[0] with { Text = _runs[0].Text.TrimStart() };
                 _runs[^1] = _runs[^1] with { Text = _runs[^1].Text.TrimEnd() };
-                _result.Add(new PrintParagraph(_runs.Where(r => r.Text.Length > 0).ToList(), kind, listId));
+                _result.Add(new PrintParagraph(_runs.Where(r => r.Text.Length > 0 || r.Image is not null).ToList(), kind, listId));
             }
             _runs = [];
         }
@@ -130,6 +133,16 @@ public static class RichTextBlocks
         private PrintTableCell Cell(IElement cell) =>
             new(new Reader(nextListId, tables: false).Read(cell).OfType<PrintParagraph>().ToList(),
                 Span(cell, "colspan"), Span(cell, "rowspan"), cell.LocalName == "th");
+
+        // Рисунок разметки: номер из собственного адреса и размер в точках, если он задан; чужой адрес санитайзер не оставил бы,
+        // а пришедший иным путём не печатается.
+        private static PrintImage? Image(IElement image) =>
+            DocumentImages.IdsIn(image.GetAttribute("src")).Cast<Guid?>().FirstOrDefault() is { } id
+                ? new PrintImage(id, Size(image, "width"), Size(image, "height"), image.GetAttribute("alt"))
+                : null;
+
+        private static int? Size(IElement image, string name) =>
+            int.TryParse(image.GetAttribute(name), out var size) && size > 0 ? size : null;
 
         private static int Span(IElement cell, string name) =>
             int.TryParse(cell.GetAttribute(name), out var span) ? Math.Clamp(span, 1, RichTextSanitizer.MaxSpan) : 1;

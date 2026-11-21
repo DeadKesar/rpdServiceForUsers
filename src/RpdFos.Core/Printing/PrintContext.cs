@@ -11,13 +11,16 @@ namespace RpdFos.Core.Printing;
 /// </summary>
 public sealed class PrintContext(
     JsonElement payload, JsonElement schema, Func<string, JsonElement?> resolve, DisciplineFacts facts,
-    SignatoryReport signatories, int year, IReadOnlyList<string> hiddenPaths)
+    SignatoryReport signatories, int year, IReadOnlyList<string> hiddenPaths, IReadOnlyDictionary<Guid, ImageInfo>? images = null)
 {
     private int _lists;
 
     public JsonElement Payload { get; } = payload;
     public DisciplineFacts Facts { get; } = facts;
     public SignatoryReport Signatories { get; } = signatories;
+
+    /// <summary>Рисунки документа по номеру файла (этап 7, B4а): содержимое и размер в точках.</summary>
+    public IReadOnlyDictionary<Guid, ImageInfo> Images { get; } = images ?? new Dictionary<Guid, ImageInfo>();
 
     /// <summary>Номер для нового списка: нумерация у каждого списка своя.</summary>
     public int NextListId() => ++_lists;

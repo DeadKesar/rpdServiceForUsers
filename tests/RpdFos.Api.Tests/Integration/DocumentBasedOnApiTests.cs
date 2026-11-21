@@ -352,6 +352,38 @@ public class DocumentBasedOnApiTests(DatabaseFixture fixture) : AssignmentTestBa
         Assert.True(JsonNode.DeepEquals(a, b), string.Join("/", path));
     }
 
+    [Fact]
+    public async Task Images_of_the_basis_are_the_same_files_linked_to_the_new_document_and_stay_after_the_basis_is_deleted()
+    {
+        // Этап 7, B4а: «Создать на основе» не копирует рисунки — новому документу добавляются связи с теми же файлами.
+        var (author, _) = await AccountAsync(App, AppRoles.Teacher);
+        var (stranger, _) = await AccountAsync(App, AppRoles.Teacher);
+        var source = await DocumentData.CreateAsync(App, author, (await DocumentData.PublishedTemplateAsync(App)).Id, "Б1.О.10");
+        var image = await DocumentImagesApiTests.UploadedAsync(author, source.Document.Id, Documents.TestImages.Png(seed: 70));
+        var tag = DocumentImagesApiTests.Tag(image.Id, "width=\"90\" alt=\"Схема\"");
+        await DocumentData.PatchAsync(author, source.Document.Id, "goals_and_objectives", source.Document.Version,
+            new JsonObject { ["goals"] = $"<p>Схема: {tag}</p>", ["objectives"] = new JsonArray("Изучить схему") });
+
+        var (otherTemplate, other) = await OtherPlanAsync("Б1.О.10");
+        var created = await CreatedAsync(author, otherTemplate.Id, other.Id, source.Document.Id);
+
+        var goals = (string)JsonNode.Parse(created.Payload.GetRawText())!["goals_and_objectives"]!["goals"]!;
+        Assert.Equal($"<p>Схема: {tag}</p>", goals);
+        await App.WithDbAsync(async db =>
+        {
+            Assert.Equal(new[] { source.Document.Id, created.Document.Id }.Order(),
+                (await db.DocumentImages.Where(i => i.FileId == image.Id).Select(i => i.DocumentId).ToListAsync()).Order());
+            Assert.Equal(1, await db.UploadedFiles.CountAsync(f => f.Id == image.Id));
+        });
+        Assert.Equal(HttpStatusCode.Forbidden, (await stranger.GetAsync(image.Url)).StatusCode);
+
+        // Основа удалена автором — рисунок открывается по новому документу.
+        var deleted = await author.DeleteAsync($"/api/documents/{source.Document.Id}?version={source.Document.Version + 1}");
+        Assert.True(deleted.IsSuccessStatusCode, await deleted.Content.ReadAsStringAsync());
+        Assert.Equal(HttpStatusCode.OK, (await author.GetAsync(image.Url)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await stranger.GetAsync(image.Url)).StatusCode);
+    }
+
     /// <summary>Согласие всех согласующих круга: заполнение, отправка, приём и отметки обоих электронных мест.</summary>
     private static async Task ApproveAsync(DocumentCircle c, DocumentDetails created)
     {

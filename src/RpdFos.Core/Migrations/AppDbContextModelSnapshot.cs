@@ -1354,6 +1354,29 @@ namespace RpdFos.Core.Migrations
                         });
                 });
 
+            modelBuilder.Entity("RpdFos.Core.Data.Entities.DocumentImage", b =>
+                {
+                    b.Property<Guid>("DocumentId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("document_id");
+
+                    b.Property<Guid>("FileId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("file_id");
+
+                    b.Property<DateTimeOffset>("LinkedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("linked_at");
+
+                    b.HasKey("DocumentId", "FileId")
+                        .HasName("pk_document_images");
+
+                    b.HasIndex("FileId")
+                        .HasDatabaseName("ix_document_images_file_id");
+
+                    b.ToTable("document_images", (string)null);
+                });
+
             modelBuilder.Entity("RpdFos.Core.Data.Entities.DocumentSignature", b =>
                 {
                     b.Property<Guid>("Id")
@@ -2714,6 +2737,23 @@ namespace RpdFos.Core.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
                         .HasConstraintName("fk_document_hours_documents_document_id");
+                });
+
+            modelBuilder.Entity("RpdFos.Core.Data.Entities.DocumentImage", b =>
+                {
+                    b.HasOne("RpdFos.Core.Data.Entities.Document", null)
+                        .WithMany()
+                        .HasForeignKey("DocumentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_document_images_documents_document_id");
+
+                    b.HasOne("RpdFos.Core.Data.Entities.UploadedFile", null)
+                        .WithMany()
+                        .HasForeignKey("FileId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_document_images_uploaded_files_file_id");
                 });
 
             modelBuilder.Entity("RpdFos.Core.Data.Entities.DocumentSignature", b =>

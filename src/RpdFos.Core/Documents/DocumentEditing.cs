@@ -24,7 +24,7 @@ public sealed record SectionUpdateResult(SectionUpdateProblem? Problem, IReadOnl
 /// сохранение, что и содержимое. Сохраняет вызывающий — с версией клиента (оптимистичная блокировка).
 /// </summary>
 public sealed class DocumentEditing(
-    AppDbContext db, DocumentTypeRegistry registry, IDocumentValidator validator, RichTextSanitizer sanitizer,
+    AppDbContext db, DocumentTypeRegistry registry, IDocumentValidator validator, RichTextSanitizer sanitizer, DocumentImages images,
     ValidationRuleSet rules, DocumentHistory history, DocumentNotifications notifications, TimeProvider clock)
 {
     public const string ReadOnlyChanged = "Поле из учебного плана — изменять нельзя";
@@ -43,6 +43,10 @@ public sealed class DocumentEditing(
     /// Исправление принятого документа, после которого полная проверка находит ошибки, возвращает его автору — только
     /// с подтверждением исправляющего; без него — <see cref="SectionUpdateProblem.ReturnNotConfirmed"/> с причинами.
     /// </param>
+    /// <param name="editorRoles">
+    /// Роли правящего из запроса: по ним определяется, читает ли он документ, из которого вставлен рисунок (этап 7, B4а); без них —
+    /// роли действующей учётной записи из базы.
+    /// </param>
     /// <param name="checkOnly">
     /// Проверка без сохранения (этап 5.2, B4.1): тот же путь до проверки черновика, затем — состояние разделов по
     /// присланному содержимому. Документ, версия, снимки, история и журнал аудита не меняются; ошибки черновика —
@@ -50,7 +54,8 @@ public sealed class DocumentEditing(
     /// </param>
     public async Task<SectionUpdateResult> UpdateSectionAsync(
         Document document, string section, JsonElement value, Guid editorId, CancellationToken ct = default,
-        DocumentEditScope scope = DocumentEditScope.Content, bool confirmReturn = false, bool checkOnly = false)
+        DocumentEditScope scope = DocumentEditScope.Content, bool confirmReturn = false, bool checkOnly = false,
+        IReadOnlyList<string>? editorRoles = null)
     {
         var schemaJson = await SchemaAsync(document, ct);
         var schema = JsonDocument.Parse(schemaJson).RootElement;
@@ -66,7 +71,18 @@ public sealed class DocumentEditing(
         var payload = JsonNode.Parse(document.Payload)!.AsObject();
         var updated = payload.DeepClone().AsObject();
         // Очищенный раздел (null) уходит из содержимого: в схеме пустых значений нет.
-        if (Sanitize(JsonNode.Parse(value.GetRawText()), sectionSchema, root, 0) is { } sanitized) updated[section] = sanitized;
+        var sanitized = Sanitize(JsonNode.Parse(value.GetRawText()), sectionSchema, root, 0, _ => true);
+        // Рисунок остаётся в тексте, если он связан с документом или принадлежит документу, который правящий читает
+        // (вставка из буфера); такую связь добавляет это же сохранение. Проверка без сохранения базу не меняет.
+        List<Guid> imagesToLink = [];
+        if (!checkOnly && DocumentImages.IdsIn(sanitized) is { Count: > 0 } mentioned)
+        {
+            var (allowed, toLink) = await images.AllowedAsync(document, editorId, editorRoles, mentioned, ct);
+            if (allowed.Count < mentioned.Count)
+                sanitized = Sanitize(JsonNode.Parse(value.GetRawText()), sectionSchema, root, 0, allowed.Contains);
+            imagesToLink = toLink.Where(DocumentImages.IdsIn(sanitized).Contains).ToList();
+        }
+        if (sanitized is not null) updated[section] = sanitized;
         else updated.Remove(section);
 
         // Поля из плана и закрытые статусом: присланное должно совпасть с тем, что уже в документе. Поля плана
@@ -113,6 +129,7 @@ public sealed class DocumentEditing(
             : [];
         if (broken.Count > 0 && !confirmReturn) return new(SectionUpdateProblem.ReturnNotConfirmed, broken, null);
 
+        await images.LinkAsync(document.Id, imagesToLink, ct);
         if (scope == DocumentEditScope.PlanOnly) document.CorrectPlanFields(updatedJson);
         else if (document.Edit(updatedJson) is { } previous) history.StatusChanged(document, previous, editorId);
         var now = clock.GetUtcNow();
@@ -182,25 +199,25 @@ public sealed class DocumentEditing(
         db.DocumentTemplates.IgnoreQueryFilters().Where(t => t.Id == document.TemplateId).Select(t => t.Schema).SingleAsync(ct);
 
     // Строки с x-ui-widget: richtext — через санитайзер (NFR-SEC-10); клиенту не доверяем.
-    private JsonNode? Sanitize(JsonNode? node, JsonElement schema, JsonElement root, int depth)
+    private JsonNode? Sanitize(JsonNode? node, JsonElement schema, JsonElement root, int depth, Func<Guid, bool> keepImage)
     {
         if (node is null || depth > 16) return node;
         if (node is JsonValue v && v.TryGetValue(out string? text) && schema.TryGetProperty("x-ui-widget", out var widget) &&
             widget.GetString() == "richtext")
-            return sanitizer.Sanitize(text);
+            return sanitizer.Sanitize(text, keepImage);
         if (node is JsonObject o && schema.TryGetProperty("properties", out var props))
             foreach (var p in props.EnumerateObject())
             {
                 var childRoot = root;
                 if (o[p.Name] is { } child && SchemaInspector.Deref(p.Value, ref childRoot, registry.FindSchema) is { } childSchema)
-                    o[p.Name] = Sanitize(child.DeepClone(), childSchema, childRoot, depth + 1);
+                    o[p.Name] = Sanitize(child.DeepClone(), childSchema, childRoot, depth + 1, keepImage);
             }
         if (node is JsonArray a && schema.TryGetProperty("items", out var items))
         {
             var itemsRoot = root;
             if (SchemaInspector.Deref(items, ref itemsRoot, registry.FindSchema) is { } itemSchema)
                 for (var i = 0; i < a.Count; i++)
-                    a[i] = Sanitize(a[i]?.DeepClone(), itemSchema, itemsRoot, depth + 1);
+                    a[i] = Sanitize(a[i]?.DeepClone(), itemSchema, itemsRoot, depth + 1, keepImage);
         }
         return node;
     }

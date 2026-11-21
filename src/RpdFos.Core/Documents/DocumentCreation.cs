@@ -93,7 +93,7 @@ public static class DocumentRules
 /// </summary>
 public sealed class DocumentCreation(
     AppDbContext db, DocumentTypeRegistry registry, DocumentProjections projections, DisciplineAssignments assignments,
-    LinkedDocuments links, TimeProvider clock)
+    LinkedDocuments links, DocumentImages images, TimeProvider clock)
 {
     private static readonly JsonSerializerOptions Json = new() { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
 
@@ -246,6 +246,8 @@ public sealed class DocumentCreation(
             CreatedAt = now
         };
         db.Documents.Add(document);
+        // Рисунки основы — те же файлы: новому документу добавляются связи, файлы не копируются (этап 7, B4а).
+        if (basis is not null) await images.LinkFromContentAsync(document, payload, ct);
         if (basis is not null)
             db.AuditLog.Add(new AuditLogEntry
             {

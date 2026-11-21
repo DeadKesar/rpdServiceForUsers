@@ -31,6 +31,12 @@ public sealed class SchemaContext(JsonElement root, JsonObject payload, Document
     /// </summary>
     public bool IsTemplate { get; set; }
 
+    /// <summary>
+    /// Документ, содержимое которого правится: в него загружаются рисунки форматированного текста (этап 7, B4а). У значений по
+    /// умолчанию шаблона документа нет — рисунков там нет.
+    /// </summary>
+    public Guid? DocumentId { get; set; }
+
     /// <summary>Замечания к документу — методиста и согласующих — показываются у полей.</summary>
     public List<CommentItem> Comments { get; set; } = [];
 

@@ -2,7 +2,11 @@ using System.Text.RegularExpressions;
 using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Wordprocessing;
+using A = DocumentFormat.OpenXml.Drawing;
+using DW = DocumentFormat.OpenXml.Drawing.Wordprocessing;
+using PIC = DocumentFormat.OpenXml.Drawing.Pictures;
 using RpdFos.Core.Data.Entities;
+using RpdFos.Core.Documents;
 using RpdFos.Core.DocumentTypes;
 
 namespace RpdFos.Core.Printing;
@@ -200,6 +204,9 @@ public static partial class DocxGenerator
             if (value.IsEmpty) unfilled.Add($"{name} — {missing}");
             var paragraph = text.Ancestors<Paragraph>().FirstOrDefault();
             var whole = paragraph is not null && paragraph.Descendants<Text>().Count() == 1 && text.Text.Trim() == baseName;
+            // Значение внутри абзаца с другим текстом печатается строкой: рисунку в ней места нет.
+            if (!whole && value.Blocks.Any(b => b.HasImage))
+                warnings.Add($"{name}: рисунок не напечатан — закладка стоит в абзаце с другим текстом, а рисунок печатается только вместо целого абзаца.");
             if (whole && (value.IsMultiline || value.Blocks.OfType<PrintParagraph>().Any(p => p.Runs.Any(r => r.Bold || r.Italic))))
                 ReplaceParagraph(paragraph!, text.Ancestors<Run>().First(), value);
             else
@@ -259,12 +266,12 @@ public static partial class DocxGenerator
                 switch (block)
                 {
                     case PrintParagraph content when !used:
-                        Write(paragraph, content, runProperties);
+                        Write(paragraph, content, runProperties, width);
                         used = true;
                         break;
                     case PrintParagraph content:
                         var next = new Paragraph { ParagraphProperties = paragraphProperties?.CloneNode(true) as ParagraphProperties };
-                        Write(next, content, runProperties);
+                        Write(next, content, runProperties, width);
                         current.InsertAfterSelf(next);
                         current = next;
                         break;
@@ -297,7 +304,7 @@ public static partial class DocxGenerator
                 return table.Rows.Select(row =>
                 {
                     var line = new Paragraph { ParagraphProperties = paragraphProperties?.CloneNode(true) as ParagraphProperties };
-                    Write(line, PrintParagraph.Plain(string.Join(" | ", row.Cells.Select(c => c.PlainText))), runProperties);
+                    Write(line, PrintParagraph.Plain(string.Join(" | ", row.Cells.Select(c => c.PlainText))), runProperties, width);
                     return (OpenXmlElement)line;
                 }).ToList();
 
@@ -336,7 +343,8 @@ public static partial class DocxGenerator
                 foreach (var content in source.Paragraphs)
                 {
                     var line = new Paragraph(CellParagraphProperties(paragraphProperties, header));
-                    Write(line, header ? content with { Runs = content.Runs.Select(r => r with { Bold = true }).ToList() } : content, runProperties);
+                    Write(line, header ? content with { Runs = content.Runs.Select(r => r with { Bold = true }).ToList() } : content, runProperties,
+                        Math.Max(columnWidth * placed.Span - CellPadding, MinTableWidth / 4));
                     cell.AppendChild(line);
                 }
             // Ячейка без абзаца — файл неверный.
@@ -398,7 +406,7 @@ public static partial class DocxGenerator
             return null;
         }
 
-        private void Write(Paragraph paragraph, PrintParagraph content, RunProperties? runProperties)
+        private void Write(Paragraph paragraph, PrintParagraph content, RunProperties? runProperties, int width)
         {
             // Заглушка — элемент списка шаблона: значения продолжают его список (4.3 с постоянными ресурсами вуза).
             if (content.List != PrintListKind.None && paragraph.ParagraphProperties?.NumberingProperties is null)
@@ -412,6 +420,13 @@ public static partial class DocxGenerator
             var end = paragraph.Elements<BookmarkEnd>().FirstOrDefault();
             foreach (var run in content.Runs)
             {
+                if (run.Image is not null)
+                {
+                    if (ImageRun(run.Image, width) is { } picture)
+                        if (end is not null) end.InsertBeforeSelf(picture);
+                        else paragraph.AppendChild(picture);
+                    continue;
+                }
                 var properties = runProperties?.CloneNode(true) as RunProperties ?? new RunProperties();
                 if (run.Bold) properties.Bold = new Bold();
                 if (run.Italic) properties.Italic = new Italic();
@@ -419,6 +434,54 @@ public static partial class DocxGenerator
                 if (end is not null) end.InsertBeforeSelf(element);
                 else paragraph.AppendChild(element);
             }
+        }
+
+        // Рисунок форматированного текста (этап 7, B4а): размер из разметки (точки при 96 на дюйм), без размера — натуральный;
+        // не шире места (текст страницы или ячейка) и не выше страницы, пропорции сохраняются. Один файл в нескольких местах —
+        // одна часть пакета.
+        private const long EmuPerPixel = 9525, EmuPerDxa = 635, MaxHeightEmu = 8_640_000;
+
+        private readonly Dictionary<Guid, string> _imageParts = [];
+        private uint _drawingId;
+
+        private Run? ImageRun(PrintImage image, int widthDxa)
+        {
+            if (!context.Images.TryGetValue(image.FileId, out var info))
+            {
+                warnings.Add($"Рисунок {image.FileId} не найден — пропущен.");
+                return null;
+            }
+            if (!_imageParts.TryGetValue(image.FileId, out var relationship))
+            {
+                var part = _main.AddImagePart(info.MimeType == ImageFiles.Png ? ImagePartType.Png : ImagePartType.Jpeg);
+                using (var data = new MemoryStream(info.Content)) part.FeedData(data);
+                _imageParts[image.FileId] = relationship = _main.GetIdOfPart(part);
+            }
+            if (_drawingId == 0)
+                _drawingId = (_main.Document?.Descendants<DW.DocProperties>().Select(p => p.Id?.Value ?? 0u).DefaultIfEmpty(0u).Max() ?? 0u) + 1;
+
+            double width = image.Width ?? (image.Height is { } h ? h * (double)info.Width / info.Height : info.Width);
+            double height = image.Height ?? (image.Width is { } w ? w * (double)info.Height / info.Width : info.Height);
+            double cx = width * EmuPerPixel, cy = height * EmuPerPixel;
+            var scale = Math.Min(1.0, Math.Min(Math.Max(widthDxa, 1) * (double)EmuPerDxa / cx, MaxHeightEmu / cy));
+            var extentX = Math.Max((long)Math.Round(cx * scale), 1);
+            var extentY = Math.Max((long)Math.Round(cy * scale), 1);
+
+            var id = _drawingId++;
+            return new Run(new Drawing(new DW.Inline(
+                new DW.Extent { Cx = extentX, Cy = extentY },
+                new DW.EffectExtent { LeftEdge = 0L, TopEdge = 0L, RightEdge = 0L, BottomEdge = 0L },
+                new DW.DocProperties { Id = id, Name = $"Рисунок {id}", Description = image.Alt },
+                new DW.NonVisualGraphicFrameDrawingProperties(new A.GraphicFrameLocks { NoChangeAspect = true }),
+                new A.Graphic(new A.GraphicData(new PIC.Picture(
+                    new PIC.NonVisualPictureProperties(
+                        new PIC.NonVisualDrawingProperties { Id = 0U, Name = $"image{id}" }, new PIC.NonVisualPictureDrawingProperties()),
+                    new PIC.BlipFill(new A.Blip { Embed = relationship }, new A.Stretch(new A.FillRectangle())),
+                    new PIC.ShapeProperties(
+                        new A.Transform2D(new A.Offset { X = 0L, Y = 0L }, new A.Extents { Cx = extentX, Cy = extentY }),
+                        new A.PresetGeometry(new A.AdjustValueList()) { Preset = A.ShapeTypeValues.Rectangle })))
+                { Uri = "http://schemas.openxmlformats.org/drawingml/2006/picture" }))
+            { DistanceFromTop = 0U, DistanceFromBottom = 0U, DistanceFromLeft = 0U, DistanceFromRight = 0U }));
         }
 
         // Список: своё определение нумерации на каждый список, чтобы нумерованные списки начинались с 1.

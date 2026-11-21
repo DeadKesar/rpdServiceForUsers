@@ -102,9 +102,12 @@ public sealed class DirectoryAccounts(AppDbContext db, TimeProvider clock)
     }
 
     /// <summary>Id активной записи справочника текущего пользователя по утверждению sub; null — не связан.</summary>
-    public async Task<Guid?> FindIdAsync(ClaimsPrincipal user, CancellationToken ct = default)
+    public Task<Guid?> FindIdAsync(ClaimsPrincipal user, CancellationToken ct = default) =>
+        FindIdBySubjectAsync(user.FindFirst(SubjectClaim)?.Value, ct);
+
+    /// <summary>То же по значению sub: cookie входа несёт его не утверждением sub, а идентификатором учётной записи.</summary>
+    public async Task<Guid?> FindIdBySubjectAsync(string? subject, CancellationToken ct = default)
     {
-        var subject = user.FindFirst(SubjectClaim)?.Value;
         if (string.IsNullOrEmpty(subject)) return null;
         return await db.Employees
             .Where(e => e.IdentitySubject == subject && e.IsActive)

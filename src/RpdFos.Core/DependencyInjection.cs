@@ -57,6 +57,8 @@ public static class DependencyInjection
         services.AddScoped<DocumentCreation>();
         services.AddScoped<DocumentHistory>();
         services.AddScoped<DocumentNotifications>();
+        // Рисунки в форматированном тексте (этап 7, B4а): загрузка, права чтения, связи с документами.
+        services.AddScoped<DocumentImages>();
         services.AddScoped<DocumentEditing>();
         services.AddScoped<DocumentReview>();
         services.AddScoped<SignatoryResolution>();

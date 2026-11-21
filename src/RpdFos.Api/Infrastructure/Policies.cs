@@ -35,6 +35,12 @@ public static class Policies
     /// без токена доступа, поэтому вход проверяется по cookie страницы входа.
     /// </summary>
     public const string JobsDashboard = "jobs-dashboard";
+
+    /// <summary>
+    /// Чтение рисунков документов (этап 7, B4а). Рисунок в тексте грузит сам браузер, без заголовка с токеном, поэтому, кроме токена,
+    /// принимается cookie входа того же хоста. Кто читает рисунок, решает сама операция: по документам, в которых он вставлен.
+    /// </summary>
+    public const string ImageReaders = "image-readers";
 }
 
 /// <summary>Очереди фоновых задач Hangfire.</summary>

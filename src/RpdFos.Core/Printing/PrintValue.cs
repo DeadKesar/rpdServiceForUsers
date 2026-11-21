@@ -2,13 +2,24 @@ namespace RpdFos.Core.Printing;
 
 public enum PrintListKind { None, Bullet, Numbered }
 
-/// <summary>Фрагмент абзаца печатной формы: полужирный и курсив — из форматированного текста.</summary>
-public sealed record PrintRun(string Text, bool Bold = false, bool Italic = false);
+/// <summary>
+/// Рисунок форматированного текста (этап 7, B4а): файл и размер из разметки в точках; без размера — натуральный. Пропорции и
+/// ширина места при печати — забота генератора.
+/// </summary>
+public sealed record PrintImage(Guid FileId, int? Width, int? Height, string? Alt);
+
+/// <summary>
+/// Фрагмент абзаца печатной формы: полужирный и курсив — из форматированного текста; рисунок — фрагмент без текста.
+/// </summary>
+public sealed record PrintRun(string Text, bool Bold = false, bool Italic = false, PrintImage? Image = null);
 
 /// <summary>Блок значения для закладки: абзац или таблица (форматированный текст допускает и то и другое).</summary>
 public abstract record PrintBlock
 {
     public abstract string PlainText { get; }
+
+    /// <summary>Есть ли в блоке рисунок: блок без слов, но с рисунком — не пустой.</summary>
+    public abstract bool HasImage { get; }
 }
 
 /// <summary>
@@ -17,6 +28,8 @@ public abstract record PrintBlock
 public sealed record PrintParagraph(IReadOnlyList<PrintRun> Runs, PrintListKind List = PrintListKind.None, int ListId = 0) : PrintBlock
 {
     public override string PlainText => string.Concat(Runs.Select(r => r.Text));
+
+    public override bool HasImage => Runs.Any(r => r.Image is not null);
 
     public static PrintParagraph Plain(string text, bool bold = false) => new([new PrintRun(text, bold)]);
 }
@@ -36,6 +49,8 @@ public sealed record PrintTableRow(IReadOnlyList<PrintTableCell> Cells);
 public sealed record PrintTable(IReadOnlyList<PrintTableRow> Rows) : PrintBlock
 {
     /// <summary>Строки таблицы через «; », ячейки строки — через пробел: для места, где таблице не поместиться.</summary>
+    public override bool HasImage => Rows.Any(r => r.Cells.Any(c => c.Paragraphs.Any(p => p.HasImage)));
+
     public override string PlainText => string.Join("; ", Rows
         .Select(r => string.Join(" ", r.Cells.Select(c => c.PlainText).Where(t => t.Length > 0)))
         .Where(t => t.Length > 0));
@@ -51,9 +66,9 @@ public sealed record PrintValue(IReadOnlyList<PrintBlock> Blocks)
 
     public static PrintValue Text(string? text) => string.IsNullOrWhiteSpace(text) ? Empty : new([PrintParagraph.Plain(text.Trim())]);
 
-    public bool IsEmpty => Blocks.All(b => string.IsNullOrWhiteSpace(b.PlainText));
+    public bool IsEmpty => Blocks.All(b => string.IsNullOrWhiteSpace(b.PlainText) && !b.HasImage);
 
-    public bool IsMultiline => Blocks.Count > 1 || Blocks.Any(b => b is PrintTable or PrintParagraph { List: not PrintListKind.None });
+    public bool IsMultiline => Blocks.Count > 1 || Blocks.Any(b => b is PrintTable or PrintParagraph { List: not PrintListKind.None } || b.HasImage);
 
     /// <summary>Значение одной строкой — для места внутри абзаца: блоки через «; ».</summary>
     public string Inline => string.Join("; ", Blocks.Select(b => b.PlainText.Trim()).Where(t => t.Length > 0));

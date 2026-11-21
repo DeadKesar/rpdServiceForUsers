@@ -164,3 +164,16 @@ internal sealed class DisciplineAssignmentConfiguration : IEntityTypeConfigurati
         e.HasOne<Employee>().WithMany().HasForeignKey(x => x.AssignedBy).OnDelete(DeleteBehavior.Restrict);
     }
 }
+
+// Рисунки документов (этап 7, B4а): составной ключ — пара не повторяется; рисунок читают по связи, поэтому второй индекс — по файлу.
+internal sealed class DocumentImageConfiguration : IEntityTypeConfiguration<DocumentImage>
+{
+    public void Configure(EntityTypeBuilder<DocumentImage> e)
+    {
+        e.ToTable("document_images");
+        e.HasKey(x => new { x.DocumentId, x.FileId });
+        e.HasIndex(x => x.FileId);
+        e.HasOne<Document>().WithMany().HasForeignKey(x => x.DocumentId).OnDelete(DeleteBehavior.Cascade);
+        e.HasOne<UploadedFile>().WithMany().HasForeignKey(x => x.FileId).OnDelete(DeleteBehavior.Restrict);
+    }
+}

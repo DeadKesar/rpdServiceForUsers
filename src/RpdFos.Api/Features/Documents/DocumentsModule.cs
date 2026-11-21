@@ -289,7 +289,7 @@ public class DocumentsModule : ICarterModule
     /// </summary>
     // Кто и в каком объёме правит раздел: автор — своё содержимое, методист на проверке — всё, после приёма методист
     // и администратор — поля из плана. Те же права — у проверки раздела без сохранения.
-    private static async Task<(Document? Document, Guid EditorId, DocumentEditScope Scope, IResult? Refusal)> SectionEditorAsync(
+    internal static async Task<(Document? Document, Guid EditorId, DocumentEditScope Scope, IResult? Refusal)> SectionEditorAsync(
         Guid id, HttpContext http, AppDbContext db, DirectoryAccounts directory, DocumentReview review, CancellationToken ct)
     {
         var document = await db.Documents.SingleOrDefaultAsync(d => d.Id == id, ct);
@@ -333,7 +333,8 @@ public class DocumentsModule : ICarterModule
 
         // Сравнивать будем с версией, которую видел клиент; новую проставит перехватчик сохранения.
         db.Entry(document!).Property(d => d.Version).OriginalValue = rq.Version;
-        var result = await editing.UpdateSectionAsync(document!, section, rq.Value, editorId, ct, scope, rq.ConfirmReturn);
+        var result = await editing.UpdateSectionAsync(document!, section, rq.Value, editorId, ct, scope, rq.ConfirmReturn,
+            editorRoles: DocumentViewer.RolesOf(http.User));
         if (result.Problem is not null) return SectionProblem(section, result);
 
         await db.SaveChangesAsync(ct);

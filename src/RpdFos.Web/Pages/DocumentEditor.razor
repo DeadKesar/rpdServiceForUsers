@@ -693,7 +693,7 @@ else
         comments = await Http.GetFromJsonAsync<List<CommentItem>>($"api/documents/{Id}/comments") ?? [];
         context = new SchemaContext(details.Schema, payload, details.Metadata, OnChanged, OnEdited)
         {
-            Locked = !details.Editable, Comments = comments, CanComment = details.Actions.Comment,
+            DocumentId = Id, Locked = !details.Editable, Comments = comments, CanComment = details.Actions.Comment,
             CanResolve = details.Actions.ResolveComments, CanResolveOwn = details.Actions.ResolveOwnComments,
             CanResolveApproval = details.Actions.ResolveApprovalComments,
             ViewerId = details.ViewerId, AddComment = AddCommentAsync, ResolveComment = ResolveCommentAsync,

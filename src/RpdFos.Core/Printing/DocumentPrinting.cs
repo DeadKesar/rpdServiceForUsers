@@ -26,6 +26,19 @@ public sealed partial class DocumentPrinting(
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase, Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
     };
 
+    // Рисунки, на которые ссылается содержимое: файлы читаются из базы разом, размер в точках — из самого файла (этап 7, B4а).
+    private async Task<Dictionary<Guid, ImageInfo>> ImagesAsync(string payload, CancellationToken ct)
+    {
+        var result = new Dictionary<Guid, ImageInfo>();
+        var ids = DocumentImages.IdsIn(System.Text.Json.Nodes.JsonNode.Parse(payload));
+        if (ids.Count == 0) return result;
+        foreach (var file in await db.UploadedFiles.AsNoTracking()
+                     .Where(f => ids.Contains(f.Id) && f.FileType == UploadedFileTypes.Image)
+                     .Select(f => new { f.Id, f.Content }).ToListAsync(ct))
+            if (file.Content is not null && ImageFiles.Inspect(file.Content).Image is { } info) result[file.Id] = info;
+        return result;
+    }
+
     /// <summary>Новая задача формирования в статусе «в очереди».</summary>
     public GenerationTask Queue(Document document, string format, Guid requestedBy) =>
         db.GenerationTasks.Add(new GenerationTask
@@ -58,7 +71,8 @@ public sealed partial class DocumentPrinting(
         // Не предусмотренное — по трудоёмкости документа: раздел, скрытый исправлением, печатается заглушкой.
         var context = new PrintContext(payload, schema, registry.FindSchema, facts,
             await signatories.ResolveAsync(seats, document.DisciplineId, ct), Year(document),
-            DocumentMetadata.Hidden(schema, DocumentSemesters.Of(payload, facts), registry.FindSchema));
+            DocumentMetadata.Hidden(schema, DocumentSemesters.Of(payload, facts), registry.FindSchema),
+            await ImagesAsync(document.Payload, ct));
         var result = DocxGenerator.Generate(content, PrintMappingJson.ReadMapping(template.PrintMapping), context);
         task.Report = JsonSerializer.Serialize(result.Report, Json);
 

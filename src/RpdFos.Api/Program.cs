@@ -107,6 +107,10 @@ builder.Services.AddAuthorizationBuilder()
     .AddPolicy(Policies.CommentResolvers, p => p
         .AddAuthenticationSchemes(OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme)
         .RequireRole(AppRoles.Teacher, AppRoles.Methodist, AppRoles.Admin, AppRoles.Approver))
+    .AddPolicy(Policies.ImageReaders, p => p
+        // Первой — схема токена: без входа ответ 401, а не переход на страницу входа.
+        .AddAuthenticationSchemes(OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme, IdentityConstants.ApplicationScheme)
+        .RequireAuthenticatedUser())
     .AddPolicy(Policies.JobsDashboard, p => p
         .AddAuthenticationSchemes(IdentityConstants.ApplicationScheme)
         .RequireRole(AppRoles.Admin));

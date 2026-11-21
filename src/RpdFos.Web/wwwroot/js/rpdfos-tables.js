@@ -2,7 +2,7 @@
 // Radzen.Blazor по имени. Radzen вставляет и удаляет столбец по номеру ячейки в строке, а не по столбцу сетки, а
 // строку — без учёта объединения по вертикали; при объединённых ячейках это ломает таблицу. Здесь строки и столбцы
 // считаются по сетке (rpdfos-table-logic.js), остальные команды Radzen (объединение, разделение, копирование ячеек,
-// удаление таблицы) остаются его собственными.
+// удаление таблицы) остаются его собственными. Здесь же — проверка рисунков, вставленных разметкой (этап 7, B4а).
 //
 // Замена привязана к версии пакета: имена функций и порядок вызова сверены с Radzen.Blazor 12.1.11
 // (execTableCommand зовёт this.addTableRow / deleteTableRow / addTableColumn / deleteTableColumn / insertTable и
@@ -203,12 +203,40 @@
         return count;
     }
 
+
+    // ---- Рисунки, вставленные из буфера или перетаскиванием (этап 7, B4а) ----
+    // Файл рисунка Radzen загружает сам. Здесь — рисунок, пришедший разметкой: свой («/api/images/…», браузер кладёт в буфер
+    // абсолютный адрес) остаётся, остальные — из Word (адрес файла на компьютере автора, браузер его не читает), с сайта или
+    // data: — убираются с предупреждением, иначе слова вставились бы, а рисунок молча пропал при сохранении.
+    var OWN_IMAGE = /^\/api\/images\/[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
+
+    function checkPastedImages(editor) {
+        var foreign = 0;
+        var local = 0;
+        Array.prototype.slice.call(editor.querySelectorAll('img')).forEach(function (image) {
+            var source = (image.getAttribute('src') || '').trim();
+            if (source.indexOf(location.origin + '/api/images/') === 0) {
+                source = source.substring(location.origin.length);
+                image.setAttribute('src', source);
+            }
+            if (OWN_IMAGE.test(source)) return;
+            if (/^file:/i.test(source)) local++;
+            foreign++;
+            image.remove();
+        });
+        if (local) warn('Рисунок из Word вставлен ссылкой на файл на вашем компьютере, браузер его не читает: вставьте рисунок отдельно — из файла или из буфера.');
+        else if (foreign) warn('Рисунок с чужим адресом не сохраняется: сохраните его в файл и вставьте отдельно.');
+        return foreign;
+    }
+
     document.addEventListener('input', function (event) {
         if (event.inputType !== 'insertFromPaste' && event.inputType !== 'insertFromDrop') return;
         var editor = event.target && event.target.closest ? event.target.closest('.rz-html-editor-content') : null;
-        if (!editor || !flattenNestedTables(editor)) return;
-        warn('Таблица внутри ячейки не сохраняется: её содержимое вставлено текстом.');
+        if (!editor) return;
+        var nested = flattenNestedTables(editor);
+        if (nested) warn('Таблица внутри ячейки не сохраняется: её содержимое вставлено текстом.');
+        var images = checkPastedImages(editor);
         // Редактор передаёт значение на каждой правке: после замены сообщаем итог.
-        editor.dispatchEvent(new Event('input', { bubbles: true }));
+        if (nested || images) editor.dispatchEvent(new Event('input', { bubbles: true }));
     });
 })();

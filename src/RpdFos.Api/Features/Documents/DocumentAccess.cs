@@ -28,6 +28,13 @@ public sealed record DocumentViewer(
 {
     public bool Sees => IsAuthor || IsCorrector || IsSignatory || IsAssigned || IsFosAuthor;
 
+    /// <summary>
+    /// Роли пользователя из утверждений запроса: токен несёт их утверждением role, cookie входа — ClaimTypes.Role. Правила ядра,
+    /// которым нужны роли (открытие документа, рисунки), получают их отсюда, как и остальной API, а не из учётной записи в базе.
+    /// </summary>
+    public static IReadOnlyList<string> RolesOf(ClaimsPrincipal user) =>
+        user.Claims.Where(c => c.Type is "role" or ClaimTypes.Role).Select(c => c.Value).Distinct().ToList();
+
     public static async Task<DocumentViewer> OfAsync(
         ClaimsPrincipal user, Guid? me, Document document, DocumentApproval approval, CancellationToken ct) => new(
         me,
