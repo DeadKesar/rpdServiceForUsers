@@ -27,9 +27,21 @@ public sealed record BookmarkTarget(
 public sealed record BookmarkOccurrence(
     string? Form = null, string? Kind = null, string? Target = null, string? Part = null, string? Note = null, string? Stub = null);
 
+/// <summary>
+/// Способ печати блока (<see cref="BookmarkTargetKinds.Block"/>): блок — целые абзацы и таблицы от начала закладки до её конца;
+/// <see cref="Repeat"/> — по экземпляру на элемент списка цели (часть банка заданий, билет), <see cref="Present"/> — один раз,
+/// если в списке цели есть элементы, иначе блок убирается вместе с разрывом раздела.
+/// </summary>
+public static class BlockModes
+{
+    public const string Repeat = "repeat", Present = "present";
+
+    public static readonly IReadOnlySet<string> All = new HashSet<string> { Repeat, Present };
+}
+
 public static class BookmarkTargetKinds
 {
-    public const string Source = "source", Field = "field", Signature = "signature", Table = "table", Text = "text";
+    public const string Source = "source", Field = "field", Signature = "signature", Table = "table", Text = "text", Block = "block";
 }
 
 /// <summary>
@@ -142,13 +154,15 @@ public static partial class PrintMappingValidator
             BookmarkTargetKinds.Signature when part is null || !SignatureParts.All.Contains(part) =>
                 $"неизвестная часть подписи «{part}»",
             BookmarkTargetKinds.Table when !TableBuilders.All.ContainsKey(value) => $"неизвестный построитель таблицы {value}",
+            BookmarkTargetKinds.Block when !fieldExists(value) => $"поля {value} нет в схеме",
+            BookmarkTargetKinds.Block when part is null || !BlockModes.All.Contains(part) => $"неизвестный способ печати блока «{part}»",
             BookmarkTargetKinds.Text when string.IsNullOrWhiteSpace(value) => "пустой текст",
             BookmarkTargetKinds.Text => Placeholder().Matches(value)
                 .Select(m => m.Groups["source"].Value).FirstOrDefault(s => !DocumentSources.IsKnown(s)) is { } unknown
                 ? $"неизвестный источник {unknown} в тексте"
                 : null,
             BookmarkTargetKinds.Source or BookmarkTargetKinds.Field or BookmarkTargetKinds.Signature
-                or BookmarkTargetKinds.Table => null,
+                or BookmarkTargetKinds.Table or BookmarkTargetKinds.Block => null,
             _ => $"неизвестный вид цели «{kind}»"
         };
     }

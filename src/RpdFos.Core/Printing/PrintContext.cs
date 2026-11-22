@@ -25,6 +25,31 @@ public sealed class PrintContext(
     /// <summary>Номер для нового списка: нумерация у каждого списка своя.</summary>
     public int NextListId() => ++_lists;
 
+    // Блок, который печатается по разу на элемент (часть банка, билет): место и номер элемента, пока блок заполняется.
+    private (string Pointer, int Index)? _scope;
+
+    /// <summary>Номер части банка заданий, пока заполняется блок части; вне блока — null.</summary>
+    public int? PartIndex => _scope is { Pointer: "/task_bank" } s ? s.Index : null;
+
+    /// <summary>Сколько раз печатается блок места: частей банка по виду аттестации, билетов — по числу в документе.</summary>
+    public int RepeatCount(string pointer) =>
+        pointer == "/task_bank" ? FosPrint.Parts(this).Count : At(pointer) is { ValueKind: JsonValueKind.Array } items ? items.GetArrayLength() : 0;
+
+    /// <summary>
+    /// Начало заполнения одного экземпляра блока: до <c>Dispose</c> образец «/exam_tickets/0/…» означает билет с этим номером,
+    /// а «/task_bank» и источник <c>document.bank_part_title</c> — часть банка с этим номером.
+    /// </summary>
+    public IDisposable Enter(string pointer, int index)
+    {
+        _scope = (pointer, index);
+        return new Scope(this);
+    }
+
+    private sealed class Scope(PrintContext owner) : IDisposable
+    {
+        public void Dispose() => owner._scope = null;
+    }
+
     /// <summary>
     /// Семестры трудоёмкости документа: таблицы печатают часы документа — исправленные методистом, если исправлял,
     /// без пометок (этап 5.1).
@@ -63,6 +88,7 @@ public sealed class PrintContext(
             "reference.curriculum_plan.academic_year" => PlanTitles.AcademicYear(Facts.Plan.Year, semesters.DefaultIfEmpty(1).Min()),
             "reference.department.name" => Facts.Department?.Name,
             "document.year" => year.ToString(),
+            "document.bank_part_title" => PartIndex is { } part ? FosPrint.PartTitle(this, part) : null,
             _ => null
         };
     }
@@ -70,6 +96,9 @@ public sealed class PrintContext(
     /// <summary>Место в содержимом документа по JSON Pointer; нет такого места — null.</summary>
     public JsonElement? At(string pointer)
     {
+        // Образец билета в шаблоне — номер 0; в экземпляре блока он означает текущий билет.
+        if (_scope is { Pointer: "/exam_tickets" } ticket && (pointer == "/exam_tickets/0" || pointer.StartsWith("/exam_tickets/0/", StringComparison.Ordinal)))
+            pointer = "/exam_tickets/" + ticket.Index + pointer["/exam_tickets/0".Length..];
         var current = Payload;
         foreach (var raw in pointer.TrimStart('/').Split('/', StringSplitOptions.RemoveEmptyEntries))
         {
@@ -111,6 +140,7 @@ public sealed class PrintContext(
     /// </summary>
     public PrintValue Field(string pointer)
     {
+        if (FosPrint.Handles(pointer)) return FosPrint.Render(this, pointer);
         if (Stub(pointer) is { } stub) return PrintValue.Text(stub);
         return At(pointer) is { } value && SchemaAt(pointer) is { } schema ? Render(value, schema) : PrintValue.Empty;
     }

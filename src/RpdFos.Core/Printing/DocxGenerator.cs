@@ -53,6 +53,7 @@ public static partial class DocxGenerator
 
         public void Run()
         {
+            if (_main.Document?.Body is { } main) ExpandBlocks(main);
             var roots = new List<OpenXmlElement?> { _main.Document?.Body };
             roots.AddRange(_main.HeaderParts.Select(p => (OpenXmlElement?)p.Header));
             roots.AddRange(_main.FooterParts.Select(p => (OpenXmlElement?)p.Footer));
@@ -61,6 +62,83 @@ public static partial class DocxGenerator
                              .Where(b => b.Name?.Value?.StartsWith(DocxBookmarks.Prefix, StringComparison.Ordinal) == true).ToList())
                     Fill(root, bookmark);
             if (_main.Document?.Body is { } body) ZeroCreditLaboriousness(body);
+        }
+
+        /// <summary>
+        /// Блоки (цели вида <c>block</c>, этап 7, B9): закладка охватывает целые абзацы и таблицы тела документа. «repeat» — блок
+        /// печатается по экземпляру на элемент цели, каждый заполняется со своим элементом; нет элементов — блок убирается.
+        /// «present» — блок остаётся, если у цели есть элементы, иначе убирается вместе с разрывом раздела внутри него.
+        /// Блоки идут по порядку документа: внешний — раньше вложенного.
+        /// </summary>
+        private void ExpandBlocks(Body body)
+        {
+            while (body.Descendants<BookmarkStart>().FirstOrDefault(IsBlock) is { } start)
+            {
+                var target = mapping[DocxBookmarks.BaseName(start.Name!.Value!)];
+                var first = TopLevel(start);
+                var last = body.Descendants<BookmarkEnd>().FirstOrDefault(e => e.Id?.Value == start.Id?.Value) is { } closing ? TopLevel(closing) : first;
+                var elements = new List<OpenXmlElement>();
+                for (OpenXmlElement? element = first; element is not null; element = element.NextSibling())
+                {
+                    elements.Add(element);
+                    if (element == last) break;
+                }
+
+                // Метки самого блока снимаются раньше копирования: иначе каждая копия стала бы блоком.
+                foreach (var end in body.Descendants<BookmarkEnd>().Where(e => e.Id?.Value == start.Id?.Value).ToList()) end.Remove();
+                start.Remove();
+
+                var count = context.RepeatCount(target.Target);
+                if (count == 0)
+                {
+                    foreach (var element in elements) element.Remove();
+                    continue;
+                }
+                if (target.Part == BlockModes.Present) continue;
+
+                OpenXmlElement anchor = last;
+                for (var i = 0; i < count; i++)
+                {
+                    var copy = elements.Select(e => e.CloneNode(true)).ToList();
+                    foreach (var element in copy)
+                    {
+                        anchor.InsertAfterSelf(element);
+                        anchor = element;
+                    }
+                    using (context.Enter(target.Target, i))
+                        foreach (var bookmark in copy.SelectMany(e => e.Descendants<BookmarkStart>().Concat(e is BookmarkStart b ? [b] : []))
+                                     .Where(b => b.Name?.Value?.StartsWith(DocxBookmarks.Prefix, StringComparison.Ordinal) == true).ToList())
+                            Fill(body, bookmark);
+                    RenumberDrawings(copy);
+                    Unbookmark(copy);
+                }
+                foreach (var element in elements) element.Remove();
+            }
+        }
+
+        private bool IsBlock(BookmarkStart bookmark) =>
+            bookmark.Name?.Value is { } name && name.StartsWith(DocxBookmarks.Prefix, StringComparison.Ordinal) &&
+            mapping.TryGetValue(DocxBookmarks.BaseName(name), out var target) && target.Kind == BookmarkTargetKinds.Block;
+
+        // Элемент тела, в котором стоит метка: сама метка, если она прямо в теле.
+        private static OpenXmlElement TopLevel(OpenXmlElement element) =>
+            element.Parent is Body ? element : element.Ancestors().First(a => a.Parent is Body);
+
+        // У копии блока метки закладок не нужны: их имена и номера повторяли бы шаблонные.
+        private static void Unbookmark(IEnumerable<OpenXmlElement> copy)
+        {
+            var all = copy.SelectMany(e => e.Descendants<BookmarkStart>().Concat(e is BookmarkStart b ? [b] : [])).ToList();
+            var ids = all.Select(b => b.Id?.Value).ToHashSet();
+            foreach (var end in copy.SelectMany(e => e.Descendants<BookmarkEnd>().Concat(e is BookmarkEnd x ? [x] : [])).Where(e => ids.Contains(e.Id?.Value)).ToList())
+                end.Remove();
+            foreach (var start in all) start.Remove();
+        }
+
+        // Эмблема в каждой копии блока — свой номер рисунка: одинаковые номера Word не любит.
+        private void RenumberDrawings(IEnumerable<OpenXmlElement> copy)
+        {
+            foreach (var properties in copy.SelectMany(e => e.Descendants<DW.DocProperties>()))
+                properties.Id = NextDrawingId();
         }
 
         /// <summary>
@@ -102,6 +180,12 @@ public static partial class DocxGenerator
             var form = occurrence?.Form ?? WordForms.Nom;
             var stub = occurrence?.Stub ?? target.Stub;
             var range = Range(root, bookmark);
+
+            if (kind == BookmarkTargetKinds.Block)
+            {
+                warnings.Add($"Закладка {name}: блок можно печатать только из тела документа — оставлена как есть.");
+                return;
+            }
 
             if (kind == BookmarkTargetKinds.Table)
             {
@@ -181,7 +265,7 @@ public static partial class DocxGenerator
             foreach (var element in root.Descendants())
             {
                 if (element == start) inside = true;
-                else if (element is BookmarkEnd end && end.Id?.Value == start.Id?.Value) break;
+                else if (inside && element is BookmarkEnd end && end.Id?.Value == start.Id?.Value) break;
                 else if (inside) result.Add(element);
             }
             return result;
@@ -197,6 +281,14 @@ public static partial class DocxGenerator
                 // Закладка вокруг бланка («________», «"___" ______ 20__ г.»): пустое значение бланк не стирает —
                 // его заполнят вручную; значение заменяет бланк.
                 if (value.IsEmpty) unfilled.Add($"{name} — {missing}, оставлен бланк");
+                else if (value.Blocks.Count > 1 && range.OfType<Text>().FirstOrDefault() is { } first)
+                {
+                    // Бланк на нескольких абзацах («Составитель … (Ф.И.О.)»): остаётся первый абзац, значение — по абзацу на блок.
+                    var run = first.Ancestors<Run>().First();
+                    var owner = first.Ancestors<Paragraph>().First();
+                    ReplaceRange(range, bookmark, "");
+                    ReplaceParagraph(owner, run, value);
+                }
                 else ReplaceRange(range, bookmark, value.Inline);
                 return;
             }
@@ -444,6 +536,14 @@ public static partial class DocxGenerator
         private readonly Dictionary<Guid, string> _imageParts = [];
         private uint _drawingId;
 
+        // Номер для рисунка (docPr): следующий за наибольшим в документе, дальше по порядку.
+        private uint NextDrawingId()
+        {
+            if (_drawingId == 0)
+                _drawingId = (_main.Document?.Descendants<DW.DocProperties>().Select(p => p.Id?.Value ?? 0u).DefaultIfEmpty(0u).Max() ?? 0u) + 1;
+            return _drawingId++;
+        }
+
         private Run? ImageRun(PrintImage image, int widthDxa)
         {
             if (!context.Images.TryGetValue(image.FileId, out var info))
@@ -457,8 +557,6 @@ public static partial class DocxGenerator
                 using (var data = new MemoryStream(info.Content)) part.FeedData(data);
                 _imageParts[image.FileId] = relationship = _main.GetIdOfPart(part);
             }
-            if (_drawingId == 0)
-                _drawingId = (_main.Document?.Descendants<DW.DocProperties>().Select(p => p.Id?.Value ?? 0u).DefaultIfEmpty(0u).Max() ?? 0u) + 1;
 
             double width = image.Width ?? (image.Height is { } h ? h * (double)info.Width / info.Height : info.Width);
             double height = image.Height ?? (image.Width is { } w ? w * (double)info.Height / info.Width : info.Height);
@@ -467,7 +565,7 @@ public static partial class DocxGenerator
             var extentX = Math.Max((long)Math.Round(cx * scale), 1);
             var extentY = Math.Max((long)Math.Round(cy * scale), 1);
 
-            var id = _drawingId++;
+            var id = NextDrawingId();
             return new Run(new Drawing(new DW.Inline(
                 new DW.Extent { Cx = extentX, Cy = extentY },
                 new DW.EffectExtent { LeftEdge = 0L, TopEdge = 0L, RightEdge = 0L, BottomEdge = 0L },

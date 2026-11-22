@@ -53,6 +53,7 @@ public static class TemplateTitles
         "signature" => "Подпись",
         "table" => "Таблица",
         "text" => "Текст",
+        "block" => "Блок",
         _ => kind
     };
 
@@ -61,6 +62,8 @@ public static class TemplateTitles
         "position" => "должность",
         "name" => "ФИО",
         "document_title" => "наименование для документа",
+        "repeat" => "по экземпляру на элемент",
+        "present" => "один раз, если элементы есть",
         _ => part ?? ""
     };
 

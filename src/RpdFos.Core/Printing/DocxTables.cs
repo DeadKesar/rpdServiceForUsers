@@ -34,6 +34,12 @@ internal static class DocxTables
             case "lab_works" or "practical_classes":
                 Classes(table, builder, context, unfilled, bookmark, stub);
                 break;
+            case "fos_passport_sections":
+                PassportSections(table, context, unfilled, bookmark);
+                break;
+            case "fos_passport":
+                Passport(table, context, unfilled, bookmark);
+                break;
             default:
                 warnings.Add($"Закладка {bookmark}: построитель таблицы «{builder}» ещё не реализован.");
                 break;
@@ -322,6 +328,50 @@ internal static class DocxTables
             var cells = row.Elements<TableCell>().ToList();
             for (var i = 0; i < cells.Count && i < values.Length; i++)
                 SetCell(cells[i], [values[i]], bold, i == 2 ? JustificationValues.Left : JustificationValues.Center);
+            table.AppendChild(row);
+        }
+    }
+
+    // Таблица 1 паспорта ФОС: две строки шапки остаются, строки-образцы шаблона заменяются разделами паспорта.
+    private static void PassportSections(Table table, PrintContext context, List<string> unfilled, string bookmark)
+    {
+        var rows = table.Elements<TableRow>().ToList();
+        var prototype = rows.Count > 2 ? rows[2] : rows[^1];
+        var data = DataRow(prototype);
+        foreach (var sample in rows.Skip(2)) sample.Remove();
+
+        var sections = FosPrint.SectionRows(context);
+        if (sections.Count == 0) unfilled.Add($"{bookmark} — разделы паспорта не заполнены");
+        foreach (var section in sections)
+        {
+            var row = (TableRow)data.CloneNode(true);
+            var cells = row.Elements<TableCell>().ToList();
+            string[] values = [section.Number.ToString(), section.Title, section.Competences, section.Questions.ToString(), section.Tasks.ToString(), section.Tests.ToString()];
+            for (var i = 0; i < cells.Count && i < values.Length; i++)
+                SetCell(cells[i], [values[i]], bold: false, i is 1 or 2 ? JustificationValues.Left : JustificationValues.Center);
+            table.AppendChild(row);
+        }
+    }
+
+    // Таблица 2 паспорта ФОС: строка на индикатор; компетенция стоит в объединённой ячейке на свои индикаторы.
+    private static void Passport(Table table, PrintContext context, List<string> unfilled, string bookmark)
+    {
+        var header = table.Elements<TableRow>().First();
+        var rows = FosPrint.PassportRows(context);
+        if (rows.Count == 0) unfilled.Add($"{bookmark} — паспорт: индикаторы не заполнены");
+        string? previous = null;
+        foreach (var item in rows)
+        {
+            var row = DataRow(header);
+            var cells = row.Elements<TableCell>().ToList();
+            var continues = item.Competence == previous;
+            previous = item.Competence;
+            SetCell(cells[0], [continues ? "" : item.Competence], bold: false, JustificationValues.Left);
+            (cells[0].TableCellProperties ??= new TableCellProperties()).VerticalMerge =
+                new VerticalMerge { Val = continues ? MergedCellValues.Continue : MergedCellValues.Restart };
+            if (cells.Count > 1) SetCell(cells[1], [item.Indicator], bold: false, JustificationValues.Left);
+            if (cells.Count > 2) SetCell(cells[2], item.Sections, bold: false, JustificationValues.Left);
+            if (cells.Count > 3) SetCell(cells[3], item.Tasks, bold: false, JustificationValues.Left);
             table.AppendChild(row);
         }
     }
