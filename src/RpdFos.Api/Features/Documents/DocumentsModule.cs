@@ -279,7 +279,6 @@ public class DocumentsModule : ICarterModule
                     DocumentCreationProblem.BaseSamePlan => "Основа из того же плана",
                     DocumentCreationProblem.RpdNotFound => "РПД не найдена",
                     DocumentCreationProblem.RpdOtherDiscipline => "РПД другой дисциплины",
-                    DocumentCreationProblem.BaseNotSupported => "ФОС на основе документа пока не создаётся",
                     _ => "Для этой строки плана документ не создаётся"
                 },
                 detail: result.Detail)
@@ -551,7 +550,7 @@ public class DocumentsModule : ICarterModule
     /// <summary>
     /// «В архив» (этап 7, A9, решение 3): согласованный документ отправляют в архив автор, методист или администратор.
     /// Преподаватель, не автор, — 403 раньше проверки статуса: чужой документ не сообщает, в каком он состоянии. Документ в
-    /// другом статусе — 409. Подтверждение — на клиенте.
+    /// другом статусе — 409. Подтверждение — на клиенте. РПД с незавершённым ФОС — 409 с названием ФОС (B10).
     /// </summary>
     private static async Task<IResult> Archive(
         Guid id, DocumentVersionRequest rq, HttpContext http, AppDbContext db, DirectoryAccounts directory, DocumentArchiving archiving,
@@ -566,7 +565,13 @@ public class DocumentsModule : ICarterModule
         if (!DocumentTransitions.CanArchive(document.Status)) return Refused(document, DocumentTransitions.ArchiveAction);
 
         db.Entry(document).Property(d => d.Version).OriginalValue = rq.Version;
-        await archiving.ArchiveAsync(document, me, ActorRole(http.User), ct);
+        var result = await archiving.ArchiveAsync(document, me, ActorRole(http.User), ct);
+        // РПД с незавершённым ФОС в архив не уходит (этап 7, B10): ФОС назван, чтобы автор знал, что довести.
+        if (result.BlockingFos is { } fos)
+            return Results.Problem(statusCode: StatusCodes.Status409Conflict, title: "Есть незавершённый ФОС",
+                detail: $"В архив РПД не уходит, пока по ней есть незавершённый ФОС: «{fos.Title}» ({DocumentStatuses.Title(fos.Status)}). " +
+                        "Согласуйте его, отправьте в архив или удалите.",
+                extensions: new Dictionary<string, object?> { ["documentId"] = fos.Id, ["location"] = $"/api/documents/{fos.Id}" });
         await db.SaveChangesAsync(ct);
         return Results.Ok(new DocumentReviewed(document.Version, document.Status, DocumentStatuses.Title(document.Status), []));
     }
@@ -889,9 +894,8 @@ public class DocumentsModule : ICarterModule
         var awaiting = viewer.IsSignatory && panel is not null && panel.Seats.Any(s => s.Mine && s.Status == SignatureStatuses.Pending);
         var signs = awaiting && DocumentTransitions.CanSign(status);
         // «Создать на основе» (этап 7, A11): автор, методист, администратор и закреплённый за дисциплиной — как и сама основа.
-        // Закрепление проверяется последним: запрос к базе только тем, кому иначе кнопка не положена. У ФОС её пока нет — она
-        // придёт с циклом ФОС (B10): экран создания берёт основой только РПД.
-        var canBase = document.Type == TemplateTypes.Rpd && DocumentTransitions.CanBaseNew(status) && (isAuthor || isCorrector ||
+        // Закрепление проверяется последним: запрос к базе только тем, кому иначе кнопка не положена. У ФОС кнопка та же (B10).
+        var canBase = DocumentTransitions.CanBaseNew(status) && (isAuthor || isCorrector ||
             viewer.IsAssigned || viewer.Id is Guid me && await assignments.IsAssignedAsync(document.DisciplineId, me, ct));
 
         // ФОС и РПД (этап 7, B3): у ФОС — связанная РПД и пометка «РПД изменилась», у РПД — её ФОС и право создать новый.

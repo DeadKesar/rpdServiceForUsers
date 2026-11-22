@@ -48,10 +48,7 @@ public enum DocumentCreationProblem
     RpdArchived,
 
     /// <summary>У дисциплины нет РПД, по которой можно создать ФОС: не создана, удалена или в архиве (B3) — 409.</summary>
-    NoRpd,
-
-    /// <summary>ФОС «на основе» другого документа появится вместе с циклом ФОС (B10) — 422.</summary>
-    BaseNotSupported
+    NoRpd
 }
 
 public sealed record DocumentCreationResult(Document? Document, DocumentCreationProblem? Problem = null, string? Detail = null,
@@ -106,7 +103,7 @@ public sealed class DocumentCreation(
     /// <param name="basedOnId">
     /// Документ-основа (этап 7, A11; решение 4): неудалённый документ того же типа — для той же дисциплины или для дисциплины
     /// другого плана. У дисциплины с согласованным документом новый создаётся только на основе согласованного. ФОС на основе
-    /// другого документа создаётся в цикле ФОС (B10): пока отказ.
+    /// другого документа (B10) — тоже: цель — РПД дисциплины, наследуемое берётся из неё (<see cref="FosBasing"/>).
     /// </param>
     /// <param name="rpdId">
     /// РПД, по которой создаётся ФОС (этап 7, B3). Не названа — берётся РПД дисциплины
@@ -144,9 +141,6 @@ public sealed class DocumentCreation(
         Document? rpd = null;
         if (isFos)
         {
-            if (basedOnId is not null)
-                return new(null, DocumentCreationProblem.BaseNotSupported,
-                    "ФОС на основе другого документа создаётся в цикле ФОС и пока недоступен: создайте ФОС по РПД.");
             if (rpdId is Guid named)
             {
                 rpd = await db.Documents.AsNoTracking().SingleOrDefaultAsync(d => d.Id == named && d.Type == TemplateTypes.Rpd, ct);
@@ -231,6 +225,8 @@ public sealed class DocumentCreation(
             notTransferred = DocumentBasing.Transfer(payload, schema, JsonDocument.Parse(source.Schema).RootElement,
                 source.DefaultPayload is { } defaults ? JsonNode.Parse(defaults) : null,
                 JsonNode.Parse(basis.Payload) as JsonObject ?? [], facts, author.Id, hidden, registry.FindSchema).NotTransferred;
+            // ФОС: ссылки переносимого — на индикаторы и разделы РПД цели; чего в ней нет, убирается (B10).
+            if (isFos) notTransferred = [.. notTransferred, .. FosBasing.Adapt(payload)];
         }
 
         var document = new Document

@@ -54,9 +54,8 @@
 
 @* Основа (этап 7, A11; S-11): ввод автора переносится из неё в новый документ — для той же дисциплины или для дисциплины
    другого плана; поля из учебного плана берутся заново. Основа названа ссылкой «Создать на основе» из согласованного или
-   архивного документа либо выбрана здесь. У ФОС основы пока нет — она придёт с циклом ФОС (B10). *@
-@if (docType == RpdType)
-{
+   архивного документа либо выбрана здесь. У ФОС основа — прежний ФОС (B10): банк, билеты, средства и шкала переносятся,
+   наследуемое берётся из РПД цели. *@
 <div class="mb-3" style="max-width: 960px">
     <label class="form-label">Основа</label>
     @if (basis is { } chosen)
@@ -90,14 +89,13 @@
                     <option value="@b.Id">@b.Title — @b.StatusTitle, @b.AuthorName</option>
                 }
             </select>
-            @if (bases.Count == 0)
+            @if (!Bases.Any())
             {
-                <div class="form-text">Документов, которые можно взять основой, нет: нужны свои РПД или РПД закреплённых за вами дисциплин.</div>
+                <div class="form-text">Документов, которые можно взять основой, нет: нужны свои @TypeTitle или @TypeTitle закреплённых за вами дисциплин.</div>
             }
         }
     }
 </div>
-}
 
 <div class="mb-3" style="max-width: 960px">
     <label class="form-label">Опубликованный шаблон @TypeTitle</label>
@@ -186,6 +184,22 @@
                                 {
                                     <span class="small text-muted">ФОС уже есть (автор — @d.DocumentAuthor)</span>
                                 }
+                                @* Согласованный ФОС занимает дисциплину: новый создаётся только на его основе (этап 7, B10). *@
+                                @if (d.DocumentStatus == "approved" && d.CanCreate && d.RpdId is not null)
+                                {
+                                    @if (basis is null)
+                                    {
+                                        <div class="small text-muted">Новый ФОС — на основе согласованного</div>
+                                    }
+                                    else if (BasisRefusal(d) is { } whyNot)
+                                    {
+                                        <div class="small text-muted">@whyNot</div>
+                                    }
+                                    else
+                                    {
+                                        <button class="btn btn-sm btn-primary ms-1" disabled="@busy" @onclick="() => CreateAsync(d)">Создать на основе</button>
+                                    }
+                                }
                             }
                             else if (d.RpdId is null)
                             {
@@ -193,7 +207,16 @@
                             }
                             else if (d.CanCreate)
                             {
-                                <button class="btn btn-sm btn-primary" disabled="@busy" @onclick="() => CreateAsync(d)">Создать ФОС</button>
+                                @if (BasisRefusal(d) is { } refusalFos)
+                                {
+                                    <span class="small text-muted">@refusalFos</span>
+                                }
+                                else
+                                {
+                                    <button class="btn btn-sm btn-primary" disabled="@busy" @onclick="() => CreateAsync(d)">
+                                        @(basis is null ? "Создать ФОС" : "Создать на основе")
+                                    </button>
+                                }
                             }
                             else
                             {
@@ -281,7 +304,10 @@
 
     private List<TemplateItem> templates = [];
     private List<DisciplineOption>? disciplines;
-    private List<DocumentListItem> bases = [];
+    private List<DocumentListItem> allBases = [];
+
+    // Основа — документ того же типа, что создаётся: РПД на основе РПД, ФОС на основе ФОС (этап 7, B10).
+    private IEnumerable<DocumentListItem> Bases => allBases.Where(b => b.Type == docType);
     private DocumentListItem? basis;
     private bool basesLoaded, choosing;
     private string baseFilter = "";
@@ -294,7 +320,7 @@
     private TemplateItem? SelectedTemplate => templates.FirstOrDefault(t => t.Id.ToString() == templateId);
 
     // Основой служат свои РПД и РПД закреплённых дисциплин (методисту и администратору — все): тот же отбор, что на сервере.
-    private IEnumerable<DocumentListItem> FilteredBases => bases.Where(b => baseFilter.Length == 0 ||
+    private IEnumerable<DocumentListItem> FilteredBases => Bases.Where(b => baseFilter.Length == 0 ||
         $"{b.Title} {b.DisciplineName} {b.AuthorName}".Contains(baseFilter.Trim(), StringComparison.CurrentCultureIgnoreCase));
 
     protected override async Task OnInitializedAsync()
@@ -307,7 +333,7 @@
             {
                 // «Создать ФОС» из РПД: у плана РПД один опубликованный шаблон ФОС — он уже выбран.
                 await LoadBasesAsync();
-                fosRpd = bases.FirstOrDefault(b => b.Id == sourceId);
+                fosRpd = allBases.FirstOrDefault(b => b.Id == sourceId && b.Type == RpdType);
                 if (fosRpd is null)
                     (messageIsError, message) = (true, "РПД недоступна: она удалена или не открыта вам. Выберите дисциплину из списка.");
                 else if (fosRpd.Plan is { } rpdPlan && templates.Where(t => t.Plan?.Id == rpdPlan.Id).ToList() is [var onlyOne])
@@ -319,7 +345,13 @@
             else if (BasedOnId is Guid basedOn)
             {
                 await LoadBasesAsync();
-                basis = bases.FirstOrDefault(b => b.Id == basedOn);
+                basis = allBases.FirstOrDefault(b => b.Id == basedOn);
+                // Основа — ФОС: открывается создание ФОС со своими шаблонами (этап 7, B10).
+                if (basis is { Type: FosType } && docType != FosType)
+                {
+                    docType = FosType;
+                    templates = await LoadTemplatesAsync();
+                }
                 if (basis is null)
                     (messageIsError, message) = (true, "Основа недоступна: документ удалён или не открыт вам. Выберите другую основу или создайте документ без неё.");
                 // Следующая редакция той же дисциплины: если у плана основы один опубликованный шаблон, он уже выбран.
@@ -339,7 +371,7 @@
     private async Task<List<TemplateItem>> LoadTemplatesAsync() =>
         await Http.GetFromJsonAsync<List<TemplateItem>>($"api/templates?type={docType}&status=published") ?? [];
 
-    // Смена типа начинает выбор заново: у РПД и ФОС свои шаблоны, а у ФОС нет основы (этап 7, B3).
+    // Смена типа начинает выбор заново: у РПД и ФОС свои шаблоны (этап 7, B3).
     private async Task SelectTypeAsync(string type)
     {
         if (type == docType) return;
@@ -359,7 +391,7 @@
         if (basesLoaded) return;
         var own = await Http.GetFromJsonAsync<List<DocumentListItem>>("api/documents") ?? [];
         var assigned = await Http.GetFromJsonAsync<List<DocumentListItem>>("api/documents/assigned") ?? [];
-        bases = own.Concat(assigned).Where(d => d.Type == "rpd").DistinctBy(d => d.Id).OrderBy(d => d.Title).ToList();
+        allBases = own.Concat(assigned).Where(d => d.Type is "rpd" or "fos").DistinctBy(d => d.Id).OrderBy(d => d.Title).ToList();
         basesLoaded = true;
     }
 
@@ -379,7 +411,7 @@
 
     private void PickBase(ChangeEventArgs e)
     {
-        basis = Guid.TryParse(e.Value?.ToString(), out var id) ? bases.FirstOrDefault(b => b.Id == id) : null;
+        basis = Guid.TryParse(e.Value?.ToString(), out var id) ? Bases.FirstOrDefault(b => b.Id == id) : null;
         choosing = basis is null;
         message = null;
     }
@@ -417,11 +449,11 @@
         existingId = null;
         try
         {
-            // У ФОС вместо основы — РПД: названная в ссылке «Создать ФОС» или РПД дисциплины, которую показал список.
+            // ФОС создаётся по РПД — названной в ссылке «Создать ФОС» или РПД дисциплины, которую показал список; основа (B10) — прежний ФОС.
             var response = await Http.PostAsJsonAsync("api/documents", new
             {
                 templateId = Guid.Parse(templateId), disciplineId = discipline.Id,
-                basedOnDocumentId = docType == RpdType ? basis?.Id : null,
+                basedOnDocumentId = basis?.Id,
                 rpdDocumentId = docType == FosType ? fosRpd?.Id ?? discipline.RpdId : null
             });
             if (response.StatusCode == HttpStatusCode.Created && await response.Content.ReadFromJsonAsync<DocumentDetails>() is { } created)

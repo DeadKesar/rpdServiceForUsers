@@ -22,12 +22,15 @@ public sealed record BasingResult(JsonObject Payload, IReadOnlyList<string> NotT
 /// документа. Постоянные пункты вуза (<c>x-template-default</c>) берутся из нового шаблона, если автор их не менял.
 /// Ссылки на дисциплины плана переносятся, если эта дисциплина есть в плане цели.</item>
 /// <item>Поле основы, которого нет в схеме нового шаблона или тип которого изменился, тоже в списке.</item>
+    /// <item>Разделы только для чтения (<c>x-readonly</c>, снимок РПД в ФОС) ведёт система: в новом документе они собраны для цели
+    /// и из основы не переносятся (B10).</item>
 /// </list>
 /// Правило без базы: проверяется на схемах и содержимом, поэтому тесты не поднимают хост.
 /// </summary>
 public static class DocumentBasing
 {
-    private const string CompetenceSource = "db.competence_matrix.by_discipline", DeveloperSource = "db.user.current";
+    private const string CompetenceSource = "db.competence_matrix.by_discipline", DeveloperSource = "db.user.current",
+        ReadOnlyKeyword = "x-readonly";
 
     /// <param name="fresh">
     /// Содержимое нового документа, собранное для цели как при создании с нуля: поля из плана и справочников, автор среди
@@ -80,6 +83,9 @@ public static class DocumentBasing
                     continue;
                 }
 
+                // Раздел только для чтения ведёт система, а не автор (снимок РПД в ФОС): в новом документе он собран для цели.
+                if (Declares(p.Value, child, ReadOnlyKeyword, mustBeTrue: true)) continue;
+
                 // Поле из плана или справочника — заново. Особые случаи: компетенции и составители.
                 if ((Text(p.Value, "x-source") ?? Text(child, "x-source")) is { } source)
                 {
@@ -119,7 +125,8 @@ public static class DocumentBasing
                 var value = from[p.Name];
                 // Поля из плана основа не вводила; составители и протокол названы отдельно (Forward).
                 if (!Has(value) || Text(p.Value, "x-source") is not null || Text(child, "x-source") is not null ||
-                    Declares(p.Value, child, "x-required-for-status")) continue;
+                    Declares(p.Value, child, "x-required-for-status") || Declares(p.Value, child, ReadOnlyKeyword, mustBeTrue: true))
+                    continue;
 
                 var pointer = $"{path}/{p.Name}";
                 var named = titles.Append(Text(child, "title") ?? Text(p.Value, "title") ?? p.Name).ToList();

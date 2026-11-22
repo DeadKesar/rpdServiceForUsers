@@ -18,6 +18,15 @@ public sealed class LinkedDocuments(AppDbContext db)
             .Where(d => d.Type == TemplateTypes.Fos && d.DisciplineId == rpd.DisciplineId)
             .OrderByDescending(d => d.CreatedAt).ToListAsync(ct), rpd.Id);
 
+    /// <summary>
+    /// Те же ФОС, но отслеживаемые контекстом: «устарел» и архив РПД переносятся на согласованный ФОС (этап 7, B10) в том же
+    /// сохранении, что и сама РПД.
+    /// </summary>
+    public async Task<List<Document>> TrackedFosOfAsync(Document rpd, CancellationToken ct = default) =>
+        Linked(await db.Documents
+            .Where(d => d.Type == TemplateTypes.Fos && d.DisciplineId == rpd.DisciplineId)
+            .OrderByDescending(d => d.CreatedAt).ToListAsync(ct), rpd.Id);
+
     /// <summary>Автор ли сотрудник хотя бы одного ФОС, созданного по этой РПД: ему РПД открыта для чтения.</summary>
     public async Task<bool> IsFosAuthorAsync(Document rpd, Guid employeeId, CancellationToken ct = default) =>
         Linked(await db.Documents.AsNoTracking()

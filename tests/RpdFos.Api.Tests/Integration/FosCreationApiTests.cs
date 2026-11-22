@@ -403,9 +403,9 @@ public class FosCreationApiTests(DatabaseFixture fixture) : AssignmentTestBase(f
         var rpd = await FilledRpdAsync(author, (await DocumentData.PublishedTemplateAsync(App)).Id, "Б1.О.13");
         var fosTemplate = await FosTemplateAsync();
 
-        // ФОС «на основе» придёт с циклом ФОС (B10): пока отказ, документ не создан.
+        // ФОС на основе РПД (документа другого типа) не создаётся (B10): отказ, документ не создан.
         var basis = await RefusedAsync(author, HttpStatusCode.UnprocessableEntity, fosTemplate.Id, rpd.Document.DisciplineId, rpd.Document.Id, basedOn: rpd.Document.Id);
-        Assert.Equal("ФОС на основе документа пока не создаётся", basis.Title);
+        Assert.Equal("Основа другого типа", basis.Title);
         Assert.Equal(0, await FosCountAsync(rpd.Document.Id));
 
         var fos = await CreatedAsync(author, fosTemplate.Id, rpd.Document.DisciplineId, rpd.Document.Id);
