@@ -585,6 +585,20 @@ public class FosCreationApiTests(DatabaseFixture fixture) : AssignmentTestBase(f
     }
 
     [Fact]
+    public async Task The_client_gets_the_fos_with_the_title_page_and_the_approval_sheet_spelled_out_not_referenced()
+    {
+        var (author, fos, _) = await FosWithBankAsync("Б1.О.11");
+
+        var properties = (await DetailsAsync(author, fos.Document.Id)).Schema.GetProperty("properties");
+
+        // Клиент разбирает только локальные ссылки (точка проверки B7): титул и лист согласования приходят готовыми разделами.
+        Assert.True(properties.GetProperty("title_page").GetProperty("properties").TryGetProperty("academic_year", out _));
+        Assert.Equal("developer_picker",
+            properties.GetProperty("approval_sheet").GetProperty("properties").GetProperty("developers").GetProperty("x-ui-widget").GetString());
+        Assert.DoesNotContain("\"$ref\":\"https", properties.GetRawText().Replace(" ", ""));
+    }
+
+    [Fact]
     public async Task Rich_text_of_tasks_and_ticket_questions_is_sanitized()
     {
         var (author, fos, version) = await FosWithBankAsync("Б1.О.11");

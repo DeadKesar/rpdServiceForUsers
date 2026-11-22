@@ -163,4 +163,37 @@ public class FosSchemaTests
         Assert.Subset(Names(rpd, "/competences/0/indicators/0").ToHashSet(), Names(fos, "/linked_rpd/competences/0/indicators/0").ToHashSet());
         Assert.DoesNotContain("results", Names(fos, "/linked_rpd/competences/0/indicators/0"));
     }
+
+    // Поля без title общая форма подписывает именем свойства по-английски («module», «min_score»): так выглядели три раздела
+    // ФОС на точке проверки B7. Свои виджеты (паспорт, банк, средства, билеты, связь с РПД) подписи рисуют сами.
+    private static IEnumerable<string> Untitled(JsonElement schema, string path)
+    {
+        if (schema.TryGetProperty("properties", out var properties))
+            foreach (var property in properties.EnumerateObject())
+            {
+                var here = $"{path}/{property.Name}";
+                if (!property.Value.TryGetProperty("title", out _)) yield return here;
+                foreach (var inner in Untitled(property.Value, here)) yield return inner;
+            }
+        if (schema.TryGetProperty("items", out var items))
+            foreach (var inner in Untitled(items, $"{path}/*")) yield return inner;
+    }
+
+    [Theory]
+    [InlineData("competence_indicators")]
+    [InlineData("current_control")]
+    [InlineData("evaluation_scale")]
+    public void Sections_drawn_by_the_generic_form_have_a_title_on_every_field(string section) =>
+        Assert.Empty(Untitled(Registry.Get(DocumentTypeRegistry.Fos).Schema.GetProperty("properties").GetProperty(section), $"/{section}"));
+
+    [Fact]
+    public void Every_scale_type_has_a_russian_title()
+    {
+        var type = Registry.Get(DocumentTypeRegistry.Fos).Schema.GetProperty("properties").GetProperty("evaluation_scale")
+            .GetProperty("properties").GetProperty("type");
+        var titles = type.GetProperty("x-enum-titles");
+
+        Assert.All(type.GetProperty("enum").EnumerateArray().Select(v => v.GetString()!), kind =>
+            Assert.Matches("[А-Яа-я]", titles.GetProperty(kind).GetString()!));
+    }
 }

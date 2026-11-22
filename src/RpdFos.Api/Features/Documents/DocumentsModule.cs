@@ -903,7 +903,8 @@ public class DocumentsModule : ICarterModule
         return new DocumentDetails(
             DocumentItem.From(document, facts.Discipline),
             payload,
-            JsonDocument.Parse(schemaJson).RootElement,
+            // Титул и лист согласования ФОС ссылаются на схему РПД; клиент ссылки на чужие схемы не разбирает (этап 7, B7).
+            SchemaBundle.ForClient(schemaJson, registry.FindSchema),
             DocumentMetadata.Build(schemaJson, payload, status, facts, validator, rules, registry.FindSchema,
                 template.PrintMapping is { } mapping ? PrintMappingJson.ReadMapping(mapping) : null),
             // Остальным редактор показывает документ только для чтения.

@@ -100,8 +100,8 @@
       "items": {
         "type": "object",
         "properties": {
-          "code": { "type": "string" },
-          "text": { "type": "string" }
+          "code": { "type": "string", "title": "Код индикатора" },
+          "text": { "type": "string", "title": "Формулировка" }
         }
       }
     },
@@ -150,31 +150,32 @@
       "properties": {
         "forms": {
           "type": "array",
-          "items": { "type": "string" },
-          "description": "Формы текущей аттестации"
+          "title": "Формы текущей аттестации",
+          "items": { "type": "string" }
         },
         "activities": {
           "type": "array",
-          "description": "Мероприятия текущего контроля по модулям",
+          "title": "Мероприятия текущего контроля по модулям",
           "items": {
             "type": "object",
             "required": ["title"],
             "properties": {
-              "module": { "type": "string" },
-              "title": { "type": "string" },
-              "description": { "type": "string", "x-ui-widget": "richtext" }
+              "module": { "type": "string", "title": "Модуль" },
+              "title": { "type": "string", "title": "Мероприятие" },
+              "description": { "type": "string", "title": "Описание", "x-ui-widget": "richtext" }
             }
           }
         },
         "variants": {
           "type": "array",
-          "items": { "type": "string", "x-ui-widget": "richtext" },
-          "description": "Программы и типовые варианты"
+          "title": "Программы и типовые варианты",
+          "items": { "type": "string", "x-ui-widget": "richtext" }
         },
         "rating": {
           "type": "string",
+          "title": "Модульно-рейтинговые атрибуты",
           "x-ui-widget": "richtext",
-          "description": "Модульно-рейтинговые атрибуты (баллы, недели) — текстом; раздел необязательный"
+          "description": "Баллы и недели — текстом; раздел необязательный"
         }
       }
     },
@@ -282,19 +283,21 @@
       "properties": {
         "type": {
           "type": "string",
+          "title": "Вид шкалы",
           "enum": ["five_point", "pass_fail", "hundred_point"],
-          "description": "Балльная (5), зачёт/незачёт, 100-балльная"
+          "x-enum-titles": { "five_point": "Балльная (5)", "pass_fail": "Зачёт / незачёт", "hundred_point": "100-балльная" }
         },
         "criteria": {
           "type": "array",
+          "title": "Критерии оценок",
           "items": {
             "type": "object",
             "required": ["grade", "description"],
             "properties": {
-              "grade": { "type": "string" },
-              "min_score": { "type": "number", "description": "Нижняя граница баллов; в критериях Положения баллов нет" },
-              "max_score": { "type": "number" },
-              "description": { "type": "string" }
+              "grade": { "type": "string", "title": "Оценка" },
+              "min_score": { "type": "number", "title": "От, баллов", "description": "Нижняя граница баллов; в критериях Положения баллов нет" },
+              "max_score": { "type": "number", "title": "До, баллов" },
+              "description": { "type": "string", "title": "Описание" }
             }
           }
         }
