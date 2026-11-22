@@ -2,8 +2,11 @@ namespace RpdFos.Web.Models;
 
 // Контракт API строк матрицы без дисциплины плана (Features/Imports) на стороне клиента (этапы 5.2 и 7.1).
 
-/// <summary>Дисциплина плана в выборе строки: кандидат неоднозначной строки или дисциплина без связей с матрицей — выше прочих.</summary>
-public sealed record MatrixRowOptionItem(Guid Id, string Code, string Name, bool Candidate, bool WithoutMatrix);
+/// <summary>
+/// Дисциплина плана в выборе строки: кандидат неоднозначной строки, уже привязанная другой строкой блока или без связей
+/// с матрицей — выше прочих.
+/// </summary>
+public sealed record MatrixRowOptionItem(Guid Id, string Code, string Name, bool Candidate, bool LinkedHere, bool WithoutMatrix);
 
 /// <summary>
 /// Строка блока: одна строка матрицы или группа одинаковых (этап 7.1). <paramref name="Id"/> — первая строка группы, по ней

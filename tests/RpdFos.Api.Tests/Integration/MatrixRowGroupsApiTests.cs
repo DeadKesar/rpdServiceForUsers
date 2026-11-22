@@ -142,28 +142,45 @@ public class MatrixRowGroupsApiTests(DatabaseFixture app)
     }
 
     [Fact]
-    public async Task Options_of_other_rows_change_order_after_binding_but_keep_their_ids()
+    public async Task Discipline_bound_by_one_row_stays_at_the_top_of_the_list_of_other_rows()
     {
-        // Основа выбора по идентификатору дисциплины (клиент — MatrixRowChoicesTests): после привязки дисциплина получила
-        // связи и ушла из «без связей с матрицей» — в списках остальных строк она встала на другое место.
+        // Замечание по итогам проверки шага 1: одна дисциплина встречается в нескольких таблицах матрицы под разными
+        // названиями. После первой привязки она получает связи, уходит из «без связей с матрицей» в общий список по кодам —
+        // в плане из 80–90 дисциплин во второй строке её не найти. Привязанные в этом блоке остаются наверху.
         var (methodist, _) = await DocumentData.UserAsync(app, AppRoles.Methodist);
         var runId = await RealRunIdAsync();
         var elective = await DocumentData.DisciplineAsync(app, Elective);
         var seeded = await SeedAsync(
-            Row("Таблица 1", 30, "Первая строка для порядка", "3", "ПК-1"),
-            Row("Таблица 1", 31, "Вторая строка для порядка", "5", "ПК-2"));
+            Row("Таблица 1", 30, "Первая строка той же дисциплины", "3", "ПК-1"),
+            Row("Таблица 3", 31, "Вторая строка той же дисциплины", "5", "ПК-2"));
         try
         {
-            static int IndexOf(MatrixRowState row, Guid id) => row.Options.ToList().FindIndex(o => o.Id == id);
-            var before = Assert.Single(await ListAsync(methodist, runId), r => r.Name == "Вторая строка для порядка");
-            Assert.True(before.Options.Single(o => o.Id == elective).WithoutMatrix);
+            static MatrixRowState Second(IEnumerable<MatrixRowState> rows) => Assert.Single(rows, r => r.Name == "Вторая строка той же дисциплины");
+            var before = Second(await ListAsync(methodist, runId));
+            var asBefore = before.Options.Single(o => o.Id == elective);
+            Assert.Equal((false, true), (asBefore.LinkedHere, asBefore.WithoutMatrix));
 
             Assert.Equal(HttpStatusCode.OK, (await Apply(methodist, seeded[0], elective)).StatusCode);
 
-            var after = Assert.Single(await ListAsync(methodist, runId), r => r.Name == "Вторая строка для порядка");
-            Assert.False(after.Options.Single(o => o.Id == elective).WithoutMatrix);
-            Assert.NotEqual(IndexOf(before, elective), IndexOf(after, elective));
+            // Привязанная первой строкой дисциплина — первая в списке второй строки (кандидатов у неё нет) и помечена; набор
+            // вариантов тот же.
+            var after = Second(await ListAsync(methodist, runId));
+            Assert.Equal(elective, after.Options[0].Id);
+            Assert.Equal((true, false), (after.Options[0].LinkedHere, after.Options[0].WithoutMatrix));
+            Assert.Single(after.Options, o => o.LinkedHere);
             Assert.Equal(before.Options.Select(o => o.Id).Order(), after.Options.Select(o => o.Id).Order());
+
+            // Вторая строка той же дисциплины привязывается к ней же; пока привязана хоть одна — она наверху.
+            Assert.Equal(HttpStatusCode.OK, (await Apply(methodist, seeded[1], elective)).StatusCode);
+            Assert.Equal(["ПК-1", "ПК-2"], await LinksAsync(elective));
+            Assert.Equal(HttpStatusCode.NoContent, (await methodist.PostAsync($"/api/imports/matrix-rows/{seeded[0]}/undo", null)).StatusCode);
+            Assert.Equal(["ПК-2"], await LinksAsync(elective));
+            Assert.Equal(HttpStatusCode.NoContent, (await methodist.PostAsync($"/api/imports/matrix-rows/{seeded[1]}/undo", null)).StatusCode);
+
+            // Привязок нет — дисциплина снова «без связей с матрицей», как в начале.
+            var end = Assert.Single(await ListAsync(methodist, runId), r => r.Id == seeded[0]);
+            var asEnd = end.Options.Single(o => o.Id == elective);
+            Assert.Equal((false, true), (asEnd.LinkedHere, asEnd.WithoutMatrix));
         }
         finally
         {

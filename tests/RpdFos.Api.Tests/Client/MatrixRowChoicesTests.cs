@@ -10,9 +10,9 @@ namespace RpdFos.Api.Tests.Client;
 /// </summary>
 public sealed class MatrixRowChoicesTests
 {
-    private static readonly MatrixRowOptionItem Elective = new(Guid.NewGuid(), "Б1.В.ДВ.03.01", "Факультатив", false, true);
-    private static readonly MatrixRowOptionItem Project = new(Guid.NewGuid(), "Б1.В.01.04", "Проект по дисциплине", false, true);
-    private static readonly MatrixRowOptionItem Basics = new(Guid.NewGuid(), "Б1.О.01", "Основы", false, false);
+    private static readonly MatrixRowOptionItem Elective = new(Guid.NewGuid(), "Б1.В.ДВ.03.01", "Факультатив", false, false, true);
+    private static readonly MatrixRowOptionItem Project = new(Guid.NewGuid(), "Б1.В.01.04", "Проект по дисциплине", false, false, true);
+    private static readonly MatrixRowOptionItem Basics = new(Guid.NewGuid(), "Б1.О.01", "Основы", false, false, false);
 
     private static MatrixRowItem Row(Guid id, string status, params MatrixRowOptionItem[] options) =>
         new(id, "Строка", ["Таблица 1, строка 49"], "3", ["УК-1"], status, null, null, null, null, [.. options]);
@@ -25,13 +25,14 @@ public sealed class MatrixRowChoicesTests
         var choices = new MatrixRowChoices();
         var before = new[] { Row(first, "pending", Project, Elective, Basics), Row(second, "pending", Project, Elective, Basics) };
         choices.Reconcile(before);
-        // В обеих строках выбрана одна и та же дисциплина — случай из замечания.
-        choices.Set(first, Project.Id.ToString());
+        // Первая строка — Б1.В.ДВ.03.01, вторая — Б1.В.01.04.
+        choices.Set(first, Elective.Id.ToString());
         choices.Set(second, Project.Id.ToString());
 
-        // Первую строку привязали к Б1.В.01.04: у дисциплины появились связи, во второй строке она ушла вниз списка.
-        var after = Row(second, "pending", Elective, Basics, Project);
-        choices.Reconcile([Row(first, "linked", Project), after]);
+        // Первую строку привязали: у дисциплины появились связи, во второй строке она встала на первое место,
+        // а выбранная там дисциплина сдвинулась на одно место вниз.
+        var after = Row(second, "pending", Elective with { LinkedHere = true, WithoutMatrix = false }, Project, Basics);
+        choices.Reconcile([Row(first, "linked", Elective), after]);
 
         Assert.Equal(Project.Id.ToString(), choices.Get(second));
         Assert.True(choices.TryGetTarget(second, out var target));

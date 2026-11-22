@@ -45,7 +45,7 @@
                                 <option value="@MatrixRowChoices.Ignore">Не учитывать</option>
                                 @foreach (var o in row.Options)
                                 {
-                                    <option value="@o.Id">@o.Code @o.Name@(o.Candidate ? " — кандидат" : o.WithoutMatrix ? " — без связей с матрицей" : "")</option>
+                                    <option value="@o.Id">@o.Code @o.Name@(o.Candidate ? " — кандидат" : o.LinkedHere ? " — уже привязана в этом блоке" : o.WithoutMatrix ? " — без связей с матрицей" : "")</option>
                                 }
                             </select>
                         </td>

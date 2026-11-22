@@ -7,8 +7,11 @@ using Parsed = DisciplineDataExtractor;
 
 namespace RpdFos.Core.Import;
 
-/// <summary>Дисциплина плана в выборе для строки матрицы: кандидат неоднозначной строки, без связей с матрицей, прочая.</summary>
-public sealed record MatrixRowOption(Guid Id, string Code, string Name, bool Candidate, bool WithoutMatrix);
+/// <summary>
+/// Дисциплина плана в выборе для строки матрицы: кандидат неоднозначной строки, уже привязанная другой строкой блока
+/// (<paramref name="LinkedHere"/>, этап 7.1), без связей с матрицей, прочая.
+/// </summary>
+public sealed record MatrixRowOption(Guid Id, string Code, string Name, bool Candidate, bool LinkedHere, bool WithoutMatrix);
 
 /// <summary>
 /// Строка блока «Строки матрицы без дисциплины плана»: одна строка матрицы или группа одинаковых (этап 7.1) — что в ней,
@@ -37,7 +40,8 @@ public sealed class MatrixRowBinding(AppDbContext db, TimeProvider clock)
 
     /// <summary>
     /// Строки версии плана и варианты выбора: дисциплины, практики и факультативы — без модулей, групп элективов и ГИА;
-    /// сначала кандидаты неоднозначной строки, затем дисциплины без связей с матрицей, затем остальные.
+    /// сначала кандидаты неоднозначной строки, затем дисциплины, уже привязанные строками блока (этап 7.1), затем
+    /// дисциплины без связей с матрицей, затем остальные.
     /// </summary>
     public async Task<IReadOnlyList<MatrixRowState>> ListAsync(Guid planId, CancellationToken ct)
     {
@@ -53,6 +57,10 @@ public sealed class MatrixRowBinding(AppDbContext db, TimeProvider clock)
         var withMatrix = (await db.CompetenceMatrix.Where(m => ids.Contains(m.DisciplineId)).Select(m => m.DisciplineId)
             .Distinct().ToListAsync(ct)).ToHashSet();
         var people = await PeopleAsync(rows.Select(r => r.ResolvedBy), ct);
+        // Одна дисциплина встречается в нескольких таблицах матрицы под разными названиями. После первой привязки она
+        // получает связи и без этого ушла бы в общий список по кодам — среди 80–90 дисциплин плана её не найти.
+        var linkedHere = rows.Where(r => r.Status == MatrixRowStatuses.Linked && r.DisciplineId is not null)
+            .Select(r => r.DisciplineId!.Value).ToHashSet();
 
         // Порядок групп — по первой строке группы (лист, строка), как был порядок строк.
         return rows.GroupBy(GroupOf).Select(g =>
@@ -65,8 +73,9 @@ public sealed class MatrixRowBinding(AppDbContext db, TimeProvider clock)
                 disciplines.FirstOrDefault(d => d.Id == first.DisciplineId) is { } chosen ? $"{chosen.Code} {chosen.Name}" : null,
                 first.ResolvedBy is Guid by ? people.GetValueOrDefault(by) : null, first.ResolvedAt,
                 disciplines
-                    .Select(d => new MatrixRowOption(d.Id, d.Code, d.Name, candidates.Contains(d.Code), !withMatrix.Contains(d.Id)))
-                    .OrderBy(o => o.Candidate ? 0 : o.WithoutMatrix ? 1 : 2).ThenBy(o => o.Code, StringComparer.Ordinal)
+                    .Select(d => new MatrixRowOption(d.Id, d.Code, d.Name, candidates.Contains(d.Code), linkedHere.Contains(d.Id),
+                        !withMatrix.Contains(d.Id) && !linkedHere.Contains(d.Id)))
+                    .OrderBy(o => o.Candidate ? 0 : o.LinkedHere ? 1 : o.WithoutMatrix ? 2 : 3).ThenBy(o => o.Code, StringComparer.Ordinal)
                     .ToList());
         }).ToList();
     }
