@@ -26,7 +26,10 @@ public static class WidgetRegistry
         ["linked_rpd"] = typeof(LinkedRpdWidget),
         // Банк заданий и билеты ФОС (этап 7, B5).
         ["task_bank"] = typeof(TaskBankWidget),
-        ["exam_tickets"] = typeof(ExamTicketsWidget)
+        ["exam_tickets"] = typeof(ExamTicketsWidget),
+        // Паспорт, оценочные средства (этап 7, B6).
+        ["fos_passport"] = typeof(PassportWidget),
+        ["evaluation_means_table"] = typeof(EvaluationMeansWidget)
     };
 
     /// <summary>Виджет поля: по имени из схемы, а для списков без имени — список строк или таблица записей.</summary>

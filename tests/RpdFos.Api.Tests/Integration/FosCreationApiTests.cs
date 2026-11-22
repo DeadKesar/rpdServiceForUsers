@@ -522,6 +522,68 @@ public class FosCreationApiTests(DatabaseFixture fixture) : AssignmentTestBase(f
         Assert.Equal(new[] { 1, 3, 4, 7 }, payload["task_bank"]![0]!["tasks"]!.AsArray().Select(t => (int)t!["number"]!));
     }
 
+    private static Task<HttpResponseMessage> SuggestAsync(HttpClient client, Guid documentId, params string[] covered) =>
+        client.PostAsJsonAsync($"/api/documents/{documentId}/means-suggestions", new MeansSuggestionRequest(covered));
+
+    [Fact]
+    public async Task Suggesting_means_returns_rows_for_indicators_without_means_and_changes_nothing()
+    {
+        var (author, fos, version) = await FosWithBankAsync("Б1.О.11");
+        var payload = JsonNode.Parse((await DetailsAsync(author, fos.Document.Id)).Payload.GetRawText())!;
+        var indicators = payload["linked_rpd"]!["competences"]!.AsArray()
+            .SelectMany(c => c!["indicators"]!.AsArray().Select(i => (string)i!["code"]!)).ToList();
+        var inSection = (string)payload["linked_rpd"]!["sections"]![0]!["indicator_codes"]![0]!;
+
+        var response = await SuggestAsync(author, fos.Document.Id);
+        Assert.True(response.IsSuccessStatusCode, $"{(int)response.StatusCode} {await response.Content.ReadAsStringAsync()}");
+        var all = (await response.Content.ReadFromJsonAsync<MeansSuggestionResponse>())!;
+
+        // Форма раздела — «Контрольная работа»: письменный опрос с индикатором раздела; все коды — из снимка, критериев нет.
+        var rows = all.Rows.OfType<JsonObject>().ToList();
+        Assert.Contains(rows, r => (string)r["means_type"]! == "written_survey" &&
+            r["indicator_codes"]!.AsArray().Any(c => (string)c! == inSection));
+        Assert.All(rows, r => Assert.All(r["indicator_codes"]!.AsArray(), c => Assert.Contains((string)c!, indicators)));
+        Assert.All(rows, r => Assert.Null(r["criteria"]));
+
+        // Индикаторы, у которых средство уже есть, не получают ничего; когда есть у всех — предлагать нечего.
+        var rest = (await (await SuggestAsync(author, fos.Document.Id, inSection)).Content.ReadFromJsonAsync<MeansSuggestionResponse>())!;
+        Assert.DoesNotContain(rest.Rows.OfType<JsonObject>(), r => r["indicator_codes"]!.AsArray().Any(c => (string)c! == inSection));
+        var none = (await (await SuggestAsync(author, fos.Document.Id, indicators.ToArray())).Content.ReadFromJsonAsync<MeansSuggestionResponse>())!;
+        Assert.Empty(none.Rows);
+        Assert.Contains("предлагать нечего", none.Notice);
+
+        // Подбор ничего не сохраняет: версия документа прежняя.
+        Assert.Equal(version, (await DetailsAsync(author, fos.Document.Id)).Document.Version);
+    }
+
+    [Fact]
+    public async Task Suggesting_means_is_refused_for_a_stranger_and_an_rpd()
+    {
+        var (author, fos, _) = await FosWithBankAsync("Б1.О.11");
+        var (stranger, _) = await AccountAsync(App, AppRoles.Teacher);
+
+        Assert.Equal(HttpStatusCode.Forbidden, (await SuggestAsync(stranger, fos.Document.Id)).StatusCode);
+        var rpdId = Guid.Parse((string)JsonNode.Parse(fos.Payload.GetRawText())!["linked_rpd"]!["rpd_document_id"]!);
+        var onRpd = await SuggestAsync(author, rpdId);
+        Assert.Equal(HttpStatusCode.Conflict, onRpd.StatusCode);
+        Assert.Equal("Действие недоступно для РПД", (await onRpd.Content.ReadFromJsonAsync<ProblemDetails>())!.Title);
+    }
+
+    [Fact]
+    public async Task The_section_tree_of_an_fos_shows_the_fill_of_passport_and_bank()
+    {
+        var (author, fos, _) = await FosWithBankAsync("Б1.О.11");
+        var before = (await DetailsAsync(author, fos.Document.Id)).Metadata.Sections.ToDictionary(s => s.Key);
+
+        // Все разделы схемы ФОС — в дереве; заполненные паспорт и банк «пустыми» не числятся.
+        Assert.All(new[] { "passport", "task_bank", "evaluation_means", "current_control", "exam_tickets", "evaluation_scale" },
+            key => Assert.True(before.ContainsKey(key), key));
+        Assert.NotEqual(SectionFill.Empty, before["passport"].Fill);
+        Assert.NotEqual(SectionFill.Empty, before["task_bank"].Fill);
+        // Необязательные разделы, которых нет в содержимом, ничего не требуют.
+        Assert.Equal(SectionFill.NotApplicable, before["exam_tickets"].Fill);
+    }
+
     [Fact]
     public async Task Rich_text_of_tasks_and_ticket_questions_is_sanitized()
     {

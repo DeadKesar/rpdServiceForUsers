@@ -72,6 +72,12 @@ public sealed class SchemaContext(JsonElement root, JsonObject payload, Document
     /// </summary>
     public Func<string, Task>? RenumberBank { get; set; }
 
+    /// <summary>
+    /// «Предложить» оценочные средства ФОС (этап 7, B6): по индикаторам, у которых средство уже есть, сервер подбирает типовые
+    /// средства остальным. Ничего не сохраняет — строки добавляет виджет, в несохранённую форму. null — недоступно.
+    /// </summary>
+    public Func<string[], Task<MeansSuggestionResult?>>? SuggestMeans { get; set; }
+
     /// <summary>Замечания к самому месту, а для <paramref name="subtree"/> — и к вложенным в него полям.</summary>
     public IEnumerable<CommentItem> CommentsAt(string path, bool subtree) =>
         Comments.Where(c => c.FieldPath == path || subtree && c.FieldPath.StartsWith(path + "/", StringComparison.Ordinal));

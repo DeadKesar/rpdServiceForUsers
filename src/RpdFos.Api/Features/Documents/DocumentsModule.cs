@@ -60,6 +60,8 @@ public class DocumentsModule : ICarterModule
         g.MapPost("/{id:guid}/refresh-from-rpd", RefreshFromRpd).RequireAuthorization(Policies.DocumentAuthors);
         // «Перенумеровать» группу банка заданий ФОС (этап 7, B5): права как у правки содержимого.
         g.MapPost("/{id:guid}/renumber-bank", RenumberBank).RequireAuthorization(Policies.DocumentAuthors);
+        // «Предложить» оценочные средства (этап 7, B6): ничего не сохраняет — отвечает строками, которые страница добавит в форму.
+        g.MapPost("/{id:guid}/means-suggestions", SuggestMeans).RequireAuthorization(Policies.DocumentAuthors);
         g.MapGet("/{id:guid}/comments", Comments);
         g.MapPost("/{id:guid}/comments", AddComment).RequireAuthorization(Policies.Commenters);
         g.MapPost("/{id:guid}/comments/{commentId:guid}/resolve", ResolveComment).RequireAuthorization(Policies.CommentResolvers);
@@ -657,6 +659,28 @@ public class DocumentsModule : ICarterModule
         return Results.Ok(new DocumentReviewed(document.Version, document.Status, DocumentStatuses.Title(document.Status), [], result.Notice));
     }
 
+    /// <summary>
+    /// «Предложить» оценочные средства (этап 7, B6; FR-VAL-08): по снимку РПД в ФОС подбираются типовые средства индикаторам,
+    /// у которых их ещё нет. Документ не меняется — ответ содержит строки раздела <c>evaluation_means</c> и сообщение для
+    /// автора; добавляет их страница, в несохранённую форму, и автор правит. Права — как у правки содержимого; документ не ФОС
+    /// — 409. <c>covered</c> — индикаторы, у которых средство уже есть в форме (в том числе несохранённое).
+    /// </summary>
+    private static async Task<IResult> SuggestMeans(
+        Guid id, MeansSuggestionRequest rq, HttpContext http, AppDbContext db, DirectoryAccounts directory, DocumentReview review,
+        CancellationToken ct)
+    {
+        var (document, _, scope, refusal) = await SectionEditorAsync(id, http, db, directory, review, ct);
+        if (refusal is not null) return refusal;
+        if (document!.Type != TemplateTypes.Fos)
+            return Results.Problem(statusCode: StatusCodes.Status409Conflict, title: "Действие недоступно для РПД",
+                detail: "Оценочных средств нет у РПД: «Предложить» есть только у ФОС.");
+        if (scope != DocumentEditScope.Content) return Refused(document, DocumentTransitions.EditAction);
+
+        var link = JsonNode.Parse(document.Payload)?["linked_rpd"];
+        var suggestion = FosMeansRecommender.Suggest(link, rq.Covered ?? []);
+        return Results.Ok(new MeansSuggestionResponse(new JsonArray(suggestion.Rows.Select(r => (JsonNode)r).ToArray()), suggestion.Notice));
+    }
+
     private static IResult TransferRefused(TransferProblem problem) => problem switch
     {
         TransferProblem.EmptyReason => Results.Problem(statusCode: StatusCodes.Status422UnprocessableEntity, title: "Не указана причина",
@@ -1072,6 +1096,12 @@ public record DocumentVersionRequest(int Version);
 
 /// <summary>«Перенумеровать» группу банка заданий ФОС (этап 7, B5): название группы и версия документа, которую видел клиент.</summary>
 public record RenumberBankRequest(int Version, string Group);
+
+/// <summary>«Предложить» оценочные средства (этап 7, B6): индикаторы, у которых средство уже есть в форме автора.</summary>
+public record MeansSuggestionRequest(string[]? Covered);
+
+/// <summary>Строки раздела <c>evaluation_means</c>, которые страница добавит в форму, и сообщение автору.</summary>
+public record MeansSuggestionResponse(JsonArray Rows, string Notice);
 
 /// <summary>«Взять на проверку»: версия и обязательная причина — в историю статусов.</summary>
 public record TakeRequest(int Version, string? Reason);

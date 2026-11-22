@@ -183,3 +183,6 @@ public sealed record GenerationItem(Guid TaskId, string Format, string Status, s
 {
     public bool InProgress => Status is "queued" or "running";
 }
+
+/// <summary>Ответ «Предложить» оценочные средства (этап 7, B6): строки раздела <c>evaluation_means</c> и сообщение автору.</summary>
+public sealed record MeansSuggestionResult(System.Text.Json.Nodes.JsonArray Rows, string Notice);

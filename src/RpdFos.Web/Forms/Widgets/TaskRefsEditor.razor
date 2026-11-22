@@ -1,0 +1,108 @@
+@using System.Text.Json.Nodes
+
+@* Ссылки на задания банка в строке паспорта ФОС (этап 7, B6): список «группа — номера» и выбор новой ссылки. Выбрать можно
+   только группу и номера, которые есть в банке (TaskRefChoices); ссылка, ставшая неверной после правки банка, остаётся в списке
+   красной — её видно и можно убрать. *@
+<div class="d-flex flex-wrap gap-1 align-items-center">
+    @{ var references = Owner["tasks"] as JsonArray; }
+    @for (var i = 0; i < (references?.Count ?? 0); i++)
+    {
+        var index = i;
+        var problem = TaskRefChoices.Problem(Bank, references![index]);
+        <span class="badge border @(problem is null ? "text-bg-light" : "text-bg-danger") d-inline-flex align-items-center gap-1"
+              title="@problem">
+            @TaskRefChoices.Describe(references[index])
+            @if (!ReadOnly)
+            {
+                <button type="button" class="btn-close btn-close-sm ms-1" style="font-size:.6rem" aria-label="Убрать ссылку"
+                        @onclick="() => Remove(index)"></button>
+            }
+        </span>
+    }
+    @if ((references?.Count ?? 0) == 0)
+    {
+        <span class="small text-muted">заданий нет</span>
+    }
+</div>
+@if (!ReadOnly)
+{
+    var groups = TaskRefChoices.Groups(Bank);
+    List<int> numbers = group is null ? new List<int>() : TaskRefChoices.Numbers(Bank, group);
+    <div class="d-flex flex-wrap gap-1 align-items-center mt-1">
+        <select class="form-select form-select-sm w-auto" aria-label="Группа банка" @onchange="e => SetGroup(e.Value?.ToString())">
+            <option value="" selected="@(group is null)">группа…</option>
+            @foreach (var name in groups)
+            {
+                <option value="@name" selected="@(name == group)">@name</option>
+            }
+        </select>
+        <select class="form-select form-select-sm w-auto" aria-label="Первое задание" disabled="@(group is null)"
+                @onchange="e => { from = ParseNumber(e.Value); error = null; }">
+            <option value="" selected="@(from is null)">все</option>
+            @foreach (var number in numbers)
+            {
+                <option value="@number" selected="@(from == number)">№ @number</option>
+            }
+        </select>
+        <span class="small text-muted">—</span>
+        <select class="form-select form-select-sm w-auto" aria-label="Последнее задание" disabled="@(group is null || from is null)"
+                @onchange="e => { to = ParseNumber(e.Value); error = null; }">
+            <option value="" selected="@(to is null)">то же</option>
+            @foreach (var number in numbers.Where(n => from is null || n >= from))
+            {
+                <option value="@number" selected="@(to == number)">№ @number</option>
+            }
+        </select>
+        <button type="button" class="btn btn-sm btn-outline-primary" disabled="@(group is null)" @onclick="Add">Добавить</button>
+    </div>
+    @if (error is not null)
+    {
+        <div class="field-missing-text">@error</div>
+    }
+}
+
+@code {
+    [Parameter, EditorRequired] public SchemaContext Context { get; set; } = default!;
+
+    /// <summary>Строка паспорта: объект со списком <c>tasks</c> (создаётся при первой ссылке).</summary>
+    [Parameter, EditorRequired] public JsonObject Owner { get; set; } = default!;
+
+    [Parameter] public bool ReadOnly { get; set; }
+
+    private string? group, error;
+    private int? from, to;
+
+    private JsonNode? Bank => Context.Payload["task_bank"];
+
+    private static int? ParseNumber(object? value) => int.TryParse(value?.ToString(), out var n) ? n : null;
+
+    private void SetGroup(string? name)
+    {
+        group = string.IsNullOrEmpty(name) ? null : name;
+        (from, to, error) = (null, null, null);
+    }
+
+    private void Add()
+    {
+        var reference = TaskRefChoices.Build(Bank, group, from, to, out error);
+        if (reference is null) return;
+        if (Owner["tasks"] is not JsonArray list) Owner["tasks"] = list = new JsonArray();
+        if (TaskRefChoices.Contains(list, reference))
+        {
+            error = "Такая ссылка уже есть.";
+            return;
+        }
+        list.Add(reference);
+        (from, to) = (null, null);
+        Context.Changed();
+    }
+
+    private void Remove(int index)
+    {
+        if (Owner["tasks"] is JsonArray list && index < list.Count)
+        {
+            list.RemoveAt(index);
+            Context.Changed();
+        }
+    }
+}

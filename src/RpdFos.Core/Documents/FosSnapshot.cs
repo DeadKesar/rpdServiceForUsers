@@ -36,6 +36,9 @@ public static partial class FosSnapshot
 
     private static readonly string[] CodePrefixes = ["УК", "ОПК", "ПК"];
 
+    /// <summary>Виды занятий раздела снимка и поле часов темы РПД, по которому они определяются (самостоятельная работа — не вид занятий).</summary>
+    private static readonly (string Kind, string HoursKey)[] ClassKinds = [("lecture", "lectures"), ("practice", "practice"), ("lab", "lab_hours")];
+
     // [0-9], а не \d: схема проверяет по правилам ECMAScript, где \d — только ASCII-цифры.
     [GeneratedRegex("^(УК|ОПК|ПК)-[0-9]+$")]
     private static partial Regex CompetenceCode();
@@ -182,6 +185,10 @@ public static partial class FosSnapshot
                     section.Indicators.Add(code);
                 foreach (var form in Strings(topic["current_control_forms"]))
                     if (!section.Forms.Contains(form)) section.Forms.Add(form);
+                // Вид занятий — по часам темы: подбор оценочных средств (B6) смотрит, что ведётся в разделе.
+                if (Get(topic, "hours") is { } hours)
+                    foreach (var (kind, hoursKey) in ClassKinds)
+                        if (Int(Get(hours, hoursKey)) is > 0) section.Kinds.Add(kind);
             }
 
         var result = new JsonArray();
@@ -197,6 +204,7 @@ public static partial class FosSnapshot
                 .Select(c => (JsonNode)c).ToArray());
             item["indicator_codes"] = new JsonArray(indicators.Select(i => (JsonNode)i).ToArray());
             item["current_control_forms"] = new JsonArray(section.Forms.Select(f => (JsonNode)f).ToArray());
+            item["class_kinds"] = new JsonArray(ClassKinds.Where(k => section.Kinds.Contains(k.Kind)).Select(k => (JsonNode)k.Kind).ToArray());
             result.Add(item);
         }
         return result;
@@ -253,5 +261,6 @@ public static partial class FosSnapshot
         public SortedSet<int> Semesters { get; } = [];
         public HashSet<string> Indicators { get; } = new(StringComparer.Ordinal);
         public List<string> Forms { get; } = [];
+        public HashSet<string> Kinds { get; } = [];
     }
 }

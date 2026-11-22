@@ -27,8 +27,10 @@ public class FosSnapshotTests
           ],
           "thematic_plan": [
             { "section_number": 2, "semester": 2, "topic_title": "Моделирование", "competence_indicators": ["ПК-2.1"],
+              "hours": { "lectures": 4, "practice": 0, "lab_hours": 2, "self_study": 8 },
               "current_control_forms": ["Тест"] },
             { "section_number": 1, "semester": 1, "topic_title": "Введение", "competence_indicators": ["УК-1.2", "УК-1.1"],
+              "hours": { "practice": 6, "self_study": 10 },
               "current_control_forms": ["Контрольная работа", "Тест"] },
             { "section_number": 1, "semester": 2, "topic_title": "Основные понятия", "competence_indicators": ["УК-1.2"],
               "current_control_forms": ["Тест"] }
@@ -53,9 +55,9 @@ public class FosSnapshotTests
               ],
               "sections": [
                 { "number": 1, "title": "Введение, Основные понятия", "semesters": [1, 2], "competence_codes": ["УК-1"],
-                  "indicator_codes": ["УК-1.1", "УК-1.2"], "current_control_forms": ["Контрольная работа", "Тест"] },
+                  "indicator_codes": ["УК-1.1", "УК-1.2"], "current_control_forms": ["Контрольная работа", "Тест"], "class_kinds": ["practice"] },
                 { "number": 2, "title": "Моделирование", "semesters": [2], "competence_codes": ["ПК-2"],
-                  "indicator_codes": ["ПК-2.1"], "current_control_forms": ["Тест"] }
+                  "indicator_codes": ["ПК-2.1"], "current_control_forms": ["Тест"], "class_kinds": ["lecture", "lab"] }
               ],
               "semesters": [ { "number": 1, "control_types": ["credit"] }, { "number": 2, "control_types": ["exam", "course_work"] } ]
             }
@@ -108,7 +110,7 @@ public class FosSnapshotTests
         Assert.True(JsonNode.DeepEquals(JsonNode.Parse("""
             { "competences": [ { "code": "УК-1", "indicators": [ { "code": "УК-1.1" } ] } ],
               "sections": [ { "number": 1, "title": "Тема", "semesters": [], "competence_codes": [], "indicator_codes": [],
-                              "current_control_forms": ["Тест"] } ],
+                              "current_control_forms": ["Тест"], "class_kinds": [] } ],
               "semesters": [ { "number": 1, "control_types": ["exam"] } ] }
             """), snapshot), snapshot.ToJsonString());
     }
@@ -146,9 +148,11 @@ public class FosSnapshotTests
         Assert.True(FosSnapshot.Differs(stored, Take(Rpd.Replace("Моделирование", "Имитационное моделирование"))));
         Assert.True(FosSnapshot.Differs(stored, Take(Rpd.Replace("\"credit\"", "\"graded_credit\""))));
         Assert.True(FosSnapshot.Differs(stored, Take(Rpd.Replace("\"section_number\": 2", "\"section_number\": 3"))));
-        // Правки, которые снимок не наследует (часы, описание темы), его не затрагивают.
+        // Правки, которые снимок не наследует (число часов, описание темы), его не затрагивают...
         Assert.False(FosSnapshot.Differs(stored, Take(Rpd.Replace("\"topic_title\": \"Введение\"",
-            "\"topic_title\": \"Введение\", \"topic_description\": \"текст\", \"hours\": { \"lectures\": 4 }"))));
+            "\"topic_title\": \"Введение\", \"topic_description\": \"текст\"").Replace("\"practice\": 6", "\"practice\": 8"))));
+        // ...а новый вид занятий в разделе — наследует: от него зависит подбор оценочных средств.
+        Assert.True(FosSnapshot.Differs(stored, Take(Rpd.Replace("\"practice\": 6", "\"practice\": 6, \"lectures\": 2"))));
         // Снимка в ФОС нет вовсе — РПД с данными изменилась, пустая — нет.
         Assert.True(FosSnapshot.Differs(null, Take()));
         Assert.False(FosSnapshot.Differs(null, Take("{}")));

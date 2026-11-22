@@ -1,0 +1,344 @@
+@using System.Text.Json
+@using System.Text.Json.Nodes
+@inherits FieldBase
+
+@* Паспорт ФОС (этап 7, B6; FR-DOC-22): две таблицы. Первая — «раздел — компетенции — задания», вторая — «компетенция —
+   индикатор — разделы РПД — задания». Разделы, компетенции и индикаторы выбираются из снимка РПД (linked_rpd), задания — из
+   банка: группа и номера, которых в банке нет, не выбираются. Строка, чей раздел или индикатор исчез из снимка, остаётся —
+   «Обновить из РПД» ничего не удаляет — и подсвечивается. «Добавить из РПД» дописывает недостающие строки, ничего не меняя. *@
+<div class="mb-3">
+    <label class="form-label">@Title</label>
+    <p class="text-muted small mb-2">
+        Разделы, компетенции и индикаторы — из снимка данных РПД, задания — из банка заданий (раздел «Банк заданий»).
+        Число заданий в печатную форму паспорта считается по ссылкам.
+    </p>
+
+    <h6 class="mt-3">Разделы дисциплины, компетенции и задания</h6>
+    @{ var sectionRows = Rows("sections"); }
+    @for (var i = 0; i < sectionRows.Count; i++)
+    {
+        var index = i;
+        if (sectionRows[index] is not JsonObject row) continue;
+        var number = Number(row["section_number"]);
+        var known = SnapshotSections.FirstOrDefault(s => s.Number == number);
+        var path = $"{Path}/sections/{index}";
+        <div class="border rounded p-2 mb-2" @key="row" id="@SchemaContext.Anchor(path)">
+            <div class="row g-2">
+                <div class="col-md-5">
+                    <label class="form-label small mb-0">Раздел РПД</label>
+                    <select class="form-select form-select-sm" disabled="@ReadOnly" aria-label="Раздел РПД"
+                            @onchange="e => ChangeSection(row, ParseNumber(e.Value))">
+                        @if (number == 0)
+                        {
+                            <option value="" selected>выберите раздел…</option>
+                        }
+                        @if (number != 0 && known is null)
+                        {
+                            <option value="@number" selected>Раздел @number — нет в снимке РПД</option>
+                        }
+                        @foreach (var section in SnapshotSections.Where(s => s.Number == number || !UsedSections(row).Contains(s.Number)))
+                        {
+                            <option value="@section.Number" selected="@(section.Number == number)">@section.Number. @Short(section.Title)</option>
+                        }
+                    </select>
+                    @if (number != 0 && known is null)
+                    {
+                        <div class="field-missing-text">Раздела нет в снимке РПД: он исчез из тематического плана.</div>
+                    }
+                    @if (number != 0 && sectionRows.OfType<JsonObject>().Count(r => Number(r["section_number"]) == number) > 1)
+                    {
+                        <div class="field-missing-text">Раздел уже есть в таблице.</div>
+                    }
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label small mb-0">Название в паспорте</label>
+                    <ScalarInput Context="Context" Schema="@(Prop("sections", "section_title"))" Parent="row" Key="section_title"
+                                 Path="@($"{path}/section_title")" Compact="true" />
+                </div>
+                <div class="col-md-1 text-end">
+                    @if (!ReadOnly)
+                    {
+                        <button class="btn btn-sm btn-outline-secondary mt-3" type="button" title="Удалить строку" @onclick="() => Remove(SectionsList, row)">✕</button>
+                    }
+                </div>
+            </div>
+            <div class="mt-1">
+                <span class="form-label small me-2">Компетенции:</span>
+                @if (Choices(SnapshotCompetences.Select(c => c.Code), Codes(row, "competence_codes")).Count == 0)
+                {
+                    <span class="small text-muted">в снимке РПД компетенций нет</span>
+                }
+                @foreach (var code in Choices(SnapshotCompetences.Select(c => c.Code), Codes(row, "competence_codes")))
+                {
+                    var inSnapshot = SnapshotCompetences.Any(c => c.Code == code);
+                    <div class="form-check form-check-inline">
+                        <input type="checkbox" class="form-check-input" id="@($"passport-s-{index}-{code}")" disabled="@ReadOnly"
+                               checked="@(Codes(row, "competence_codes").Contains(code))"
+                               @onchange="e => ToggleCode(row, code, e.Value is true)" />
+                        <label class="form-check-label small @(inSnapshot ? "" : "text-danger")" for="@($"passport-s-{index}-{code}")"
+                               title="@(inSnapshot ? "" : "Компетенции нет в снимке РПД")"><b>@(code)</b></label>
+                    </div>
+                }
+            </div>
+            <div class="mt-1">
+                <span class="form-label small me-2">Задания:</span>
+                <TaskRefsEditor Context="Context" Owner="row" ReadOnly="ReadOnly" />
+            </div>
+        </div>
+    }
+    @if (!ReadOnly)
+    {
+        <button class="btn btn-sm btn-outline-primary me-1" type="button" disabled="@(SnapshotSections.All(s => UsedSectionNumbers.Contains(s.Number)))"
+                @onclick="AddMissingSections">Добавить разделы из РПД</button>
+    }
+    @if (SnapshotSections.Count == 0)
+    {
+        <span class="small text-muted">В снимке РПД нет разделов тематического плана.</span>
+    }
+
+    <h6 class="mt-4">Компетенции, индикаторы, разделы РПД и задания</h6>
+    @{ var indicatorRows = Rows("indicators"); }
+    @for (var i = 0; i < indicatorRows.Count; i++)
+    {
+        var index = i;
+        if (indicatorRows[index] is not JsonObject row) continue;
+        var code = Text(row["indicator_code"]) ?? "";
+        var known = SnapshotIndicators.FirstOrDefault(s => s.Code == code);
+        var path = $"{Path}/indicators/{index}";
+        <div class="border rounded p-2 mb-2" @key="row" id="@SchemaContext.Anchor(path)">
+            <div class="d-flex gap-2 align-items-start">
+                <div class="flex-grow-1">
+                    <label class="form-label small mb-0">Индикатор (компетенция — @(Text(row["competence_code"]) ?? "—"))</label>
+                    <select class="form-select form-select-sm" disabled="@ReadOnly" aria-label="Индикатор"
+                            @onchange="e => ChangeIndicator(row, Convert.ToString(e.Value))">
+                        @if (code == "")
+                        {
+                            <option value="" selected>выберите индикатор…</option>
+                        }
+                        @if (code != "" && known is null)
+                        {
+                            <option value="@(code)" selected>@(code) — нет в снимке РПД</option>
+                        }
+                        @foreach (var indicator in SnapshotIndicators.Where(s => s.Code == code || !UsedIndicators(row).Contains(s.Code)))
+                        {
+                            <option value="@indicator.Code" selected="@(indicator.Code == code)">@indicator.Code @Short(indicator.Text)</option>
+                        }
+                    </select>
+                    @if (code != "" && known is null)
+                    {
+                        <div class="field-missing-text">Индикатора нет в снимке РПД: он исчез из компетенций.</div>
+                    }
+                    @if (code != "" && indicatorRows.OfType<JsonObject>().Count(r => Text(r["indicator_code"]) == code) > 1)
+                    {
+                        <div class="field-missing-text">Индикатор уже есть в таблице.</div>
+                    }
+                </div>
+                @if (!ReadOnly)
+                {
+                    <button class="btn btn-sm btn-outline-secondary mt-3" type="button" title="Удалить строку" @onclick="() => Remove(IndicatorsList, row)">✕</button>
+                }
+            </div>
+            <div class="mt-1">
+                <span class="form-label small me-2">Разделы РПД:</span>
+                @if (SectionChoices(row).Count == 0)
+                {
+                    <span class="small text-muted">в снимке РПД разделов нет</span>
+                }
+                @foreach (var section in SectionChoices(row))
+                {
+                    var inSnapshot = SnapshotSections.Any(s => s.Number == section);
+                    <div class="form-check form-check-inline">
+                        <input type="checkbox" class="form-check-input" id="@($"passport-i-{index}-{section}")" disabled="@ReadOnly"
+                               checked="@(SectionNumbers(row).Contains(section))"
+                               @onchange="e => ToggleSection(row, section, e.Value is true)" />
+                        <label class="form-check-label small @(inSnapshot ? "" : "text-danger")" for="@($"passport-i-{index}-{section}")"
+                               title="@(inSnapshot ? "" : "Раздела нет в снимке РПД")"><b>@section</b></label>
+                    </div>
+                }
+            </div>
+            <div class="mt-1">
+                <span class="form-label small me-2">Задания:</span>
+                <TaskRefsEditor Context="Context" Owner="row" ReadOnly="ReadOnly" />
+            </div>
+        </div>
+    }
+    @if (!ReadOnly)
+    {
+        <button class="btn btn-sm btn-outline-primary me-1" type="button" disabled="@(SnapshotIndicators.All(s => UsedIndicatorCodes.Contains(s.Code)))"
+                @onclick="AddMissingIndicators">Добавить индикаторы из РПД</button>
+    }
+    @if (SnapshotIndicators.Count == 0)
+    {
+        <span class="small text-muted">В снимке РПД нет индикаторов.</span>
+    }
+    @if (Hint is not null)
+    {
+        <div class="form-text">@Hint</div>
+    }
+</div>
+
+@code {
+    private const string SectionsList = "sections", IndicatorsList = "indicators";
+
+    private record SnapshotSection(int Number, string Title, List<string> CompetenceCodes, List<string> IndicatorCodes);
+    private record SnapshotIndicator(string Code, string Text, string CompetenceCode);
+
+    // ---- Снимок РПД ----
+    private JsonObject? Link => Context.Payload["linked_rpd"] as JsonObject;
+
+    private List<(string Code, string Text)> SnapshotCompetences => (Link?["competences"] as JsonArray ?? []).OfType<JsonObject>()
+        .Select(c => (Text(c["code"]) ?? "", Text(c["formulation"]) ?? "")).Where(c => c.Item1 != "").ToList();
+
+    private List<SnapshotIndicator> SnapshotIndicators => (Link?["competences"] as JsonArray ?? []).OfType<JsonObject>()
+        .SelectMany(c => (c["indicators"] as JsonArray ?? []).OfType<JsonObject>()
+            .Select(i => new SnapshotIndicator(Text(i["code"]) ?? "", Text(i["text"]) ?? "", Text(c["code"]) ?? "")))
+        .Where(i => i.Code != "").ToList();
+
+    private List<SnapshotSection> SnapshotSections => (Link?["sections"] as JsonArray ?? []).OfType<JsonObject>()
+        .Select(s => new SnapshotSection(Number(s["number"]), Text(s["title"]) ?? "", Strings(s["competence_codes"]), Strings(s["indicator_codes"])))
+        .Where(s => s.Number > 0).OrderBy(s => s.Number).ToList();
+
+    // ---- Содержимое паспорта ----
+    // Раздел паспорта создаётся при первой правке: пустой «Паспорт» не должен считаться начатым.
+    private JsonObject Passport()
+    {
+        if (Value is JsonObject existing) return existing;
+        var created = new JsonObject();
+        SetValue(created);
+        return created;
+    }
+
+    private JsonArray Rows(string name) => (Value as JsonObject)?[name] as JsonArray ?? new JsonArray();
+
+    private JsonArray EnsureRows(string name)
+    {
+        var passport = Passport();
+        if (passport[name] is JsonArray list) return list;
+        passport[name] = list = new JsonArray();
+        return list;
+    }
+
+    private JsonElement Prop(string list, string name)
+    {
+        var rows = Schema.ValueKind == JsonValueKind.Object && Schema.TryGetProperty("properties", out var p) && p.TryGetProperty(list, out var l)
+            ? Context.Resolve(l) : default;
+        var item = rows.ValueKind == JsonValueKind.Object && rows.TryGetProperty("items", out var i) ? Context.Resolve(i) : default;
+        return item.ValueKind == JsonValueKind.Object && item.TryGetProperty("properties", out var props) && props.TryGetProperty(name, out var s)
+            ? Context.Resolve(s)
+            : default;
+    }
+
+    private static int? ParseNumber(object? value) => int.TryParse(value?.ToString(), out var n) ? n : null;
+
+    private static string Short(string text) => text.Length <= 70 ? text : text[..70].TrimEnd() + "…";
+
+    private static List<string> Strings(JsonNode? node) =>
+        (node as JsonArray ?? []).Select(c => c?.ToString() ?? "").Where(c => c != "").ToList();
+
+    private static List<string> Codes(JsonObject row, string name) => Strings(row[name]);
+
+    private static List<int> SectionNumbers(JsonObject row) =>
+        (row["rpd_section_numbers"] as JsonArray ?? []).Select(n => Number(n)).Where(n => n > 0).ToList();
+
+    private static JsonArray JsonList(IEnumerable<string> items) => new(items.Select(i => (JsonNode)JsonValue.Create(i)!).ToArray());
+
+    private static JsonArray JsonList(IEnumerable<int> items) => new(items.Select(i => (JsonNode)JsonValue.Create(i)!).ToArray());
+
+    // Выбор из снимка плюс то, что уже стоит в строке, но из снимка пропало: его не прячем.
+    private static List<string> Choices(IEnumerable<string> snapshot, IEnumerable<string> chosen) =>
+        snapshot.Concat(chosen).Distinct().ToList();
+
+    private List<int> SectionChoices(JsonObject row) =>
+        SnapshotSections.Select(s => s.Number).Concat(SectionNumbers(row)).Distinct().Order().ToList();
+
+    private HashSet<int> UsedSectionNumbers => Rows("sections").OfType<JsonObject>().Select(r => Number(r["section_number"])).ToHashSet();
+
+    private HashSet<int> UsedSections(JsonObject except) =>
+        Rows("sections").OfType<JsonObject>().Where(r => r != except).Select(r => Number(r["section_number"])).ToHashSet();
+
+    private HashSet<string> UsedIndicatorCodes => Rows("indicators").OfType<JsonObject>().Select(r => Text(r["indicator_code"]) ?? "").ToHashSet();
+
+    private HashSet<string> UsedIndicators(JsonObject except) =>
+        Rows("indicators").OfType<JsonObject>().Where(r => r != except).Select(r => Text(r["indicator_code"]) ?? "").ToHashSet();
+
+    // ---- Правки ----
+    private static JsonObject NewSectionRow(SnapshotSection section)
+    {
+        var row = new JsonObject { ["section_number"] = section.Number };
+        if (section.Title != "") row["section_title"] = section.Title;
+        row["competence_codes"] = JsonList(section.CompetenceCodes);
+        row["tasks"] = new JsonArray();
+        return row;
+    }
+
+    private JsonObject NewIndicatorRow(SnapshotIndicator indicator)
+    {
+        var row = new JsonObject { ["competence_code"] = indicator.CompetenceCode, ["indicator_code"] = indicator.Code };
+        row["rpd_section_numbers"] = JsonList(SnapshotSections.Where(s => s.IndicatorCodes.Contains(indicator.Code)).Select(s => s.Number));
+        row["tasks"] = new JsonArray();
+        return row;
+    }
+
+    private void AddMissingSections()
+    {
+        var used = UsedSectionNumbers;
+        var rows = EnsureRows("sections");
+        foreach (var section in SnapshotSections.Where(s => !used.Contains(s.Number))) rows.Add(NewSectionRow(section));
+        Context.Changed();
+    }
+
+    private void AddMissingIndicators()
+    {
+        var used = UsedIndicatorCodes;
+        var rows = EnsureRows("indicators");
+        foreach (var indicator in SnapshotIndicators.Where(s => !used.Contains(s.Code))) rows.Add(NewIndicatorRow(indicator));
+        Context.Changed();
+    }
+
+    // Другой раздел выбран осознанно: название и компетенции берутся у него, задания остаются.
+    private void ChangeSection(JsonObject row, int? number)
+    {
+        if (number is not { } n || SnapshotSections.FirstOrDefault(s => s.Number == n) is not { } section) return;
+        var fresh = NewSectionRow(section);
+        row["section_number"] = n;
+        if (fresh["section_title"] is { } title) row["section_title"] = title.DeepClone(); else row.Remove("section_title");
+        row["competence_codes"] = fresh["competence_codes"]!.DeepClone();
+        Context.Changed();
+    }
+
+    private void ChangeIndicator(JsonObject row, string? code)
+    {
+        if (SnapshotIndicators.FirstOrDefault(s => s.Code == code) is not { } indicator) return;
+        var fresh = NewIndicatorRow(indicator);
+        row["competence_code"] = indicator.CompetenceCode;
+        row["indicator_code"] = code;
+        row["rpd_section_numbers"] = fresh["rpd_section_numbers"]!.DeepClone();
+        Context.Changed();
+    }
+
+    private void Remove(string list, JsonObject row)
+    {
+        EnsureRows(list).Remove(row);
+        Context.Changed();
+    }
+
+    private void ToggleCode(JsonObject row, string code, bool on)
+    {
+        var chosen = Codes(row, "competence_codes");
+        if (on && !chosen.Contains(code)) chosen.Add(code);
+        if (!on) chosen.Remove(code);
+        row["competence_codes"] = JsonList(chosen);
+        Context.Changed();
+    }
+
+    private void ToggleSection(JsonObject row, int section, bool on)
+    {
+        var chosen = SectionNumbers(row);
+        if (on && !chosen.Contains(section)) chosen.Add(section);
+        if (!on) chosen.Remove(section);
+        chosen.Sort();
+        if (chosen.Count == 0) row.Remove("rpd_section_numbers");
+        else row["rpd_section_numbers"] = JsonList(chosen);
+        Context.Changed();
+    }
+}

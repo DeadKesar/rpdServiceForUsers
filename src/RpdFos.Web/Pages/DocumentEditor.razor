@@ -698,6 +698,7 @@ else
             CanResolveApproval = details.Actions.ResolveApprovalComments,
             ViewerId = details.ViewerId, AddComment = AddCommentAsync, ResolveComment = ResolveCommentAsync,
             RenumberBank = details.Editable ? RenumberBankAsync : null,
+            SuggestMeans = details.Editable ? SuggestMeansAsync : null,
             Defaults = details.TemplateDefaults is { } defaults ? JsonNode.Parse(defaults.GetRawText()) as JsonObject : null,
             CorrectPlan = details.Actions.CorrectPlan, Corrections = details.PlanCorrections ?? [],
             PlanFieldChanged = () => _ = InvokeAsync(SavePlanCorrectionAsync),
@@ -900,6 +901,24 @@ else
                 "задания будут переписаны. Перенумеровать?", "Перенумерация группы")) return;
         if (!await SaveSectionAsync()) return;
         await ChangeStatusAsync("renumber-bank", new { version, group }, "Задания перенумерованы.", r => r.Notice ?? "Задания перенумерованы.");
+    }
+
+    // «Предложить» оценочные средства ФОС (этап 7, B6): сервер подбирает типовые средства индикаторам без средств, ничего не
+    // сохраняя; виджет добавляет строки в форму, и они уйдут на сервер обычным автосохранением.
+    private async Task<MeansSuggestionResult?> SuggestMeansAsync(string[] covered)
+    {
+        try
+        {
+            var response = await Http.PostAsJsonAsync($"api/documents/{Id}/means-suggestions", new { covered });
+            if (response.IsSuccessStatusCode) return await response.Content.ReadFromJsonAsync<MeansSuggestionResult>();
+            (messageIsError, message, fieldErrors) = (true, await ProblemTextAsync(response, "Подбор не выполнен"), []);
+        }
+        catch (AccessTokenNotAvailableException e)
+        {
+            e.Redirect();
+        }
+        StateHasChanged();
+        return null;
     }
 
     private Task OnTransferSearchKeyAsync(KeyboardEventArgs e) => e.Key == "Enter" ? SearchTeachersAsync() : Task.CompletedTask;

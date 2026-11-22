@@ -1,0 +1,207 @@
+@using System.Text.Json
+@using System.Text.Json.Nodes
+@inherits FieldBase
+
+@* Оценочные средства ФОС (этап 7, B6; FR-DOC-22, FR-VAL-08): средство — тип с русским названием, наименование, индикаторы,
+   которые оно проверяет, описание и критерии оценок. Вид контроля у средства не хранится: после B2 он — у группы банка.
+   «Предложить» просит у сервера типовые средства индикаторам, у которых средства ещё нет, и дописывает строки в форму;
+   введённое автором не трогается. Строки свёрнуты до заголовка: редактор текста тяжёлый, и открываются они по одной. *@
+<div class="mb-3">
+    <label class="form-label">@Title</label>
+    @{
+        var means = Value as JsonArray;
+        var uncovered = Uncovered();
+    }
+    <p class="text-muted small mb-2">
+        Раздел необязательный. В печати — «Методические материалы, определяющие процедуры оценивания»: по каждому средству описание
+        и критерии оценок. Критерии заполняйте у каждого средства — их отсутствие правила ФОС покажут предупреждением.
+    </p>
+    @if (Indicators.Count > 0)
+    {
+        <p class="small mb-2 @(uncovered.Count == 0 ? "text-muted" : "")">
+            @if (uncovered.Count == 0)
+            {
+                <text>У каждого индикатора РПД есть оценочное средство.</text>
+            }
+            else
+            {
+                <text>Индикаторы без оценочного средства (@uncovered.Count): <b>@string.Join(", ", uncovered)</b></text>
+            }
+        </p>
+    }
+    @for (var i = 0; i < (means?.Count ?? 0); i++)
+    {
+        var index = i;
+        var item = means![index] as JsonObject;
+        if (item is null) continue;
+        var path = $"{Path}/{index}";
+        var open = opened.Contains(item);
+        var codes = Codes(item);
+        <div class="border rounded p-2 mb-2" @key="item" id="@SchemaContext.Anchor(path)">
+            <div class="d-flex gap-2 align-items-start">
+                <div class="me-auto">
+                    <strong>@(Text(item["title"]) is { Length: > 0 } title ? title : "Без наименования")</strong>
+                    <span class="badge text-bg-light border ms-1">@TypeTitle(item)</span>
+                    @if (!open)
+                    {
+                        <div class="small text-muted">
+                            Индикаторы: @(codes.Count == 0 ? "не указаны" : string.Join(", ", codes))
+                            @if (string.IsNullOrWhiteSpace(Preview(item["criteria"])))
+                            {
+                                <span class="text-warning-emphasis ms-2">критерии не заполнены</span>
+                            }
+                        </div>
+                    }
+                </div>
+                @if (open)
+                {
+                    <button class="btn btn-sm btn-outline-secondary" type="button" @onclick="() => opened.Remove(item)">Свернуть</button>
+                }
+                else
+                {
+                    <button class="btn btn-sm btn-outline-secondary" type="button" @onclick="() => opened.Add(item)">@(ReadOnly ? "Открыть" : "Править")</button>
+                }
+                @if (!ReadOnly)
+                {
+                    <button class="btn btn-sm btn-outline-secondary" type="button" title="Удалить средство" @onclick="() => RemoveItem(item)">✕</button>
+                }
+            </div>
+            @if (open)
+            {
+                <div class="mt-2">
+                    <div class="row g-2 mb-2">
+                        <div class="col-md-4">
+                            <label class="form-label small mb-0">Тип средства</label>
+                            <ScalarInput Context="Context" Schema="@(Prop("means_type"))" Parent="item" Key="means_type" Path="@($"{path}/means_type")" Compact="true" />
+                        </div>
+                        <div class="col-md-8">
+                            <label class="form-label small mb-0">Наименование</label>
+                            <ScalarInput Context="Context" Schema="@(Prop("title"))" Parent="item" Key="title" Path="@($"{path}/title")" Compact="true" />
+                        </div>
+                    </div>
+                    <div class="mb-2">
+                        <span class="form-label small me-2">Индикаторы:</span>
+                        @if (IndicatorChoices(item).Count == 0)
+                        {
+                            <span class="small text-muted">в снимке РПД индикаторов нет</span>
+                        }
+                        @foreach (var (code, text) in IndicatorChoices(item))
+                        {
+                            var known = Indicators.Any(c => c.Code == code);
+                            <div class="form-check form-check-inline">
+                                <input type="checkbox" class="form-check-input" id="@($"means-{index}-{code}")" disabled="@ReadOnly"
+                                       checked="@(codes.Contains(code))" @onchange="e => ToggleIndicator(item, code, e.Value is true)" />
+                                <label class="form-check-label small @(known ? "" : "text-danger")" for="@($"means-{index}-{code}")"
+                                       title="@(known ? text : "Индикатора нет в снимке РПД")"><b>@(code)</b></label>
+                            </div>
+                        }
+                    </div>
+                    <SchemaField Context="Context" Schema="@(Prop("description"))" Parent="item" Key="description"
+                                 Path="@($"{path}/description")" Label="Описание средства" />
+                    <SchemaField Context="Context" Schema="@(Prop("criteria"))" Parent="item" Key="criteria"
+                                 Path="@($"{path}/criteria")" Label="Критерии оценок" />
+                </div>
+            }
+        </div>
+    }
+    @if (!ReadOnly)
+    {
+        <button class="btn btn-sm btn-outline-primary me-1" type="button" @onclick="AddItem">Добавить средство</button>
+        <button class="btn btn-sm btn-outline-secondary" type="button" disabled="@(busy || Context.SuggestMeans is null || uncovered.Count == 0)"
+                title="Типовые средства индикаторам, у которых их ещё нет, — по формам контроля, видам занятий и аттестации РПД"
+                @onclick="SuggestAsync">Предложить</button>
+    }
+    @if (notice is not null)
+    {
+        <div class="alert alert-info small py-2 mt-2 mb-0">@notice</div>
+    }
+    @if (Hint is not null)
+    {
+        <div class="form-text">@Hint</div>
+    }
+</div>
+
+@code {
+    // Открытые строки — по узлу содержимого; сообщение о подборе и признак «идёт запрос».
+    private readonly HashSet<JsonObject> opened = [];
+    private string? notice;
+    private bool busy;
+
+    private JsonElement Prop(string name) =>
+        Items.ValueKind == JsonValueKind.Object && Items.TryGetProperty("properties", out var p) && p.TryGetProperty(name, out var s)
+            ? Context.Resolve(s)
+            : default;
+
+    private string TypeTitle(JsonObject item) =>
+        Text(item["means_type"]) is { Length: > 0 } type ? SchemaContext.EnumTitle(Prop("means_type"), type) : "тип не выбран";
+
+    // ---- Снимок РПД ----
+    private List<(string Code, string Text)> Indicators => ((Context.Payload["linked_rpd"] as JsonObject)?["competences"] as JsonArray ?? [])
+        .OfType<JsonObject>().SelectMany(c => (c["indicators"] as JsonArray ?? []).OfType<JsonObject>())
+        .Select(i => (Text(i["code"]) ?? "", Text(i["text"]) ?? "")).Where(i => i.Item1 != "").ToList();
+
+    private static List<string> Codes(JsonObject item) =>
+        (item["indicator_codes"] as JsonArray ?? []).Select(c => c?.ToString() ?? "").Where(c => c != "").ToList();
+
+    private List<(string Code, string Text)> IndicatorChoices(JsonObject item)
+    {
+        var known = Indicators;
+        return known.Concat(Codes(item).Where(c => known.All(k => k.Code != c)).Select(c => (c, ""))).ToList();
+    }
+
+    // Индикаторы снимка, которых не проверяет ни одно средство из формы (в том числе ещё не сохранённое).
+    private List<string> Uncovered()
+    {
+        var covered = Covered();
+        return Indicators.Select(i => i.Code).Where(c => !covered.Contains(c)).ToList();
+    }
+
+    private HashSet<string> Covered() => (Value as JsonArray ?? []).OfType<JsonObject>().SelectMany(Codes).ToHashSet();
+
+    private void ToggleIndicator(JsonObject item, string code, bool on)
+    {
+        var chosen = Codes(item);
+        if (on && !chosen.Contains(code)) chosen.Add(code);
+        if (!on) chosen.Remove(code);
+        if (chosen.Count == 0) item.Remove("indicator_codes");
+        else item["indicator_codes"] = new JsonArray(chosen.Select(c => (JsonNode)JsonValue.Create(c)!).ToArray());
+        Context.Changed();
+    }
+
+    // ---- Строки ----
+    private void AddItem()
+    {
+        var item = new JsonObject { ["means_type"] = "practical_task", ["title"] = "" };
+        EnsureArray().Add(item);
+        opened.Add(item);
+        notice = null;
+        Context.Changed();
+    }
+
+    private void RemoveItem(JsonObject item)
+    {
+        opened.Remove(item);
+        EnsureArray().Remove(item);
+        Context.Changed();
+    }
+
+    // Подбор добавляет только строки сервера и только индикаторам без средства: сервер получает «закрытые» индикаторы формы.
+    private async Task SuggestAsync()
+    {
+        if (Context.SuggestMeans is not { } suggest) return;
+        busy = true;
+        try
+        {
+            var result = await suggest(Covered().ToArray());
+            if (result is null) return;
+            var list = EnsureArray();
+            foreach (var row in result.Rows.OfType<JsonObject>()) list.Add(row.DeepClone());
+            notice = result.Notice;
+            if (result.Rows.Count > 0) Context.Changed();
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+}

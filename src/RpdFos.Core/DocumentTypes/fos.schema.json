@@ -57,7 +57,12 @@
               "semesters": { "type": "array", "items": { "type": "integer", "minimum": 1, "maximum": 12 } },
               "competence_codes": { "type": "array", "items": { "$ref": "#/$defs/competence_code" } },
               "indicator_codes": { "type": "array", "items": { "$ref": "#/$defs/indicator_code" } },
-              "current_control_forms": { "type": "array", "items": { "type": "string" } }
+              "current_control_forms": { "type": "array", "items": { "type": "string" } },
+              "class_kinds": {
+                "type": "array",
+                "description": "Виды занятий раздела по часам тематического плана; от них зависит подбор типовых оценочных средств",
+                "items": { "type": "string", "enum": ["lecture", "practice", "lab"] }
+              }
             }
           }
         },
@@ -105,6 +110,7 @@
       "type": "object",
       "title": "Паспорт ФОС",
       "x-validation-rule": "fos_passport_consistent",
+      "x-ui-widget": "fos_passport",
       "properties": {
         "sections": {
           "type": "array",
@@ -190,6 +196,12 @@
               "lab_report", "essay", "presentation", "case_study",
               "project", "exam_questions", "credit_questions"
             ],
+            "x-enum-titles": {
+              "test": "Тест", "oral_survey": "Устный опрос", "written_survey": "Письменный опрос (контрольная работа)",
+              "practical_task": "Практическое задание", "lab_report": "Отчёт по лабораторной работе", "essay": "Реферат, эссе",
+              "presentation": "Доклад, презентация", "case_study": "Кейс-задание", "project": "Проект, курсовая работа",
+              "exam_questions": "Вопросы к экзамену", "credit_questions": "Вопросы к зачёту"
+            },
             "x-source-suggestion": "fos_means_recommender"
           },
           "title": { "type": "string", "description": "Наименование средства, например «Реферат»" },
