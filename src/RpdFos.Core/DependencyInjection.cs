@@ -49,6 +49,7 @@ public static class DependencyInjection
         services.AddSingleton<IValidationRule, CompetencesMatchMatrix>();
         services.AddSingleton<IValidationRule, LiteratureMainRecent>();
         services.AddSingleton<IValidationRule, LiteratureYearNotFuture>();
+        services.AddSingleton<IValidationRule, GuidelineTextOrUrl>();
         // Правила ФОС и сквозной проверки РПД ↔ ФОС (этап 7, B8): одна ошибка и пять предупреждений.
         services.AddSingleton<IValidationRule, LinkedRpdMustBeApprovedOrUnderReview>();
         services.AddSingleton<IValidationRule, AllIndicatorsHaveMeans>();

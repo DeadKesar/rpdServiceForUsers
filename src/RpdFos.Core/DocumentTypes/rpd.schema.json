@@ -367,6 +367,7 @@
           "title": "Основная литература",
           "minItems": 1,
           "x-ui-widget": "literature_list",
+          "x-reorderable": true,
           "x-validation-rule": ["literature_main_count", "literature_main_recent", "literature_year_not_future"],
           "items": { "$ref": "#/$defs/literature_item" },
           "description": "Основная литература"
@@ -375,6 +376,7 @@
           "type": "array",
           "title": "Дополнительная литература",
           "x-ui-widget": "literature_list",
+          "x-reorderable": true,
           "x-validation-rule": "literature_year_not_future",
           "items": { "$ref": "#/$defs/literature_item" },
           "description": "Дополнительная литература"
@@ -382,6 +384,7 @@
         "periodicals": {
           "type": "array",
           "title": "Периодические издания",
+          "x-reorderable": true,
           "items": { "type": "string" },
           "description": "Периодические издания"
         },
@@ -389,6 +392,7 @@
           "type": "array",
           "title": "Интернет-ресурсы",
           "x-ui-widget": "literature_list",
+          "x-reorderable": true,
           "x-template-default": true,
           "items": {
             "type": "object",
@@ -404,32 +408,48 @@
           "type": "object",
           "title": "Методические указания",
           "x-template-default": true,
-          "description": "Ссылки на методические указания в электронной образовательной среде университета",
+          "description": "Методические указания к занятиям: названия указаний текстом, ссылка на них в электронной образовательной среде университета или то и другое",
           "properties": {
             "lab_works": {
-              "type": "string",
-              "title": "Ссылка на указания к лабораторным занятиям",
-              "format": "uri",
+              "type": "object",
+              "title": "Указания к лабораторным занятиям",
+              "x-ui-widget": "guideline",
+              "x-validation-rule": "guideline_text_or_url",
               "x-visible-if": { "source": "parser.discipline.details", "any": "lab_hours" },
-              "x-stub-text": "Лабораторные работы учебным планом не предусмотрены."
+              "x-stub-text": "Лабораторные работы учебным планом не предусмотрены.",
+              "properties": {
+                "text": { "type": "string", "title": "Текст", "x-ui-widget": "multiline", "description": "Названия указаний и где их взять; каждая строка печатается отдельным абзацем" },
+                "url": { "type": "string", "title": "Ссылка", "pattern": "^(https?://\\S+)?$", "description": "Адрес http:// или https:// в электронной образовательной среде университета" }
+              }
             },
             "practical_classes": {
-              "type": "string",
-              "title": "Ссылка на указания к практическим занятиям",
-              "format": "uri",
+              "type": "object",
+              "title": "Указания к практическим занятиям",
+              "x-ui-widget": "guideline",
+              "x-validation-rule": "guideline_text_or_url",
               "x-visible-if": { "source": "parser.discipline.details", "any": "practice" },
-              "x-stub-text": "Практические занятия учебным планом не предусмотрены."
+              "x-stub-text": "Практические занятия учебным планом не предусмотрены.",
+              "properties": {
+                "text": { "type": "string", "title": "Текст", "x-ui-widget": "multiline", "description": "Названия указаний и где их взять; каждая строка печатается отдельным абзацем" },
+                "url": { "type": "string", "title": "Ссылка", "pattern": "^(https?://\\S+)?$", "description": "Адрес http:// или https:// в электронной образовательной среде университета" }
+              }
             },
             "independent_work": {
-              "type": "string",
-              "title": "Ссылка на указания к курсовому проектированию и самостоятельной работе",
-              "format": "uri"
+              "type": "object",
+              "title": "Указания к курсовому проектированию и самостоятельной работе",
+              "x-ui-widget": "guideline",
+              "x-validation-rule": "guideline_text_or_url",
+              "properties": {
+                "text": { "type": "string", "title": "Текст", "x-ui-widget": "multiline", "description": "Названия указаний и где их взять; каждая строка печатается отдельным абзацем" },
+                "url": { "type": "string", "title": "Ссылка", "pattern": "^(https?://\\S+)?$", "description": "Адрес http:// или https:// в электронной образовательной среде университета" }
+              }
             }
           }
         },
         "software": {
           "type": "array",
           "title": "Программное обеспечение",
+          "x-reorderable": true,
           "x-template-default": true,
           "items": { "type": "string" },
           "description": "Программное обеспечение, базы данных, информационно-справочные системы"
@@ -442,6 +462,7 @@
       "title": "Материально-техническое обеспечение",
       "description": "Помещения и оборудование — пунктами списка",
       "x-ui-widget": "list",
+      "x-reorderable": true,
       "x-template-default": true,
       "items": { "type": "string", "minLength": 3 }
     },
@@ -560,7 +581,14 @@
           "title": "Фундаментальное издание",
           "description": "Классический труд, который не переиздаётся: предупреждение о возрасте издания не выдаётся"
         },
-        "isbn": { "type": "string", "title": "ISBN" }
+        "isbn": { "type": "string", "title": "ISBN" },
+        "url": {
+          "type": "string",
+          "title": "Ссылка",
+          "x-ui-widget": "textarea",
+          "pattern": "^(https?://\\S+)?$",
+          "description": "Адрес издания в библиотеке или ЭБС (http:// или https://), где его можно прочитать или скачать; в печати — гиперссылкой"
+        }
       }
     }
   }

@@ -48,10 +48,15 @@ public class DocxGenerationTests(DatabaseFixture app)
         // Новый документ получил постоянные пункты вуза из умолчаний шаблона — автор дополняет их своими.
         var literature = JsonNode.Parse(created.Payload.GetProperty("literature").GetRawText())!.AsObject();
         Assert.Equal((4, 8), (literature["internet_resources"]!.AsArray().Count, literature["software"]!.AsArray().Count));
-        literature["main"] = new JsonArray(new JsonObject { ["citation"] = "Петров П. П. Моделирование систем : учебник. — Москва : Наука, 2024. — 320 с." });
+        literature["main"] = new JsonArray(new JsonObject
+        {
+            ["citation"] = "Петров П. П. Моделирование систем : учебник. — Москва : Наука, 2024. — 320 с.",
+            ["url"] = "https://e.lanbook.com/book/123456"
+        });
         literature["additional"] = new JsonArray();
         literature["internet_resources"]!.AsArray().Add(new JsonObject { ["title"] = "Портал моделирования", ["url"] = "https://example.org/models" });
-        literature["guidelines"] = new JsonObject { ["lab_works"] = "https://edu.example.org/labs" };
+        // Методические указания — запись «текст и/или ссылка» (этап 7.1): к лабораторным одна ссылка, как раньше.
+        literature["guidelines"] = new JsonObject { ["lab_works"] = new JsonObject { ["url"] = "https://edu.example.org/labs" } };
         literature["software"]!.AsArray().Add("Среда имитационного моделирования");
         var support = JsonNode.Parse(created.Payload.GetProperty("material_support").GetRawText())!.AsArray();
         support.Add("Компьютерный класс со средой моделирования.");
@@ -168,6 +173,9 @@ public class DocxGenerationTests(DatabaseFixture app)
         AssertOneList("Профессиональная база данных Web of Science", "Среда имитационного моделирования", 9);
         AssertOneList("Учебная аудитория для проведения лекций", "Компьютерный класс со средой моделирования.", 3);
         Assert.Contains("https://edu.example.org/labs", text);                         // 4.4 — ссылка
+        Assert.Contains("320 с. — URL: https://e.lanbook.com/book/123456", text);      // 4.1 — ссылка у литературы после записи
+        Assert.Equal(["https://e.lanbook.com/book/123456", "https://edu.example.org/labs"],
+            body.Descendants<Hyperlink>().Where(h => h.Id is not null).Select(h => h.InnerText).Order()); // обе — гиперссылками (оглавление — по якорям)
 
         // Пустые необязательные значения не стирают бланк: протокол и строка второго составителя — для ручного заполнения.
         Assert.Equal("протокол № ________ от \"___\" __________ 20__г.", Line("протокол №"));

@@ -24,7 +24,9 @@
         {
             var index = i;
             var row = rows![index] as JsonObject;
-            <tbody class="border-top">
+            @* Ключ с номером перестановки — как у списка строк (StringListWidget): после перестановки и удаления строки создаются
+               заново из содержимого, иначе многострочное поле, в котором печатали, осталось бы с прежним текстом. *@
+            <tbody class="border-top" @key="(_arrangement, index)">
                 @if (row is not null && LongColumns.Count > 0)
                 {
                     <tr>
@@ -49,10 +51,16 @@
                             }
                         </td>
                     }
-                    <td class="text-end">
+                    <td class="text-end text-nowrap">
                         @if (!ReadOnly)
                         {
-                            <button class="btn btn-sm btn-outline-secondary" type="button" title="Удалить строку" @onclick="() => Remove(index)">✕</button>
+                            <div class="btn-group btn-group-sm">
+                                @if (Reorderable)
+                                {
+                                    <MoveButtons Index="index" Count="rows!.Count" Moved="delta => Move(index, delta)" />
+                                }
+                                <button class="btn btn-sm btn-outline-secondary" type="button" title="Удалить строку" @onclick="() => Remove(index)">✕</button>
+                            </div>
                         }
                     </td>
                 </tr>
@@ -133,6 +141,21 @@
     private void Remove(int index)
     {
         EnsureArray().RemoveAt(index);
+        _arrangement++;
+        Context.Changed();
+    }
+
+    // Порядок записей меняется только в списках, которые схема нового шаблона отметила x-reorderable (этап 7.1): литература
+    // и интернет-ресурсы. Таблицы занятий нумеруются автором, их порядок остаётся порядком добавления.
+    private bool Reorderable => ListOrder.IsReorderable(Schema);
+
+    // Номер расстановки строк: растёт при удалении и перестановке (см. ключ строки).
+    private int _arrangement;
+
+    private void Move(int index, int delta)
+    {
+        if (!ListOrder.Move(EnsureArray(), index, delta)) return;
+        _arrangement++;
         Context.Changed();
     }
 }

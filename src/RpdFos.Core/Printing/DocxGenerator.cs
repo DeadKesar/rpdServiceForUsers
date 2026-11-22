@@ -301,7 +301,8 @@ public static partial class DocxGenerator
             // Значение внутри абзаца с другим текстом печатается строкой: рисунку в ней места нет.
             if (!whole && value.Blocks.Any(b => b.HasImage))
                 warnings.Add($"{name}: рисунок не напечатан — закладка стоит в абзаце с другим текстом, а рисунок печатается только вместо целого абзаца.");
-            if (whole && (value.IsMultiline || value.Blocks.OfType<PrintParagraph>().Any(p => p.Runs.Any(r => r.Bold || r.Italic))))
+            if (whole && value.ReplacesLead && !value.IsEmpty) DropLead(bookmark, paragraph!);
+            if (whole && (value.IsMultiline || value.HasLink || value.Blocks.OfType<PrintParagraph>().Any(p => p.Runs.Any(r => r.Bold || r.Italic))))
                 ReplaceParagraph(paragraph!, text.Ancestors<Run>().First(), value);
             else
             {
@@ -533,10 +534,52 @@ public static partial class DocxGenerator
                 var properties = runProperties?.CloneNode(true) as RunProperties ?? new RunProperties();
                 if (run.Bold) properties.Bold = new Bold();
                 if (run.Italic) properties.Italic = new Italic();
-                var element = new Run(properties, new Text(run.Text) { Space = SpaceProcessingModeValues.Preserve });
+                OpenXmlElement element = new Run(properties, new Text(run.Text) { Space = SpaceProcessingModeValues.Preserve });
+                if (run.Url is not null && LinkId(run.Url) is { } link)
+                {
+                    // Гиперссылка — как её рисует Word, но прямым оформлением: стиля «Hyperlink» в шаблоне может не быть.
+                    properties.Color = new Color { Val = "0563C1" };
+                    properties.Underline = new Underline { Val = UnderlineValues.Single };
+                    element = new Hyperlink(element) { Id = link, History = true };
+                }
                 if (end is not null) end.InsertBeforeSelf(element);
                 else paragraph.AppendChild(element);
             }
+        }
+
+        // Внешняя ссылка пакета для адреса — одна на адрес; не http(s) или не разбирающийся адрес — null: печатается текстом.
+        private readonly Dictionary<string, string> _links = [];
+
+        private string? LinkId(string url)
+        {
+            if (_links.TryGetValue(url, out var existing)) return existing;
+            if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https")) return null;
+            return _links[url] = _main.AddHyperlinkRelationship(uri, true).Id;
+        }
+
+        /// <summary>
+        /// Значение заменяет вводную фразу закладки (<see cref="PrintValue.ReplacesLead"/>): абзац, в котором закладка началась, и
+        /// абзацы до абзаца значения убираются. Метки закладок (в том числе чужие — ссылки оглавления «_Toc…») переезжают в абзац
+        /// значения: оглавление и сама закладка остаются целыми.
+        /// </summary>
+        private static void DropLead(BookmarkStart start, Paragraph target)
+        {
+            if (start.Parent is not Paragraph lead || lead == target) return;
+            var anchor = target.ParagraphProperties as OpenXmlElement;
+            foreach (var mark in lead.ChildElements.Where(c => c is BookmarkStart or BookmarkEnd).ToList())
+            {
+                mark.Remove();
+                if (anchor is null) target.InsertAt(mark, 0);
+                else anchor.InsertAfterSelf(mark);
+                anchor = mark;
+            }
+            for (var between = lead.NextSibling(); between is not null && between != target;)
+            {
+                var next = between.NextSibling();
+                between.Remove();
+                between = next;
+            }
+            lead.Remove();
         }
 
         // Рисунок форматированного текста (этап 7, B4а): размер из разметки (точки при 96 на дюйм), без размера — натуральный;

@@ -12,19 +12,27 @@
         var index = i;
         // Ошибка проверки у самого пункта (пустой, слишком короткий) — рамка и подпись, как у простых полей (этап 5.2).
         var missing = ReadOnly ? null : Context.MissingAt($"{Path}/{index}");
-        <div class="input-group input-group-sm mb-1">
-            <span class="input-group-text align-items-start">@(index + 1)</span>
-            <textarea class="form-control auto-grow @(missing is null ? "" : "field-missing-box")" rows="1" readonly="@ReadOnly"
-                      @oninput="e => Input(index, e.Value as string)" @onchange="e => Change(index, e.Value as string)">@Text(items![index])</textarea>
-            @if (!ReadOnly)
+        @* Ключ с номером перестановки: после «выше»/«ниже» и удаления строки создаются заново из содержимого. Поле, в котором
+           печатали, показывает набранное, а не текст внутри тега, поэтому на прежних местах оно показало бы старую запись. *@
+        <div @key="(_arrangement, index)">
+            <div class="input-group input-group-sm mb-1">
+                <span class="input-group-text align-items-start">@(index + 1)</span>
+                <textarea class="form-control auto-grow @(missing is null ? "" : "field-missing-box")" rows="1" readonly="@ReadOnly"
+                          @oninput="e => Input(index, e.Value as string)" @onchange="e => Change(index, e.Value as string)">@Text(items![index])</textarea>
+                @if (!ReadOnly)
+                {
+                    if (Reorderable)
+                    {
+                        <MoveButtons Index="index" Count="items!.Count" Moved="delta => Move(index, delta)" />
+                    }
+                    <button class="btn btn-outline-secondary" type="button" title="Удалить" @onclick="() => Remove(index)">✕</button>
+                }
+            </div>
+            @if (missing is not null)
             {
-                <button class="btn btn-outline-secondary" type="button" title="Удалить" @onclick="() => Remove(index)">✕</button>
+                <div class="field-missing-text mb-1">@missing</div>
             }
         </div>
-        @if (missing is not null)
-        {
-            <div class="field-missing-text mb-1">@missing</div>
-        }
     }
     @if (!ReadOnly)
     {
@@ -60,6 +68,20 @@
     private void Remove(int index)
     {
         EnsureArray().RemoveAt(index);
+        _arrangement++;
+        Context.Changed();
+    }
+
+    // Порядок записей меняется только в списках, которые схема нового шаблона отметила x-reorderable (этап 7.1).
+    private bool Reorderable => ListOrder.IsReorderable(Schema);
+
+    // Номер расстановки строк: растёт при удалении и перестановке (см. ключ строки).
+    private int _arrangement;
+
+    private void Move(int index, int delta)
+    {
+        if (!ListOrder.Move(EnsureArray(), index, delta)) return;
+        _arrangement++;
         Context.Changed();
     }
 

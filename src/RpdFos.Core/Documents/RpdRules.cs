@@ -270,6 +270,28 @@ public sealed class LiteratureYearNotFuture : IValidationRule
     }
 }
 
+/// <summary>
+/// <c>guideline_text_or_url</c> (этап 7.1): запись методических указаний — текст, ссылка или то и другое; запись, в которой
+/// нет ни того ни другого, — ошибка у самой записи. Правило висит на записи, а не на поле: «хотя бы одно из двух»
+/// JSON Schema выражает через anyOf, а его отказы валидатор не привязывает к месту. Запись, которой в содержимом нет, —
+/// не ошибка: указания необязательны. Не проверяется при сохранении: начатую запись можно оставить пустой до отправки.
+/// </summary>
+public sealed class GuidelineTextOrUrl : IValidationRule
+{
+    public string Name => "guideline_text_or_url";
+    public string Level => IssueLevels.Error;
+
+    public IEnumerable<DocumentValidationError> Check(RuleContext context)
+    {
+        if (context.Value.ValueKind != JsonValueKind.Object) yield break;
+        if (!Filled(context.Value, "text") && !Filled(context.Value, "url"))
+            yield return new(context.Path, "Укажите текст или ссылку на методические указания");
+    }
+
+    private static bool Filled(JsonElement record, string name) =>
+        record.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(v.GetString());
+}
+
 internal static class LiteratureYear
 {
     public static int? Of(JsonElement item) =>

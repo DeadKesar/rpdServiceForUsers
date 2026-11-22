@@ -1,0 +1,28 @@
+@* Кнопки «выше» и «ниже» у записи списка (этап 7.1, см. ListOrder). Нужной кнопки у крайней записи нет: на её месте — пустое
+   место той же ширины, чтобы кнопки соседних записей не разъезжались. Кнопки стоят прямо в группе записи (input-group или
+   btn-group), своей обёртки у компонента нет. *@
+@if (ListOrder.CanMoveUp(Index))
+{
+    <button class="btn btn-outline-secondary" type="button" title="Выше" aria-label="Выше" @onclick="() => Moved.InvokeAsync(-1)">↑</button>
+}
+else
+{
+    <span class="btn btn-outline-secondary invisible" aria-hidden="true">↑</span>
+}
+@if (ListOrder.CanMoveDown(Index, Count))
+{
+    <button class="btn btn-outline-secondary" type="button" title="Ниже" aria-label="Ниже" @onclick="() => Moved.InvokeAsync(1)">↓</button>
+}
+else
+{
+    <span class="btn btn-outline-secondary invisible" aria-hidden="true">↓</span>
+}
+
+@code {
+    /// <summary>Номер записи в списке с нуля и число записей.</summary>
+    [Parameter, EditorRequired] public int Index { get; set; }
+    [Parameter, EditorRequired] public int Count { get; set; }
+
+    /// <summary>Сдвиг: −1 — выше, +1 — ниже.</summary>
+    [Parameter, EditorRequired] public EventCallback<int> Moved { get; set; }
+}

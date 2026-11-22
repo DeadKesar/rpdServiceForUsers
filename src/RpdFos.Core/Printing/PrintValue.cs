@@ -9,9 +9,10 @@ public enum PrintListKind { None, Bullet, Numbered }
 public sealed record PrintImage(Guid FileId, int? Width, int? Height, string? Alt);
 
 /// <summary>
-/// Фрагмент абзаца печатной формы: полужирный и курсив — из форматированного текста; рисунок — фрагмент без текста.
+/// Фрагмент абзаца печатной формы: полужирный и курсив — из форматированного текста; рисунок — фрагмент без текста;
+/// <paramref name="Url"/> — фрагмент печатается гиперссылкой на этот адрес (этап 7.1: ссылка у литературы и методических указаний).
 /// </summary>
-public sealed record PrintRun(string Text, bool Bold = false, bool Italic = false, PrintImage? Image = null);
+public sealed record PrintRun(string Text, bool Bold = false, bool Italic = false, PrintImage? Image = null, string? Url = null);
 
 /// <summary>Блок значения для закладки: абзац или таблица (форматированный текст допускает и то и другое).</summary>
 public abstract record PrintBlock
@@ -67,6 +68,16 @@ public sealed record PrintValue(IReadOnlyList<PrintBlock> Blocks)
     public static PrintValue Text(string? text) => string.IsNullOrWhiteSpace(text) ? Empty : new([PrintParagraph.Plain(text.Trim())]);
 
     public bool IsEmpty => Blocks.All(b => string.IsNullOrWhiteSpace(b.PlainText) && !b.HasImage);
+
+    /// <summary>
+    /// Значение само говорит обо всём месте и заменяет постоянную фразу шаблона перед закладкой (этап 7.1: методические
+    /// указания текстом — фраза «…представлены в электронной образовательной среде…» к ним не подходит). Фразу убирает
+    /// генератор DOCX; без признака она остаётся, как и у записи из одной ссылки.
+    /// </summary>
+    public bool ReplacesLead { get; init; }
+
+    /// <summary>Есть ли в значении гиперссылка: такое значение нельзя подставить строкой внутрь абзаца.</summary>
+    public bool HasLink => Blocks.OfType<PrintParagraph>().Any(p => p.Runs.Any(r => r.Url is not null));
 
     public bool IsMultiline => Blocks.Count > 1 || Blocks.Any(b => b is PrintTable or PrintParagraph { List: not PrintListKind.None } || b.HasImage);
 

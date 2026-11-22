@@ -32,6 +32,11 @@
         <textarea class="form-control auto-grow @Size @MissingClass" rows="@(Compact ? 1 : 2)" readonly="@ReadOnly"
                   @oninput="e => InputText(e.Value as string)" @onchange="e => SetText(OneParagraph(e.Value as string))">@Current</textarea>
         break;
+    case "multiline":
+        @* Текст в несколько строк с сохранением переводов строки (методические указания): каждая строка печатается абзацем. *@
+        <textarea class="form-control auto-grow @Size @MissingClass" rows="3" readonly="@ReadOnly"
+                  @oninput="e => InputText(e.Value as string)" @onchange="e => SetText(e.Value as string)">@Current</textarea>
+        break;
     default:
         <input type="text" class="form-control @Size @MissingClass" readonly="@ReadOnly" value="@Current" placeholder="@Placeholder"
                @oninput="e => InputText(e.Value as string)" @onchange="e => SetText(e.Value as string)" />
@@ -61,6 +66,7 @@
 
     private string Kind => Schema.TryGetProperty("enum", out _) ? "enum"
         : SchemaContext.Text(Schema, "format") == "date" ? "date"
+        : SchemaContext.Text(Schema, "x-ui-widget") == "multiline" ? "multiline"
         : SchemaContext.Text(Schema, "x-ui-widget") == "textarea" || Multiline && SchemaContext.Type(Schema) == "string" ? "textarea"
         : SchemaContext.Type(Schema);
 

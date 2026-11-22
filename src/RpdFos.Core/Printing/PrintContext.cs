@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using RpdFos.Core.Data.Entities;
 using RpdFos.Core.Documents;
 using RpdFos.Core.DocumentTypes;
@@ -163,15 +164,13 @@ public sealed class PrintContext(
                     schema.TryGetProperty("x-print-titles", out var phrases) && phrases.TryGetProperty(text, out var phrase) ? phrase.GetString()
                     : schema.TryGetProperty("x-enum-titles", out var titles) && titles.TryGetProperty(text, out var title) ? title.GetString()
                     : text);
-            // Библиографическая запись уже содержит год и издательство; интернет-ресурс — название и адрес, как в пунктах вуза.
+            // Библиографическая запись уже содержит год и издательство; ссылка (этап 7.1) — после неё гиперссылкой. Интернет-ресурс —
+            // название и адрес, как в пунктах вуза. Порядок записей — порядок в документе: нумерует Word.
             case JsonValueKind.Array when widget == "literature_list":
                 var list = NextListId();
                 return new PrintValue(value.EnumerateArray()
-                    .Select(item => Text(item, "citation") ?? (Text(item, "title") is { } name
-                        ? Text(item, "url") is { } url ? $"{name} // Режим доступа URL: {url}" : name
-                        : null))
-                    .OfType<string>().Where(t => t.Trim().Length > 0)
-                    .Select(t => new PrintParagraph([new PrintRun(t.Trim())], PrintListKind.Numbered, list)).ToList());
+                    .Select(LiteratureRuns).Where(runs => runs.Count > 0)
+                    .Select(runs => new PrintParagraph(runs, PrintListKind.Numbered, list)).ToList());
             // Пре- и постреквизиты — списком «индекс название», как в РПД вуза.
             case JsonValueKind.Array when widget == "discipline_picker":
                 var disciplines = NextListId();
@@ -190,6 +189,8 @@ public sealed class PrintContext(
                     .Select(item => Render(item, items).Inline)
                     .Where(t => t.Length > 0)
                     .Select(t => new PrintParagraph([new PrintRun(t)], PrintListKind.Bullet, id)).ToList());
+            case JsonValueKind.Object when widget == "guideline":
+                return Guideline(value);
             case JsonValueKind.Object:
                 var fields = schema.TryGetProperty("properties", out var props)
                     ? props.EnumerateObject()
@@ -207,6 +208,68 @@ public sealed class PrintContext(
             default:
                 return PrintValue.Empty;
         }
+    }
+
+    // Запись списка литературы: библиографическая запись со ссылкой либо название интернет-ресурса с адресом.
+    private static List<PrintRun> LiteratureRuns(JsonElement item)
+    {
+        if (Text(item, "citation") is { } citation) return WithAddress(citation, Text(item, "url"));
+        if (Text(item, "title") is not { } name) return [];
+        var line = (Text(item, "url") is { } url ? $"{name} // Режим доступа URL: {url}" : name).Trim();
+        return line.Length == 0 ? [] : [new PrintRun(line)];
+    }
+
+    /// <summary>
+    /// Запись методических указаний (этап 7.1): текст, ссылка или то и другое. Текст печатается абзацами — по строке ввода, ссылка
+    /// после текста, как у литературы. Запись из одной ссылки печатается как раньше: фраза шаблона и адрес под ней (теперь
+    /// гиперссылкой). Запись с текстом заменяет и фразу шаблона: «…представлены в электронной образовательной среде» к названиям
+    /// указаний не подходит.
+    /// </summary>
+    private static PrintValue Guideline(JsonElement record)
+    {
+        var url = Text(record, "url")?.Trim();
+        var lines = (Text(record, "text") ?? "").Split('\n').Select(l => l.Trim()).Where(l => l.Length > 0).ToList();
+        if (lines.Count == 0)
+            return string.IsNullOrEmpty(url) ? PrintValue.Empty : new PrintValue([new PrintParagraph([new PrintRun(url, Url: url)])]);
+
+        var runs = lines.Select(l => new List<PrintRun> { new(l) }).ToList();
+        if (!string.IsNullOrEmpty(url))
+        {
+            // Адрес, уже вписанный в одну из строк, остаётся там и становится ссылкой; иначе он идёт после последней строки.
+            var at = lines.FindIndex(l => AddressIn(l, url) is not null);
+            var index = at >= 0 ? at : lines.Count - 1;
+            runs[index] = WithAddress(lines[index], url);
+        }
+        return new PrintValue(runs.Select(r => new PrintParagraph(r)).ToList()) { ReplacesLead = true };
+    }
+
+    /// <summary>
+    /// Текст записи со ссылкой: «текст — URL: адрес», адрес — гиперссылкой. Адрес, уже вписанный в текст, второй раз не
+    /// печатается — в тексте он сам становится ссылкой.
+    /// </summary>
+    internal static List<PrintRun> WithAddress(string text, string? url)
+    {
+        text = text.Trim();
+        url = url?.Trim();
+        if (string.IsNullOrEmpty(url)) return text.Length == 0 ? [] : [new PrintRun(text)];
+        if (AddressIn(text, url) is { } found)
+        {
+            var runs = new List<PrintRun>();
+            if (found.Index > 0) runs.Add(new PrintRun(text[..found.Index]));
+            runs.Add(new PrintRun(found.Value, Url: url));
+            if (found.Index + found.Length < text.Length) runs.Add(new PrintRun(text[(found.Index + found.Length)..]));
+            return runs;
+        }
+        return [new PrintRun(text.Length == 0 ? "URL: " : text + " — URL: "), new PrintRun(url, Url: url)];
+    }
+
+    // Адрес в тексте целиком, а не началом более длинного адреса: «https://a.ru/book/1» — не то же, что «https://a.ru»; косая
+    // черта в конце не различает, регистр — тоже (адреса вводят и копируют по-разному).
+    private static Match? AddressIn(string text, string url)
+    {
+        var pattern = Regex.Escape(url.TrimEnd('/')) + @"/?(?![\w\-/%?=&#~+@]|\.\w)";
+        var match = Regex.Match(text, pattern, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        return match.Success ? match : null;
     }
 
     // Компетенции — по категориям, как в шаблонах МГТУ «СТАНКИН»: «Универсальные компетенции:», затем «УК-1. …;».
