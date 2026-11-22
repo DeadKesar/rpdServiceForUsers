@@ -3,15 +3,21 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using RpdFos.Core.Data;
 using RpdFos.Core.Data.Entities;
+using Parsed = DisciplineDataExtractor;
 
 namespace RpdFos.Core.Import;
 
 /// <summary>Дисциплина плана в выборе для строки матрицы: кандидат неоднозначной строки, без связей с матрицей, прочая.</summary>
 public sealed record MatrixRowOption(Guid Id, string Code, string Name, bool Candidate, bool WithoutMatrix);
 
-/// <summary>Строка матрицы без дисциплины: что в ней, как решена (кто, когда, к чему) и варианты выбора.</summary>
+/// <summary>
+/// Строка блока «Строки матрицы без дисциплины плана»: одна строка матрицы или группа одинаковых (этап 7.1) — что в ней,
+/// как решена (кто, когда, к чему) и варианты выбора. <see cref="Id"/> — первая строка группы: по ней привязывают и
+/// отменяют всю группу; <see cref="Places"/> — места в файле матрицы («Таблица 1, строка 49»); <see cref="Codes"/> —
+/// коды всех строк группы.
+/// </summary>
 public sealed record MatrixRowState(
-    Guid Id, string Name, string Sheet, int Row, string Semesters, IReadOnlyList<string> Codes, string Status,
+    Guid Id, string Name, IReadOnlyList<string> Places, string Semesters, IReadOnlyList<string> Codes, string Status,
     Guid? DisciplineId, string? Discipline, string? ResolvedBy, DateTimeOffset? ResolvedAt, IReadOnlyList<MatrixRowOption> Options);
 
 public enum MatrixRowProblem { NotFound, AlreadyResolved, NotResolved, WrongDiscipline }
@@ -21,7 +27,9 @@ public enum MatrixRowProblem { NotFound, AlreadyResolved, NotResolved, WrongDisc
 /// компетенциями строки так же, как импорт, — на уровне компетенций; коды, которых нет в списке компетенций плана,
 /// пропускаются с замечанием. «Не учитывать» — строка решена без связей. Отмена удаляет только связи, добавленные этой
 /// привязкой. Документы, уже созданные по дисциплине, не меняются. Привязка и отмена — в журнале аудита.
-/// Сохраняет вызывающий.
+/// Одинаковые строки решаются вместе (этап 7.1): строки одной версии плана, а значит одного запуска и одного файла
+/// матрицы, с тем же названием по правилу сопоставления с планом (этап 5.4) и теми же семестрами, в одном состоянии
+/// и с одной дисциплиной. Строки, решённые по-разному, остаются отдельными. Аудит — по каждой строке. Сохраняет вызывающий.
 /// </summary>
 public sealed class MatrixRowBinding(AppDbContext db, TimeProvider clock)
 {
@@ -46,25 +54,37 @@ public sealed class MatrixRowBinding(AppDbContext db, TimeProvider clock)
             .Distinct().ToListAsync(ct)).ToHashSet();
         var people = await PeopleAsync(rows.Select(r => r.ResolvedBy), ct);
 
-        return rows.Select(r => new MatrixRowState(
-            r.Id, r.Name, r.Sheet, r.RowNumber, r.Semesters, r.Codes, r.Status, r.DisciplineId,
-            disciplines.FirstOrDefault(d => d.Id == r.DisciplineId) is { } chosen ? $"{chosen.Code} {chosen.Name}" : null,
-            r.ResolvedBy is Guid by ? people.GetValueOrDefault(by) : null, r.ResolvedAt,
-            disciplines
-                .Select(d => new MatrixRowOption(d.Id, d.Code, d.Name, r.Candidates.Contains(d.Code), !withMatrix.Contains(d.Id)))
-                .OrderBy(o => o.Candidate ? 0 : o.WithoutMatrix ? 1 : 2).ThenBy(o => o.Code, StringComparer.Ordinal)
-                .ToList())).ToList();
+        // Порядок групп — по первой строке группы (лист, строка), как был порядок строк.
+        return rows.GroupBy(GroupOf).Select(g =>
+        {
+            var first = g.First();
+            var candidates = g.SelectMany(r => r.Candidates).ToHashSet();
+            return new MatrixRowState(
+                first.Id, first.Name, g.Select(r => $"{r.Sheet}, строка {r.RowNumber}").ToList(), first.Semesters,
+                g.SelectMany(r => r.Codes).Distinct().ToList(), first.Status, first.DisciplineId,
+                disciplines.FirstOrDefault(d => d.Id == first.DisciplineId) is { } chosen ? $"{chosen.Code} {chosen.Name}" : null,
+                first.ResolvedBy is Guid by ? people.GetValueOrDefault(by) : null, first.ResolvedAt,
+                disciplines
+                    .Select(d => new MatrixRowOption(d.Id, d.Code, d.Name, candidates.Contains(d.Code), !withMatrix.Contains(d.Id)))
+                    .OrderBy(o => o.Candidate ? 0 : o.WithoutMatrix ? 1 : 2).ThenBy(o => o.Code, StringComparer.Ordinal)
+                    .ToList());
+        }).ToList();
     }
 
-    /// <summary>Привязать строку к дисциплине (null — «Не учитывать»). Замечания — пропущенные коды.</summary>
+    /// <summary>
+    /// Привязать строку и все одинаковые с ней к дисциплине (null — «Не учитывать»). Замечания — пропущенные коды,
+    /// без повторов по строкам группы.
+    /// </summary>
     public async Task<(MatrixRowProblem? Problem, IReadOnlyList<string> Warnings)> ApplyAsync(
         Guid rowId, Guid? disciplineId, Guid by, CancellationToken ct)
     {
         var row = await db.MatrixUnmatchedRows.SingleOrDefaultAsync(r => r.Id == rowId, ct);
         if (row is null) return (MatrixRowProblem.NotFound, []);
         if (row.Status != MatrixRowStatuses.Pending) return (MatrixRowProblem.AlreadyResolved, []);
+        var group = await GroupAsync(row, ct);
 
         var warnings = new List<string>();
+        var skipped = group.ToDictionary(m => m.Id, _ => new List<string>());
         if (disciplineId is Guid id)
         {
             var discipline = await db.Disciplines.SingleOrDefaultAsync(d => d.Id == id && d.CurriculumPlanId == row.CurriculumPlanId &&
@@ -74,55 +94,85 @@ public sealed class MatrixRowBinding(AppDbContext db, TimeProvider clock)
             var competences = await CompetencesAsync(row.CurriculumPlanId, ct);
             var existing = (await db.CompetenceMatrix.Where(m => m.DisciplineId == id).Select(m => m.CompetenceId).ToListAsync(ct))
                 .ToHashSet();
-            foreach (var code in row.CompetenceCodes)
+            foreach (var member in group)
             {
-                if (!competences.TryGetValue(code, out var competenceId))
+                foreach (var code in member.CompetenceCodes)
                 {
-                    warnings.Add($"Компетенции {code} нет в списке компетенций плана — её связь пропущена");
-                    continue;
+                    if (!competences.TryGetValue(code, out var competenceId))
+                    {
+                        var warning = $"Компетенции {code} нет в списке компетенций плана — её связь пропущена";
+                        if (!warnings.Contains(warning)) warnings.Add(warning);
+                        skipped[member.Id].Add(code);
+                        continue;
+                    }
+                    // Связь уже есть (из матрицы, другой привязки или соседней строки группы) — не дублируется и при
+                    // отмене остаётся.
+                    if (!existing.Add(competenceId)) continue;
+                    db.CompetenceMatrix.Add(new CompetenceMatrixEntry { DisciplineId = id, CompetenceId = competenceId });
+                    member.AddedCompetenceIds.Add(competenceId);
                 }
-                // Связь уже есть (из матрицы или другой привязки) — не дублируется и при отмене остаётся.
-                if (!existing.Add(competenceId)) continue;
-                db.CompetenceMatrix.Add(new CompetenceMatrixEntry { DisciplineId = id, CompetenceId = competenceId });
-                row.AddedCompetenceIds.Add(competenceId);
+                member.Status = MatrixRowStatuses.Linked;
+                member.DisciplineId = id;
             }
-            row.Status = MatrixRowStatuses.Linked;
-            row.DisciplineId = id;
         }
-        else row.Status = MatrixRowStatuses.Ignored;
+        else
+            foreach (var member in group) member.Status = MatrixRowStatuses.Ignored;
 
-        row.ResolvedBy = by;
-        row.ResolvedAt = clock.GetUtcNow();
-        Audit(AuditEvents.MatrixRowLinked, row, by, new
+        var now = clock.GetUtcNow();
+        foreach (var member in group)
         {
-            row = row.Name, status = row.Status, discipline_id = row.DisciplineId, added = row.AddedCompetenceIds, skipped = warnings
-        });
+            member.ResolvedBy = by;
+            member.ResolvedAt = now;
+            Audit(AuditEvents.MatrixRowLinked, member, by, new
+            {
+                row = member.Name, status = member.Status, discipline_id = member.DisciplineId, added = member.AddedCompetenceIds,
+                skipped = skipped[member.Id]
+            });
+        }
         return (null, warnings);
     }
 
-    /// <summary>Отменить привязку или «Не учитывать»: удаляются только связи, добавленные этой привязкой.</summary>
+    /// <summary>
+    /// Отменить привязку или «Не учитывать» строки и одинаковых с ней строк в том же состоянии: удаляются только связи,
+    /// добавленные этой привязкой.
+    /// </summary>
     public async Task<MatrixRowProblem?> UndoAsync(Guid rowId, Guid by, CancellationToken ct)
     {
         var row = await db.MatrixUnmatchedRows.SingleOrDefaultAsync(r => r.Id == rowId, ct);
         if (row is null) return MatrixRowProblem.NotFound;
         if (row.Status == MatrixRowStatuses.Pending) return MatrixRowProblem.NotResolved;
 
-        if (row.DisciplineId is Guid id && row.AddedCompetenceIds.Count > 0)
+        foreach (var member in await GroupAsync(row, ct))
         {
-            var added = row.AddedCompetenceIds;
-            db.CompetenceMatrix.RemoveRange(await db.CompetenceMatrix
-                .Where(m => m.DisciplineId == id && added.Contains(m.CompetenceId)).ToListAsync(ct));
+            if (member.DisciplineId is Guid id && member.AddedCompetenceIds.Count > 0)
+            {
+                var added = member.AddedCompetenceIds;
+                db.CompetenceMatrix.RemoveRange(await db.CompetenceMatrix
+                    .Where(m => m.DisciplineId == id && added.Contains(m.CompetenceId)).ToListAsync(ct));
+            }
+            Audit(AuditEvents.MatrixRowUnlinked, member, by, new
+            {
+                row = member.Name, status = member.Status, discipline_id = member.DisciplineId, removed = member.AddedCompetenceIds
+            });
+            member.Status = MatrixRowStatuses.Pending;
+            member.DisciplineId = null;
+            member.AddedCompetenceIds = [];
+            member.ResolvedBy = null;
+            member.ResolvedAt = null;
         }
-        Audit(AuditEvents.MatrixRowUnlinked, row, by, new
-        {
-            row = row.Name, status = row.Status, discipline_id = row.DisciplineId, removed = row.AddedCompetenceIds
-        });
-        row.Status = MatrixRowStatuses.Pending;
-        row.DisciplineId = null;
-        row.AddedCompetenceIds = [];
-        row.ResolvedBy = null;
-        row.ResolvedAt = null;
         return null;
+    }
+
+    // Группа строки: те же название и семестры, то же состояние и та же дисциплина. Строки версии плана читаются целиком —
+    // их десятки, а ключ считается кодом (правило названий — в расширителе, не в SQL).
+    private static string GroupOf(MatrixUnmatchedRow r) =>
+        $"{Parsed.UnmatchedMatrixRow.GroupKey(r.Name, r.Semesters)}|{r.Status}|{r.DisciplineId}";
+
+    private async Task<List<MatrixUnmatchedRow>> GroupAsync(MatrixUnmatchedRow row, CancellationToken ct)
+    {
+        var key = GroupOf(row);
+        return (await db.MatrixUnmatchedRows.Where(r => r.CurriculumPlanId == row.CurriculumPlanId).ToListAsync(ct))
+            .Where(r => GroupOf(r) == key).OrderBy(r => r.Sheet).ThenBy(r => r.RowNumber).ToList();
     }
 
     // Компетенции версии плана по коду — как при импорте: УК и ОПК — общие для ФГОС, ПК — свои у профиля. ФГОС —

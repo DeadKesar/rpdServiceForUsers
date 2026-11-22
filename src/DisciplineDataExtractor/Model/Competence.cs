@@ -34,4 +34,14 @@ public sealed record MatrixLink(string DisciplineCode, string CompetenceCode, st
 /// </summary>
 public sealed record UnmatchedMatrixRow(
     string Sheet, int Row, string Name, string Semesters, IReadOnlyList<string> Codes, IReadOnlyList<string> CompetenceCodes,
-    IReadOnlyList<string> Candidates);
+    IReadOnlyList<string> Candidates)
+{
+    /// <summary>
+    /// Ключ группы одинаковых строк (этап 7.1): название по правилу сопоставления с планом (регистр, «ё», знаки, «в т.ч.»,
+    /// этап 5.4) и набор семестров — как их читает сопоставление, без учёта разделителей. Строки матрицы, составленные
+    /// по разным таблицам файла («Таблица 1», «Таблица 3»), с одним ключом — одна дисциплина, их привязывают разом.
+    /// </summary>
+    public static string GroupKey(string? name, string? semesters) =>
+        Internal.TextRules.NameKey(name) + "|" +
+        string.Join(',', (semesters ?? "").Select(Internal.TextRules.SemesterOf).OfType<int>().Distinct().Order());
+}

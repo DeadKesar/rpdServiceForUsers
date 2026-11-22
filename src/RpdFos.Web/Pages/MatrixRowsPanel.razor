@@ -1,15 +1,19 @@
 @using System.Net.Http.Json
 @using Microsoft.AspNetCore.Components.WebAssembly.Authentication
+@using RpdFos.Web.Models
 @inject HttpClient Http
 
 @* Строки матрицы без дисциплины плана (этап 5.2, ЛР Т1): у запуска, создавшего план, методист привязывает строку
-   к дисциплине этой версии плана или отмечает «Не учитывать»; привязку можно отменить. *@
+   к дисциплине этой версии плана или отмечает «Не учитывать»; привязку можно отменить. Одинаковые строки матрицы
+   (то же название и семестры, например таблицы 1 и 3 одного файла) — одна строка блока: привязка и отмена действуют
+   на все её места (этап 7.1). *@
 @if (rows is { Count: > 0 })
 {
     <h3 class="h5 mt-4">Строки матрицы без дисциплины плана</h3>
     <p class="small text-muted">
         Строка не найдена в плане по названию или неоднозначна — её связи с компетенциями не загружены. Привязка добавляет
-        дисциплине связи строки на уровне компетенций; документы, уже созданные по дисциплине, не меняются.
+        дисциплине связи строки на уровне компетенций; документы, уже созданные по дисциплине, не меняются. Одинаковые строки
+        из разных таблиц матрицы показаны одной и привязываются вместе.
     </p>
     @if (message is not null)
     {
@@ -24,17 +28,21 @@
         <tbody>
             @foreach (var row in rows)
             {
-                <tr>
-                    <td>@row.Name <div class="small text-muted">@row.Sheet, строка @row.Row</div></td>
+                <tr @key="row.Id">
+                    <td>@row.Name <div class="small text-muted">@string.Join("; ", row.Places)</div></td>
                     <td>@row.Semesters</td>
                     <td>@string.Join(", ", row.Codes)</td>
                     @if (row.Status == "pending")
                     {
                         <td>
-                            @* В прокручиваемой таблице колонка сжимается до самого узкого содержимого — список держит ширину. *@
-                            <select class="form-select form-select-sm" style="min-width: 16rem" @bind="choice[row.Id]">
+                            @* В прокручиваемой таблице колонка сжимается до самого узкого содержимого — список держит ширину.
+                               Список создаётся заново при каждом перечитывании (@key с номером загрузки): когда другие
+                               строки привязаны, порядок вариантов меняется, а браузер держит выбор по положению в списке —
+                               без этого показано одно название, а привязывается другая дисциплина. *@
+                            <select class="form-select form-select-sm" style="min-width: 16rem" @key="@((row.Id, loadVersion))"
+                                    value="@choices.Get(row.Id)" @onchange="e => choices.Set(row.Id, e.Value?.ToString())">
                                 <option value="">— выберите</option>
-                                <option value="ignore">Не учитывать</option>
+                                <option value="@MatrixRowChoices.Ignore">Не учитывать</option>
                                 @foreach (var o in row.Options)
                                 {
                                     <option value="@o.Id">@o.Code @o.Name@(o.Candidate ? " — кандидат" : o.WithoutMatrix ? " — без связей с матрицей" : "")</option>
@@ -42,7 +50,7 @@
                             </select>
                         </td>
                         <td>
-                            <button class="btn btn-sm btn-primary" disabled="@(busy || string.IsNullOrEmpty(choice.GetValueOrDefault(row.Id)))"
+                            <button class="btn btn-sm btn-primary" disabled="@(busy || !choices.TryGetTarget(row.Id, out _))"
                                     @onclick="() => ApplyAsync(row)">Применить</button>
                         </td>
                     }
@@ -64,11 +72,12 @@
 @code {
     [Parameter, EditorRequired] public Guid RunId { get; set; }
 
-    private List<MatrixRow>? rows;
-    private readonly Dictionary<Guid, string> choice = new();
+    private List<MatrixRowItem>? rows;
+    private readonly MatrixRowChoices choices = new();
     private string? message;
     private bool messageIsError, busy;
     private Guid loaded;
+    private int loadVersion;
 
     protected override async Task OnParametersSetAsync()
     {
@@ -82,8 +91,9 @@
     {
         try
         {
-            rows = await Http.GetFromJsonAsync<List<MatrixRow>>($"api/imports/{RunId}/matrix-rows");
-            foreach (var r in rows ?? []) choice.TryAdd(r.Id, "");
+            rows = await Http.GetFromJsonAsync<List<MatrixRowItem>>($"api/imports/{RunId}/matrix-rows");
+            choices.Reconcile(rows ?? []);
+            loadVersion++;
         }
         catch (AccessTokenNotAvailableException e)
         {
@@ -91,22 +101,25 @@
         }
     }
 
-    private async Task ApplyAsync(MatrixRow row)
+    private async Task ApplyAsync(MatrixRowItem row)
     {
-        var value = choice[row.Id];
-        var body = value == "ignore" ? new { DisciplineId = (Guid?)null, Ignore = true } : new { DisciplineId = (Guid?)Guid.Parse(value), Ignore = false };
+        if (!choices.TryGetTarget(row.Id, out var target)) return;
+        var body = new { DisciplineId = target, Ignore = target is null };
         await RunAsync(() => Http.PostAsJsonAsync($"api/imports/matrix-rows/{row.Id}/apply", body), async response =>
         {
             var applied = await response.Content.ReadFromJsonAsync<Applied>();
-            message = applied?.Warnings is { Count: > 0 } w ? $"Строка «{row.Name}» привязана. {string.Join(" ", w)}" : $"Строка «{row.Name}» привязана.";
+            var what = row.Places.Count > 1 ? $"Строки «{row.Name}» привязаны ({row.Places.Count})." : $"Строка «{row.Name}» привязана.";
+            message = applied?.Warnings is { Count: > 0 } w ? $"{what} {string.Join(" ", w)}" : what;
         });
     }
 
-    private Task UndoAsync(MatrixRow row) =>
+    private Task UndoAsync(MatrixRowItem row) =>
         RunAsync(() => Http.PostAsync($"api/imports/matrix-rows/{row.Id}/undo", null), _ =>
         {
-            message = $"Привязка строки «{row.Name}» отменена.";
-            choice[row.Id] = "";
+            message = row.Places.Count > 1
+                ? $"Привязка строк «{row.Name}» отменена ({row.Places.Count})."
+                : $"Привязка строки «{row.Name}» отменена.";
+            choices.Set(row.Id, "");
             return Task.CompletedTask;
         });
 
@@ -136,9 +149,6 @@
         }
     }
 
-    private sealed record Option(Guid Id, string Code, string Name, bool Candidate, bool WithoutMatrix);
-    private sealed record MatrixRow(Guid Id, string Name, string Sheet, int Row, string Semesters, List<string> Codes, string Status,
-        Guid? DisciplineId, string? Discipline, string? ResolvedBy, DateTimeOffset? ResolvedAt, List<Option> Options);
     private sealed record Applied(List<string> Warnings);
     private sealed record Problem(string? Title, string? Detail);
 }
