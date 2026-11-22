@@ -19,6 +19,8 @@ var nextId = body.Descendants<BookmarkStart>().Select(mark => int.Parse(mark.Id!
 // Номера блоков — по исходному файлу; список снимается до правок, поэтому номера не сдвигаются.
 var b = body.ChildElements.ToList();
 const int Last = 287;
+// Позиция табуляции с подчёркиванием в строках подписи и центр подписи под ней, twips (текст страницы — 9355).
+const int SignTab = 5500, SignCaption = 4000;
 
 Expect(Last, null); // последний блок — свойства последнего раздела
 Expect(70, "Паспорт"); Expect(71, "AutofillPassDestination"); Expect(72, ""); Expect(73, "№ п/п");
@@ -150,6 +152,17 @@ foreach (var image in main.ImageParts.ToList())
     if (!main.Parts.Where(part => part.OpenXmlPart == image).Any(part => used.Contains(part.RelationshipId)))
         main.DeletePart(image);
 
+// 8. Строки подписей листа согласования: «должность ______ (И. О. Фамилия)». Подчёркивание набрано знаками в несколько
+// фрагментов, и строка с длинной фамилией переносила «И. О.» и фамилию на следующую строку. Знаки заменены табуляцией
+// с заполнителем-подчёркиванием до позиции SignTab: подпись занимает всё место до расшифровки, расшифровка — по правому
+// краю. Подпись «(подпись)» под строкой встаёт под подчёркиванием, а не под фамилией: табуляция по центру вместо пробелов.
+Expect(42, "AutofillPositionKaf"); Expect(43, "наименование кафедры"); Expect(48, "AutofillProOD"); Expect(49, "(подпись)");
+Expect(53, "AutofillPositionUmu"); Expect(54, "(подпись)"); Expect(58, "AutofillPositionInst"); Expect(59, "(подпись)");
+foreach (var (line, caption, labelTab) in new[] { (42, 43, 2500), (48, 49, 0), (53, 54, 0), (58, 59, 0) })
+{
+    SignatureLine((Paragraph)b[line], (Paragraph)b[caption], SignTab, labelTab);
+}
+
 main.Document.Save();
 Console.WriteLine($"Готово: {args[1]}");
 
@@ -168,6 +181,37 @@ void Expect(int index, string? start)
 }
 
 string NewId() => (nextId++).ToString();
+
+// Строка подписи: от первого подчёркивания до имени (подчёркивания и «(») — табуляция с заполнителем и «(» перед закладкой имени.
+void SignatureLine(Paragraph line, Paragraph caption, int tab, int labelTab)
+{
+    var runs = line.Elements<Run>().ToList();
+    var first = runs.First(r => r.InnerText.Contains('_'));
+    var name = runs.First(r => r.InnerText.StartsWith("Autofill", StringComparison.Ordinal) && r.InnerText.EndsWith("Name", StringComparison.Ordinal));
+    var properties = first.RunProperties;
+    var start = runs.IndexOf(first);
+    foreach (var removed in runs.Skip(start).Take(runs.IndexOf(name) - start).ToList()) removed.Remove();
+    OpenXmlElement anchor = name;
+    while (anchor.PreviousSibling() is BookmarkStart) anchor = anchor.PreviousSibling()!;
+    anchor.InsertBeforeSelf(new Run((RunProperties?)properties?.CloneNode(true) ?? new RunProperties(), new TabChar()));
+    anchor.InsertBeforeSelf(Text("(", properties));
+    var lineProperties = line.ParagraphProperties ??= new ParagraphProperties();
+    lineProperties.Tabs = new Tabs(new TabStop { Val = TabStopValues.Left, Leader = TabStopLeaderCharValues.Underscore, Position = tab });
+    lineProperties.Justification = new Justification { Val = JustificationValues.Left };
+
+    // Подпись под подчёркиванием: по центру места между должностью и расшифровкой.
+    var captionProperties = caption.Elements<Run>().First(r => r.InnerText.Contains("подпись")).RunProperties;
+    caption.RemoveAllChildren<Run>();
+    var stops = new List<TabStop>();
+    if (labelTab > 0)
+    {
+        stops.Add(new TabStop { Val = TabStopValues.Center, Position = labelTab });
+        caption.Append(new Run((RunProperties?)captionProperties?.CloneNode(true) ?? new RunProperties(), new TabChar()), Text("наименование кафедры", captionProperties));
+    }
+    stops.Add(new TabStop { Val = TabStopValues.Center, Position = SignCaption });
+    caption.Append(new Run((RunProperties?)captionProperties?.CloneNode(true) ?? new RunProperties(), new TabChar()), Text("(подпись)", captionProperties));
+    (caption.ParagraphProperties ??= new ParagraphProperties()).Tabs = new Tabs(stops);
+}
 
 // Заголовок нового раздела — как «Паспорт»: по центру, полужирный.
 Paragraph Heading(string text) =>

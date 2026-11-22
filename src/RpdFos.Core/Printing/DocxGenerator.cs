@@ -222,12 +222,14 @@ public static partial class DocxGenerator
                     return PrintValue.Text(Declined(context.Source(goal), form, name));
                 case BookmarkTargetKinds.Field:
                     var value = context.Field(goal);
+                    // «И. О. Фамилия» составителя — неразрывно.
+                    if (goal.EndsWith("/name_for_document", StringComparison.Ordinal) && !value.IsEmpty) return PrintValue.Text(PrintNames.NoBreak(value.Inline));
                     return form == WordForms.Nom || value.IsMultiline ? value : PrintValue.Text(Declined(value.Inline, form, name));
                 case BookmarkTargetKinds.Signature:
                     var seat = context.Signatories.Seat(goal);
                     return PrintValue.Text(Declined(part switch
                     {
-                        SignatureParts.Name => seat?.Name,
+                        SignatureParts.Name => seat?.Name is { } fullName ? PrintNames.NoBreak(fullName) : null,
                         SignatureParts.Position => seat?.Position,
                         SignatureParts.DocumentTitle => seat?.Department,
                         _ => null

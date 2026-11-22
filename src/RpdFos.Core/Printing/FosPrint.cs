@@ -139,7 +139,7 @@ internal static class FosPrint
         new(Items(c.At("/approval_sheet/developers"))
             .Where(d => !string.IsNullOrWhiteSpace(Text(d, "position")) || !string.IsNullOrWhiteSpace(Text(d, "name_for_document")))
             .Select(d => (PrintBlock)PrintParagraph.Plain(
-                $"Составитель {Text(d, "position")?.Trim()} ____________________ {Text(d, "name_for_document")?.Trim()}"))
+                $"Составитель {Text(d, "position")?.Trim()} ____________________ {PrintNames.NoBreak(Text(d, "name_for_document") ?? "")}"))
             .ToList());
 
     // ---------- Текущий контроль и оценочные средства ----------

@@ -172,7 +172,7 @@ public class DocxGenerationTests(DatabaseFixture app)
         // Пустые необязательные значения не стирают бланк: протокол и строка второго составителя — для ручного заполнения.
         Assert.Equal("протокол № ________ от \"___\" __________ 20__г.", Line("протокол №"));
         Assert.StartsWith("доцент", Line("доцент"));
-        Assert.Contains("М. М. Методист", Line("доцент"));
+        Assert.Contains("М.\u00A0М.\u00A0Методист", Line("доцент"));
         Assert.Contains(item.Unfilled, u => u.StartsWith("AutofillProtocolNumber1") && u.EndsWith("оставлен бланк"));
         Assert.Contains(item.Unfilled, u => u.StartsWith("AutofillDeveloperName2") && u.EndsWith("оставлен бланк"));
 
@@ -378,7 +378,7 @@ public class DocxGenerationTests(DatabaseFixture app)
             using var docx = await DownloadAsync(client, created, with);
             var text = docx.MainDocumentPart!.Document!.Body!.InnerText;
 
-            Assert.Contains(own!.NameForDocument, text);
+            Assert.Contains(PrintNames.NoBreak(own!.NameForDocument), text);
             Assert.DoesNotContain(foreign!.NameForDocument, text);
             Assert.DoesNotContain(with.Warnings, w => w.Contains("Председатель учебно-методической комиссии"));
             Assert.DoesNotContain(with.Unfilled, u => u.StartsWith("AutofillPredWay1"));

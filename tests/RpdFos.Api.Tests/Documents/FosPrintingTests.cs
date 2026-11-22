@@ -101,7 +101,7 @@ public class FosPrintingTests
         }
     };
 
-    private static (WordprocessingDocument Document, DocxResult Result) Print(object payload)
+    private static (WordprocessingDocument Document, DocxResult Result) Print(object payload, SignatoryReport? signatories = null)
     {
         var json = JsonSerializer.Serialize(payload, new JsonSerializerOptions { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull });
         var definition = Registry.Get(DocumentTypeRegistry.Fos);
@@ -114,7 +114,7 @@ public class FosPrintingTests
             },
             new CurriculumPlan(), new StudyDirection(), new StudyProfile(), null, []);
         var images = new Dictionary<Guid, ImageInfo> { [Scheme] = ImageFiles.Inspect(TestImages.Png(200, 100, seed: 1)).Image! };
-        var context = new PrintContext(JsonDocument.Parse(json).RootElement, schema, Registry.FindSchema, facts, new SignatoryReport([], []), 2026, [], images);
+        var context = new PrintContext(JsonDocument.Parse(json).RootElement, schema, Registry.FindSchema, facts, signatories ?? new SignatoryReport([], []), 2026, [], images);
 
         var result = DocxGenerator.Generate(DocxBookmarksTests.Template(DocxBookmarksTests.Fos), definition.PrintMapping, context);
         var docx = WordprocessingDocument.Open(new MemoryStream(result.Content), false);
@@ -151,7 +151,7 @@ public class FosPrintingTests
         Assert.Contains("1.2. Второй тест", paragraphs);
         Assert.Contains("Практические задания по теме 1", paragraphs);
         // Составитель — строкой с должностью и ФИО.
-        Assert.Contains(paragraphs, p => p.StartsWith("Составитель доцент") && p.EndsWith("И. И. Иванов"));
+        Assert.Contains(paragraphs, p => p.StartsWith("Составитель доцент") && p.EndsWith("И.\u00A0И.\u00A0Иванов"));
         Assert.DoesNotContain(result.Report.Warnings, w => w.Contains("не сопоставлена"));
     }
 
@@ -234,6 +234,27 @@ public class FosPrintingTests
         Assert.Empty(errors);
         Assert.Equal((BookmarkTargetKinds.Block, BlockModes.Repeat), (definition.PrintMapping["AutofillTicket"].Kind, definition.PrintMapping["AutofillTicket"].Part));
         Assert.Equal(BlockModes.Present, definition.PrintMapping["AutofillExaming"].Part);
+    }
+
+    [Fact]
+    public void Signature_names_are_unbreakable_and_lines_use_a_leader_tab_instead_of_underscores()
+    {
+        var seats = new SignatoryReport(
+        [
+            new ResolvedSignatory("department_head", "Заведующий кафедрой", Guid.NewGuid(), "И. О. Сотрудник17", "Заведующий кафедрой", "ИС"),
+            new ResolvedSignatory("umu_head", "Начальник УМУ", Guid.NewGuid(), "И. О. Сотрудник39", "Начальник УМУ", null)
+        ], []);
+        var (docx, _) = Print(Payload(), seats);
+        var body = docx.MainDocumentPart!.Document!.Body!;
+
+        // Имя — одной неразрывной строкой: перенос внутри «И. О. Фамилия» делал расшифровку подписи в две строки.
+        Assert.Contains(body.Descendants<Text>(), t => t.Text == "И.\u00A0О.\u00A0Сотрудник17");
+        Assert.Contains(body.Descendants<Text>(), t => t.Text == "И.\u00A0О.\u00A0Сотрудник39");
+        // Подчёркивание — табуляция с заполнителем до расшифровки, а не знаки: длинная фамилия умещается в строке.
+        var line = body.Elements<Paragraph>().First(p => p.InnerText.Contains("Сотрудник17"));
+        Assert.NotNull(line.Descendants<TabChar>().FirstOrDefault());
+        Assert.DoesNotContain("_", line.InnerText);
+        Assert.Equal(TabStopLeaderCharValues.Underscore, line.ParagraphProperties!.Tabs!.Elements<TabStop>().Single().Leader!.Value);
     }
 
     [Fact]

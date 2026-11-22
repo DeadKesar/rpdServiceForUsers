@@ -74,5 +74,15 @@ public sealed record PrintValue(IReadOnlyList<PrintBlock> Blocks)
     public string Inline => string.Join("; ", Blocks.Select(b => b.PlainText.Trim()).Where(t => t.Length > 0));
 }
 
+/// <summary>Печать имён людей.</summary>
+public static class PrintNames
+{
+    /// <summary>
+    /// «И. О. Фамилия» одной неразрывной строкой: пробелы заменяются неразрывными, и расшифровка подписи не разъезжается
+    /// на две строки, когда не умещается рядом с подчёркиванием.
+    /// </summary>
+    public static string NoBreak(string name) => System.Text.RegularExpressions.Regex.Replace(name.Trim(), @"\s+", " ");
+}
+
 /// <summary>Отчёт о формировании: предупреждения (не найден подписант, нет формы слова) и незаполненные места.</summary>
 public sealed record PrintReport(IReadOnlyList<string> Warnings, IReadOnlyList<string> Unfilled);
