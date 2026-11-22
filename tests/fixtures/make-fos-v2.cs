@@ -196,6 +196,24 @@ Expect(63, "Председатель"); Expect(64, "AutofillWayCode"); Expect(65
     (umkCaption.ParagraphProperties ??= new ParagraphProperties()).Tabs = new Tabs(new TabStop { Val = TabStopValues.Center, Position = SignTab / 2 });
 }
 
+// 10. «Составитель ______ (Ф.И.О.)» на листе согласования: расшифровка — закладка AutofillDeveloperName (первый составитель,
+// как в РПД); пока составителей нет, остаётся бланк «Ф.И.О.». Подчёркивание — табуляция, как в строках подписей.
+Expect(33, "Составитель");
+{
+    var line = (Paragraph)b[33];
+    var runs = line.Elements<Run>().ToList();
+    var labelProperties = runs[0].RunProperties;
+    var nameProperties = runs[1].RunProperties;
+    foreach (var run in runs) run.Remove();
+    line.Append(Text("Составитель", labelProperties), new Run((RunProperties?)labelProperties?.CloneNode(true) ?? new RunProperties(), new TabChar()),
+        Text("(", nameProperties));
+    Wrap(line, "AutofillDeveloperName1", Text("Ф.И.О.", nameProperties));
+    line.Append(Text(")", nameProperties));
+    var pr = line.ParagraphProperties ??= new ParagraphProperties();
+    pr.Tabs = new Tabs(new TabStop { Val = TabStopValues.Left, Leader = TabStopLeaderCharValues.Underscore, Position = SignTab });
+    pr.Justification = new Justification { Val = JustificationValues.Left };
+}
+
 main.Document.Save();
 Console.WriteLine($"Готово: {args[1]}");
 

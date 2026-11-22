@@ -23,7 +23,7 @@ public class DocxBookmarksTests
     [InlineData(RpdV2, 76, 57)] // вторая версия: +24 вхождения, +22 закладки — методическое содержимое, бланки протокола и составителей
     [InlineData(Rpd, 76, 57)]   // третья: закладки те же, убраны только постоянные пункты списков
     [InlineData(FosOriginal, 46, 24)]
-    [InlineData(Fos, 51, 35)]   // вторая: −9 вхождений образцов и трёх приложений, +14 — содержимое, учебный год, подпись билета и председатель УМК
+    [InlineData(Fos, 52, 36)]   // вторая: −9 вхождений образцов и трёх приложений, +14 — содержимое, учебный год, подпись билета, председатель УМК и составитель
     public void Real_templates_match_bookmark_catalog(string file, int bookmarks, int baseNames)
     {
         // Каталог закладок (docs/design/ВКР_2_Карта_закладок_DOCX.md): 52 в исходном шаблоне РПД и 46 в ФОС.
@@ -65,7 +65,7 @@ public class DocxBookmarksTests
         [
             "AutofillPassportSections", "AutofillCurrentControl", "AutofillMeans", "AutofillBankGroup", "AutofillBankTitle",
             "AutofillBankTasks", "AutofillBankCompilers", "AutofillScale", "AutofillTicket", "AutofillTicketNumber",
-            "AutofillTicketQuestions", "AutofillAcademicYear", "AutofillPredWay"
+            "AutofillTicketQuestions", "AutofillAcademicYear", "AutofillPredWay", "AutofillDeveloperName"
         ];
         Assert.Equal(added.Order(), v2.Keys.Except(original.Keys).Order());
         // Подпись заведующего под билетом — второе вхождение той же закладки, что и на титуле.

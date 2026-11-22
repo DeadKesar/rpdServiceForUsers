@@ -259,6 +259,22 @@ public class FosPrintingTests
     }
 
     [Fact]
+    public void Developer_on_the_approval_sheet_is_printed_by_bookmark_and_blank_stays_without_him()
+    {
+        var (with, withResult) = Print(Payload());
+        var (without, withoutResult) = Print(Payload(withOptional: false));
+
+        // «Составитель ____ (Ф.И.О.)» листа согласования: расшифровка — первый составитель, подчёркивание — табуляция.
+        var line = with.MainDocumentPart!.Document!.Body!.Elements<Paragraph>().First(p => p.InnerText.StartsWith("Составитель("));
+        Assert.Equal("Составитель(И.\u00A0И.\u00A0Иванов)", line.InnerText.Trim());
+        Assert.NotNull(line.Descendants<TabChar>().FirstOrDefault());
+        Assert.DoesNotContain(withResult.Report.Unfilled, u => u.StartsWith("AutofillDeveloperName"));
+        // Составителей нет — бланк остаётся для ручного заполнения.
+        Assert.Contains(without.MainDocumentPart!.Document!.Body!.Elements<Paragraph>(), p => p.InnerText == "Составитель(Ф.И.О.)");
+        Assert.Contains(withoutResult.Report.Unfilled, u => u.StartsWith("AutofillDeveloperName"));
+    }
+
+    [Fact]
     public void Umk_chair_is_printed_under_the_direction_and_blank_stays_without_him()
     {
         var chair = new SignatoryReport([new ResolvedSignatory("umk_chair", "Председатель УМК", Guid.NewGuid(), "У. М. Умков", null, null)], []);
