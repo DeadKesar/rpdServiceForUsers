@@ -27,7 +27,7 @@ public sealed class DocumentReview(
     public async Task<IReadOnlyList<DocumentValidationError>> CheckAsync(Document document, CancellationToken ct = default)
     {
         var schemaJson = await SchemaAsync(document, ct);
-        var facts = (await DisciplineFacts.LoadAsync(db, document.DisciplineId, ct))!;
+        var facts = (await DisciplineFacts.LoadForAsync(db, document, ct))!;
         return DocumentSubmission.Check(schemaJson, JsonDocument.Parse(document.Payload).RootElement, facts, validator, rules,
             registry.FindSchema);
     }

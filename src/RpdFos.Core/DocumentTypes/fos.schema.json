@@ -218,6 +218,7 @@
       "title": "Банк заданий",
       "description": "Именованные группы вопросов, заданий и тестов; нумерация — внутри группы. Число заданий группы в паспорте вычисляется, а не вводится",
       "x-ui-widget": "task_bank",
+      "x-validation-rule": "fos_regulation_thresholds",
       "items": {
         "type": "object",
         "required": ["group", "kind", "control_form", "tasks"],

@@ -24,6 +24,12 @@ public interface IValidationRule
     /// </summary>
     bool OnSave => false;
 
+    /// <summary>
+    /// Правило нужно и тогда, когда поля в содержимом нет: у необязательного раздела ФОС «нет оценочных средств» — само
+    /// расхождение, а не повод промолчать. Значение в <see cref="RuleContext"/> тогда не определено — смотри <c>Payload</c>.
+    /// </summary>
+    bool WhenAbsent => false;
+
     IEnumerable<DocumentValidationError> Check(RuleContext context);
 }
 
@@ -61,15 +67,31 @@ public sealed class ValidationRuleSet(IEnumerable<IValidationRule> rules, TimePr
                 foreach (var name in Names(names))
                     if (_rules.TryGetValue(name, out var rule) && (!onSave || rule.OnSave))
                         issues.AddRange(rule.Check(new RuleContext(path, value, payload, facts, clock.GetUtcNow()))
-                            .Select(i => i with { Level = rule.Level }));
+                            .Select(i => i with { Level = rule.Level, Rule = rule.Name }));
 
             if (value.ValueKind != JsonValueKind.Object || !n.TryGetProperty("properties", out var props)) return;
             foreach (var p in props.EnumerateObject())
             {
-                if (depth == 0 && hiddenSections.Contains(p.Name) || !value.TryGetProperty(p.Name, out var child)) continue;
+                if (depth == 0 && hiddenSections.Contains(p.Name)) continue;
                 var childRoot = currentRoot;
-                Walk(SchemaInspector.Deref(p.Value, ref childRoot, resolve), childRoot, child, $"{path}/{p.Name}", depth + 1);
+                var childSchema = SchemaInspector.Deref(p.Value, ref childRoot, resolve);
+                if (!value.TryGetProperty(p.Name, out var child))
+                {
+                    RunAbsent(childSchema, $"{path}/{p.Name}");
+                    continue;
+                }
+                Walk(childSchema, childRoot, child, $"{path}/{p.Name}", depth + 1);
             }
+        }
+
+        // Правила с WhenAbsent вызываются и для отсутствующего поля; при сохранении (onSave) такие правила не нужны.
+        void RunAbsent(JsonElement? node, string path)
+        {
+            if (onSave || node is not { ValueKind: JsonValueKind.Object } n || !n.TryGetProperty("x-validation-rule", out var names)) return;
+            foreach (var name in Names(names))
+                if (_rules.TryGetValue(name, out var rule) && rule.WhenAbsent)
+                    issues.AddRange(rule.Check(new RuleContext(path, default, payload, facts, clock.GetUtcNow()))
+                        .Select(i => i with { Level = rule.Level, Rule = rule.Name }));
         }
 
         static IEnumerable<string> Names(JsonElement names) => names.ValueKind == JsonValueKind.Array

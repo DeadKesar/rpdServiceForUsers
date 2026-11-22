@@ -64,7 +64,7 @@ public sealed class DocumentEditing(
             SchemaInspector.Deref(raw, ref root, registry.FindSchema) is not { ValueKind: JsonValueKind.Object } sectionSchema)
             return new(SectionUpdateProblem.UnknownSection, [], null);
 
-        var facts = (await DisciplineFacts.LoadAsync(db, document.DisciplineId, ct))!;
+        var facts = (await DisciplineFacts.LoadForAsync(db, document, ct))!;
         if (!ConditionalSections.IsVisible(sectionSchema, DocumentSemesters.Of(JsonDocument.Parse(document.Payload).RootElement, facts)))
             return new(SectionUpdateProblem.HiddenSection, [], null);
 

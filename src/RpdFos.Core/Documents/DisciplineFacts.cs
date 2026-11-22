@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Microsoft.EntityFrameworkCore;
 using RpdFos.Core.Data;
 using RpdFos.Core.Data.Entities;
@@ -15,12 +16,22 @@ public sealed record CompetenceCandidate(Guid Id, string Code, string Formulatio
 public sealed record PlanDisciplineCandidate(Guid Id, string Code, string Name, IReadOnlyList<int> Semesters);
 
 /// <summary>
+/// РПД, по которой создан ФОС, для правил сквозной проверки (этап 7, B8): статус и текущие наследуемые данные —
+/// те же поля, что в снимке ФОС (<see cref="FosSnapshot.Take"/>), но по нынешнему содержимому РПД. <paramref name="Deleted"/> —
+/// РПД удалена (запись остаётся). <paramref name="EnforceStatus"/> — статус РПД блокирует переход ФОС: ФОС ещё не принят;
+/// у принятого и дальше правило ничего не требует — иначе архивирование РПД остановило бы согласование уже принятого ФОС.
+/// </summary>
+public sealed record LinkedRpdInfo(Guid Id, string Status, bool Deleted, JsonObject Current, bool EnforceStatus);
+
+/// <summary>
 /// Данные плана и справочников о дисциплине — всё, из чего предзаполняется документ и вычисляются условные разделы.
 /// <paramref name="PlanDisciplines"/> — другие дисциплины и практики плана, которые можно назвать пре- и постреквизитами.
+/// <paramref name="LinkedRpd"/> — у ФОС связанная РПД: правилам сквозной проверки она нужна как есть сейчас, а не снимком.
 /// </summary>
 public sealed record DisciplineFacts(
     Discipline Discipline, CurriculumPlan Plan, StudyDirection Direction, StudyProfile Profile, Department? Department,
-    IReadOnlyList<CompetenceCandidate> Competences, IReadOnlyList<PlanDisciplineCandidate>? PlanDisciplines = null)
+    IReadOnlyList<CompetenceCandidate> Competences, IReadOnlyList<PlanDisciplineCandidate>? PlanDisciplines = null,
+    LinkedRpdInfo? LinkedRpd = null)
 {
     public IReadOnlyList<DisciplineSemesterDetails> Semesters => Discipline.Semesters;
 
@@ -54,6 +65,27 @@ public sealed record DisciplineFacts(
     public static bool IsPlanNeighbour(Discipline d) =>
         d.EntryKind is EntryKinds.Discipline or EntryKinds.Optional or EntryKinds.Practice &&
         d.PartType != PartTypes.ElectiveGroup && d.Block != PlanBlocks.FinalAttestation && d.Semesters.Count > 0;
+
+    // Статусы ФОС, в которых связанная РПД ещё может не пустить документ дальше: правка, возврат и проверка.
+    private static readonly string[] Gated =
+        [DocumentStatuses.Draft, DocumentStatuses.SavedDraft, DocumentStatuses.Returned, DocumentStatuses.UnderReview];
+
+    /// <summary>
+    /// Факты документа: дисциплина и, у ФОС, связанная РПД. Удалённую РПД читаем (фильтр запросов отключён): ФОС должен знать,
+    /// что она удалена. РПД, которой нет в базе, — <c>LinkedRpd</c> пуст.
+    /// </summary>
+    public static async Task<DisciplineFacts?> LoadForAsync(AppDbContext db, Document document, CancellationToken ct = default)
+    {
+        var facts = await LoadAsync(db, document.DisciplineId, ct);
+        if (facts is null || document.Type != TemplateTypes.Fos || FosSnapshot.RpdIdOf(document.Payload) is not { } rpdId) return facts;
+
+        var rpd = await db.Documents.IgnoreQueryFilters().AsNoTracking()
+            .Where(d => d.Id == rpdId).Select(d => new { d.Id, d.Status, d.IsDeleted, d.Payload }).SingleOrDefaultAsync(ct);
+        if (rpd is null) return facts;
+        var current = FosSnapshot.Take(JsonNode.Parse(rpd.Payload));
+        var deleted = rpd.IsDeleted || rpd.Status == DocumentStatuses.Deleted;
+        return facts with { LinkedRpd = new LinkedRpdInfo(rpd.Id, rpd.Status, deleted, current, Gated.Contains(document.Status)) };
+    }
 
     public static async Task<DisciplineFacts?> LoadAsync(AppDbContext db, Guid disciplineId, CancellationToken ct = default)
     {

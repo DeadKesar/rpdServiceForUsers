@@ -49,10 +49,18 @@ public static class DependencyInjection
         services.AddSingleton<IValidationRule, CompetencesMatchMatrix>();
         services.AddSingleton<IValidationRule, LiteratureMainRecent>();
         services.AddSingleton<IValidationRule, LiteratureYearNotFuture>();
+        // Правила ФОС и сквозной проверки РПД ↔ ФОС (этап 7, B8): одна ошибка и пять предупреждений.
+        services.AddSingleton<IValidationRule, LinkedRpdMustBeApprovedOrUnderReview>();
+        services.AddSingleton<IValidationRule, AllIndicatorsHaveMeans>();
+        services.AddSingleton<IValidationRule, FosPassportConsistent>();
+        services.AddSingleton<IValidationRule, ScaleMatchesControlType>();
+        services.AddSingleton<IValidationRule, ControlFormsMatch>();
+        services.AddSingleton<IValidationRule, FosRegulationThresholds>();
         services.AddSingleton<ValidationRuleSet>();
         services.AddScoped<DocumentProjections>();
         // Связь ФОС и РПД (этап 7, B3): создание ФОС, чтение связанной РПД автором ФОС, обновление снимка.
         services.AddScoped<LinkedDocuments>();
+        services.AddScoped<FosCrossCheck>();
         services.AddScoped<FosRefresh>();
         // Банк заданий ФОС (этап 7, B5): «Перенумеровать» группу вместе со ссылками паспорта.
         services.AddScoped<FosBankRenumbering>();

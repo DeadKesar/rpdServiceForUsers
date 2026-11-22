@@ -126,6 +126,44 @@ else
             }
         </div>
     }
+    @* Сквозная проверка РПД ↔ ФОС (этап 7, B8; FR-VAL-04, FR-VAL-07, FR-VAL-09, FR-VAL-10): замечания правил ФОС к РПД как она
+       есть сейчас. Предупреждения отправку и приём не блокируют — решает методист; ошибка — РПД ещё не на проверке. *@
+    @if (details.LinkedRpd is { CrossCheck: true })
+    {
+        var crossIssues = CrossCheckIssues();
+        var crossWarnings = crossIssues.Count(i => i.IsWarning);
+        var crossErrors = crossIssues.Count - crossWarnings;
+        @if (crossIssues.Count == 0)
+        {
+            <div class="alert alert-success py-2 small" role="status">Сквозная проверка РПД ↔ ФОС: расхождений нет.</div>
+        }
+        else
+        {
+            <details class="alert @(crossErrors > 0 ? "alert-danger" : "alert-warning") py-2" open>
+                <summary class="fw-semibold">
+                    Сквозная проверка РПД ↔ ФОС: расхождений @crossWarnings@(crossErrors > 0 ? ", блокирует отправку: 1" : "")
+                </summary>
+                <div class="small text-muted mb-1">Предупреждения не блокируют отправку и приём: решает методист. РПД от ФОС не зависит.</div>
+                @foreach (var group in crossIssues.GroupBy(i => i.Rule).OrderBy(g => g.Any(i => !i.IsWarning) ? 0 : 1))
+                {
+                    <div class="fw-semibold small mt-2">@CrossRuleTitle(group.Key)</div>
+                    <ul class="mb-0 small">
+                        @foreach (var issue in group)
+                        {
+                            <li>
+                                @if (!issue.IsWarning)
+                                {
+                                    <span class="badge text-bg-danger me-1">ошибка</span>
+                                }
+                                @issue.Message
+                                <a href="" class="ms-1" @onclick="() => GoToAsync(issue.Path)" @onclick:preventDefault>→ @SectionTitleOf(issue.Path)</a>
+                            </li>
+                        }
+                    </ul>
+                }
+            </details>
+        }
+    }
     @if (details.LinkedFos is { Count: > 0 } fosList)
     {
         <div class="alert alert-secondary py-2" role="status">
@@ -142,6 +180,11 @@ else
                         <span>«@fos.Title»</span>
                     }
                     <span class="text-muted">· @fos.StatusTitle.ToLowerInvariant() · @fos.AuthorName</span>
+                    @if (fos.Discrepancies is { } discrepancies)
+                    {
+                        <span class="badge @(discrepancies > 0 ? "text-bg-warning" : "text-bg-light border") ms-1"
+                              title="Предупреждения сквозной проверки РПД ↔ ФОС; подробности — в самом ФОС">расхождений: @discrepancies</span>
+                    }
                 </div>
             }
         </div>
@@ -734,6 +777,28 @@ else
         if (section == current) scrollTo = path;
     }
 
+    // Замечания правил ФОС по всем видимым разделам: ошибка отправки («РПД ещё не на проверке») и предупреждения. В ФОС правила
+    // с именем — только сквозные, поэтому «есть имя правила» и значит «сквозная проверка».
+    private List<FieldError> CrossCheckIssues() =>
+        sections.Where(s => s.Visible).SelectMany(s => s.Missing.Concat(s.Warnings)).Where(i => i.Rule is not null).ToList();
+
+    private static string CrossRuleTitle(string? rule) => rule switch
+    {
+        "linked_rpd_must_be_approved_or_under_review" => "Статус связанной РПД",
+        "all_indicators_have_means" => "У каждого индикатора РПД есть оценочное средство",
+        "fos_passport_consistent" => "Паспорт ФОС согласован с банком заданий и РПД",
+        "scale_matches_control_type" => "Аттестация и шкала соответствуют виду аттестации РПД",
+        "control_forms_match" => "Формы текущего контроля РПД есть в ФОС",
+        "fos_regulation_thresholds" => "Пороги Положения о ФОС",
+        _ => rule ?? ""
+    };
+
+    private string SectionTitleOf(string path)
+    {
+        var section = path.TrimStart('/').Split('/')[0];
+        return sections.FirstOrDefault(s => s.Key == section)?.Title ?? section;
+    }
+
     private string PlaceTitle(string path)
     {
         var section = path.TrimStart('/').Split('/')[0];
@@ -766,7 +831,12 @@ else
     private async Task AcceptAsync()
     {
         // Приём запускает согласование (UC-07): отзыва нет, поэтому — подтверждение (этап 6, A3).
-        if (!await confirm.AskAsync("Вы отправляете документ на согласование. Уверены?", "Принять документ")) return;
+        // У ФОС в окне — число предупреждений сквозной проверки (этап 7, B8): приём они не блокируют.
+        var cross = details!.LinkedRpd is null ? 0 : CrossCheckIssues().Count(i => i.IsWarning);
+        var question = cross > 0
+            ? $"Сквозная проверка РПД ↔ ФОС: расхождений {cross}. Приём они не блокируют. Вы отправляете документ на согласование. Уверены?"
+            : "Вы отправляете документ на согласование. Уверены?";
+        if (!await confirm.AskAsync(question, "Принять документ")) return;
         if (!await SaveSectionAsync()) return;
         await ChangeStatusAsync("accept", new { version }, "Документ принят.", r => ApprovalStartText(r, "Документ принят. "));
     }

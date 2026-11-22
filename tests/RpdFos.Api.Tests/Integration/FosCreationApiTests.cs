@@ -457,6 +457,46 @@ public class FosCreationApiTests(DatabaseFixture fixture) : AssignmentTestBase(f
         return (author, fos, passport.Version);
     }
 
+    [Fact]
+    public async Task The_cross_check_holds_the_fos_by_the_rpd_status_and_reaches_both_documents()
+    {
+        var (author, fos, version) = await FosWithBankAsync("Б1.О.11");
+        var rpdId = FosSnapshot.RpdIdOf(fos.Payload.GetRawText())!.Value;
+
+        // РПД — черновик: отправка ФОС отказывает ошибкой правила; предупреждения идут рядом и сами не блокируют.
+        var refused = await author.PostAsJsonAsync(Url(fos, "submit"), new DocumentVersionRequest(version));
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, refused.StatusCode);
+        var problem = (await refused.Content.ReadFromJsonAsync<ProblemDetails>())!;
+        var errors = ((JsonElement)problem.Extensions["errors"]!).EnumerateArray().ToList();
+        var held = Assert.Single(errors, e => e.GetProperty("rule").GetString() == "linked_rpd_must_be_approved_or_under_review");
+        Assert.Equal(("/linked_rpd", "error"), (held.GetProperty("path").GetString(), held.GetProperty("level").GetString()));
+        Assert.Contains("«Черновик»", held.GetProperty("message").GetString());
+
+        // Панель — автору ФОС; предупреждения называют правило и лежат в разделах, к которым ведут.
+        var details = await DetailsAsync(author, fos.Document.Id);
+        Assert.True(details.LinkedRpd!.CrossCheck);
+        var warnings = details.Metadata.Sections.SelectMany(s => s.Warnings).Where(w => w.Rule is not null).ToList();
+        Assert.Contains(warnings, w => w.Rule == "all_indicators_have_means");
+        Assert.Contains(warnings, w => w.Rule == "fos_regulation_thresholds");
+        Assert.All(warnings, w => Assert.Equal("warning", w.Level));
+
+        // Строка на странице РПД — то же число расхождений.
+        var onRpd = await DetailsAsync(author, rpdId);
+        Assert.Equal(warnings.Count, Assert.Single(onRpd.LinkedFos!).Discrepancies);
+
+        // РПД на проверке — ошибка статуса уходит; предупреждения остаются и отправку не останавливают: если ФОС и не ушёл,
+        // то по другим причинам (схема), а не из-за сквозной проверки.
+        await ExpectAsync(author.PostAsJsonAsync(Url(onRpd, "submit"), new DocumentVersionRequest(onRpd.Document.Version)), S.UnderReview);
+        var again = await author.PostAsJsonAsync(Url(fos, "submit"), new DocumentVersionRequest(version));
+        if (again.StatusCode == HttpStatusCode.UnprocessableEntity)
+        {
+            var left = ((JsonElement)(await again.Content.ReadFromJsonAsync<ProblemDetails>())!.Extensions["errors"]!).EnumerateArray()
+                .Where(e => e.GetProperty("level").GetString() == "error").ToList();
+            Assert.All(left, e => Assert.Equal(JsonValueKind.Null, e.GetProperty("rule").ValueKind));
+        }
+        else Assert.True(again.IsSuccessStatusCode, $"{(int)again.StatusCode}");
+    }
+
     private static Task<HttpResponseMessage> RenumberAsync(HttpClient client, Guid documentId, int version, string group) =>
         client.PostAsJsonAsync($"/api/documents/{documentId}/renumber-bank", new RenumberBankRequest(version, group));
 

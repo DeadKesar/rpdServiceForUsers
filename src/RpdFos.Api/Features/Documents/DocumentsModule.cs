@@ -219,17 +219,17 @@ public class DocumentsModule : ICarterModule
     private static async Task<IResult> Get(
         Guid id, HttpContext http, AppDbContext db, DirectoryAccounts directory, IDocumentValidator validator,
         ValidationRuleSet rules, DocumentTypeRegistry registry, DocumentApproval approval, DisciplineAssignments assignments,
-        LinkedDocuments links, CancellationToken ct)
+        LinkedDocuments links, FosCrossCheck cross, CancellationToken ct)
     {
         var (document, viewer, refusal) = await VisibleDocumentAsync(id, http, db, directory, approval, assignments, links, ct);
         if (refusal is not null) return refusal;
-        return Results.Ok(await DetailsAsync(document!, viewer!, db, validator, rules, registry, approval, assignments, links, ct));
+        return Results.Ok(await DetailsAsync(document!, viewer!, db, validator, rules, registry, approval, assignments, links, cross, ct));
     }
 
     private static async Task<IResult> Create(
         CreateDocumentRequest rq, HttpContext http, DirectoryAccounts directory, DocumentCreation creation, AppDbContext db,
         IDocumentValidator validator, ValidationRuleSet rules, DocumentTypeRegistry registry, DocumentApproval approval,
-        DisciplineAssignments assignments, LinkedDocuments links, CancellationToken ct)
+        DisciplineAssignments assignments, LinkedDocuments links, FosCrossCheck cross, CancellationToken ct)
     {
         // Автор — запись справочника текущего пользователя: она же первый составитель.
         var authorId = await directory.FindIdAsync(http.User, ct);
@@ -246,7 +246,7 @@ public class DocumentsModule : ICarterModule
                 await DetailsAsync(document,
                     new DocumentViewer(authorId, IsAuthor: true, IsReviewer(http.User), IsCorrector(http.User), IsSignatory: false,
                         IsAdmin: http.User.IsInRole(AppRoles.Admin)),
-                    db, validator, rules, registry, approval, assignments, links, ct)),
+                    db, validator, rules, registry, approval, assignments, links, cross, ct)),
             { Problem: DocumentCreationProblem.Duplicate } => Results.Problem(statusCode: StatusCodes.Status409Conflict,
                 title: "Документ уже есть", detail: result.Detail,
                 extensions: new Dictionary<string, object?>
@@ -872,14 +872,14 @@ public class DocumentsModule : ICarterModule
 
     private static async Task<DocumentDetails> DetailsAsync(
         Document document, DocumentViewer viewer, AppDbContext db, IDocumentValidator validator, ValidationRuleSet rules,
-        DocumentTypeRegistry registry, DocumentApproval approval, DisciplineAssignments assignments, LinkedDocuments links,
+        DocumentTypeRegistry registry, DocumentApproval approval, DisciplineAssignments assignments, LinkedDocuments links, FosCrossCheck cross,
         CancellationToken ct)
     {
         var (isAuthor, isReviewer, isCorrector) = (viewer.IsAuthor, viewer.IsReviewer, viewer.IsCorrector);
         var template = await db.DocumentTemplates.IgnoreQueryFilters().Where(t => t.Id == document.TemplateId)
             .Select(t => new { t.Schema, t.DefaultPayload, t.PrintMapping }).SingleAsync(ct);
         var schemaJson = template.Schema;
-        var facts = (await DisciplineFacts.LoadAsync(db, document.DisciplineId, ct))!;
+        var facts = (await DisciplineFacts.LoadForAsync(db, document, ct))!;
         var payload = JsonDocument.Parse(document.Payload).RootElement;
         var status = document.Status;
         var scope = DocumentTransitions.EditScope(status, isAuthor, isReviewer, isCorrector);
@@ -896,7 +896,7 @@ public class DocumentsModule : ICarterModule
 
         // ФОС и РПД (этап 7, B3): у ФОС — связанная РПД и пометка «РПД изменилась», у РПД — её ФОС и право создать новый.
         var linkedRpd = document.Type == TemplateTypes.Fos ? await LinkedRpdAsync(document, viewer, db, assignments, links, ct) : null;
-        var linkedFos = document.Type == TemplateTypes.Rpd ? await LinkedFosAsync(document, viewer, db, assignments, links, ct) : null;
+        var linkedFos = document.Type == TemplateTypes.Rpd ? await LinkedFosAsync(document, viewer, db, assignments, links, cross, ct) : null;
         var createFos = linkedFos is not null && DocumentTransitions.CanCreateFosFrom(status) &&
             linkedFos.All(f => f.Status == DocumentStatuses.Archived) && await MayCreateFosAsync(document, viewer, assignments, ct);
 
@@ -950,16 +950,18 @@ public class DocumentsModule : ICarterModule
         var stored = JsonNode.Parse(fos.Payload)?[FosSnapshot.LinkSection];
         var (version, at) = FosSnapshot.Taken(stored);
         var rpd = await links.RpdOfAsync(fos, ct);
+        // Панель «Сквозная проверка» (этап 7, B8) — автору, методисту, администратору и закреплённому за дисциплиной.
+        var seesCrossCheck = viewer.IsAuthor || viewer.IsReviewer || viewer.IsCorrector || viewer.IsAssigned;
         if (rpd is null || rpd.IsDeleted)
             return new LinkedRpdItem(rpdId, rpd?.Title, DocumentStatuses.Deleted, DocumentStatuses.Title(DocumentStatuses.Deleted), null,
-                CanOpen: false, Deleted: true, Changed: false, version, rpd?.Version, at);
+                CanOpen: false, Deleted: true, Changed: false, version, rpd?.Version, at, CrossCheck: seesCrossCheck);
 
         var author = await db.Employees.AsNoTracking().Where(e => e.Id == rpd.AuthorId).Select(e => e.ShortName).SingleOrDefaultAsync(ct);
         var canOpen = viewer.IsAuthor || viewer.IsCorrector || viewer.IsAssigned || rpd.AuthorId == viewer.Id ||
             viewer.Id is Guid me && await assignments.IsAssignedAsync(rpd.DisciplineId, me, ct);
         var changed = FosSnapshot.Differs(stored, FosSnapshot.Take(JsonNode.Parse(rpd.Payload)));
         return new LinkedRpdItem(rpd.Id, rpd.Title, rpd.Status, DocumentStatuses.Title(rpd.Status), author, canOpen, Deleted: false,
-            changed, version, rpd.Version, at);
+            changed, version, rpd.Version, at, seesCrossCheck);
     }
 
     /// <summary>
@@ -967,7 +969,7 @@ public class DocumentsModule : ICarterModule
     /// администратору, его автору и закреплённому за дисциплиной.
     /// </summary>
     private static async Task<List<LinkedFosItem>> LinkedFosAsync(
-        Document rpd, DocumentViewer viewer, AppDbContext db, DisciplineAssignments assignments, LinkedDocuments links,
+        Document rpd, DocumentViewer viewer, AppDbContext db, DisciplineAssignments assignments, LinkedDocuments links, FosCrossCheck cross,
         CancellationToken ct)
     {
         var found = await links.FosOfAsync(rpd, ct);
@@ -975,8 +977,17 @@ public class DocumentsModule : ICarterModule
         var authorIds = found.Select(f => f.AuthorId).Distinct().ToList();
         var authors = await db.Employees.AsNoTracking().Where(e => authorIds.Contains(e.Id)).ToDictionaryAsync(e => e.Id, e => e.ShortName, ct);
         var assigned = viewer.IsAssigned || viewer.Id is Guid me && await assignments.IsAssignedAsync(rpd.DisciplineId, me, ct);
-        return found.Select(f => new LinkedFosItem(f.Id, f.Title, f.Status, DocumentStatuses.Title(f.Status),
-            authors.GetValueOrDefault(f.AuthorId) ?? "", viewer.IsCorrector || assigned || f.AuthorId == viewer.Id)).ToList();
+        var items = new List<LinkedFosItem>();
+        foreach (var f in found)
+        {
+            var canOpen = viewer.IsCorrector || assigned || f.AuthorId == viewer.Id;
+            // Расхождения сквозной проверки (этап 7, B8) — у ФОС, который зритель откроет; у архивного ФОС их не считаем.
+            int? discrepancies = canOpen && f.Status != DocumentStatuses.Archived
+                ? FosCrossCheck.Discrepancies(await cross.RunAsync(f, ct)) : null;
+            items.Add(new LinkedFosItem(f.Id, f.Title, f.Status, DocumentStatuses.Title(f.Status),
+                authors.GetValueOrDefault(f.AuthorId) ?? "", canOpen, discrepancies));
+        }
+        return items;
     }
 
     /// <summary>
@@ -1253,13 +1264,17 @@ public record DocumentDetails(
 /// Связанная РПД ФОС (этап 7, B3): название и статус сейчас (у удалённой — <paramref name="Deleted"/>), открывается ли она
 /// зрителю, и снимок: версия РПД и время, когда он снят. <paramref name="Changed"/> — наследуемые данные РПД отличаются от снимка
 /// («РПД изменилась»); <paramref name="CurrentVersion"/> — версия РПД сейчас, только для справки: сравниваются данные.
+/// <paramref name="CrossCheck"/> — зрителю показывается панель «Сквозная проверка» (этап 7, B8).
 /// </summary>
 public record LinkedRpdItem(
     Guid Id, string? Title, string Status, string StatusTitle, string? AuthorName, bool CanOpen, bool Deleted, bool Changed,
-    int SnapshotVersion, int? CurrentVersion, DateTimeOffset? SnapshotAt);
+    int SnapshotVersion, int? CurrentVersion, DateTimeOffset? SnapshotAt, bool CrossCheck = false);
 
-/// <summary>ФОС, созданный по РПД (этап 7, B3): в списке РПД — название, статус, автор и ссылка, если ФОС открывается зрителю.</summary>
-public record LinkedFosItem(Guid Id, string Title, string Status, string StatusTitle, string AuthorName, bool CanOpen);
+/// <summary>
+/// ФОС, созданный по РПД (этап 7, B3): в списке РПД — название, статус, автор и ссылка, если ФОС открывается зрителю.
+/// <paramref name="Discrepancies"/> — предупреждения сквозной проверки (B8); null — не считались (ФОС в архиве или не открывается).
+/// </summary>
+public record LinkedFosItem(Guid Id, string Title, string Status, string StatusTitle, string AuthorName, bool CanOpen, int? Discrepancies = null);
 
 /// <summary>
 /// Основа документа («Создать на основе», этап 7, A11): название и статус сейчас (null — основа удалена), открывается ли она

@@ -94,10 +94,11 @@ public sealed record DocumentDetails(DocumentItem Document, JsonElement Payload,
 /// данные РПД изменились после снимка («РПД изменилась»); <paramref name="Deleted"/> — РПД удалена, обновлять не из чего.
 /// </summary>
 public sealed record LinkedRpdItem(Guid Id, string? Title, string Status, string StatusTitle, string? AuthorName, bool CanOpen,
-    bool Deleted, bool Changed, int SnapshotVersion, int? CurrentVersion, DateTimeOffset? SnapshotAt);
+    bool Deleted, bool Changed, int SnapshotVersion, int? CurrentVersion, DateTimeOffset? SnapshotAt, bool CrossCheck = false);
 
-/// <summary>ФОС, созданный по РПД (этап 7, B3).</summary>
-public sealed record LinkedFosItem(Guid Id, string Title, string Status, string StatusTitle, string AuthorName, bool CanOpen);
+/// <summary>ФОС, созданный по РПД (этап 7, B3); <paramref name="Discrepancies"/> — предупреждения сквозной проверки (B8), null — не считались.</summary>
+public sealed record LinkedFosItem(Guid Id, string Title, string Status, string StatusTitle, string AuthorName, bool CanOpen,
+    int? Discrepancies = null);
 
 /// <summary>
 /// Основа документа («Создать на основе», этап 7, A11): название и статус сейчас (<c>null</c> — основа удалена), открывается ли
@@ -118,7 +119,7 @@ public sealed record SectionState(string Key, string Title, bool Visible, string
     List<FieldError> Warnings);
 
 /// <summary>Замечание проверки: место, сообщение и уровень — ошибка блокирует отправку, предупреждение нет.</summary>
-public sealed record FieldError(string Path, string Message, string Level = "error")
+public sealed record FieldError(string Path, string Message, string Level = "error", string? Rule = null)
 {
     public bool IsWarning => Level == "warning";
 }

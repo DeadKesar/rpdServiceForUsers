@@ -59,7 +59,9 @@ public static class ValidationRules
         // Этап 5.1: часы видов самостоятельной работы по семестрам против плана, год издания не в будущем.
         "self_study_kinds_match_plan", "literature_year_not_future",
         // Этап 5.2: часы таблиц лабораторных и практических против часов документа.
-        "class_hours_match_total"
+        "class_hours_match_total",
+        // Этап 7 (B8): пороги Положения о ФОС (П 01-04, 2022) — вопросов, тестов, билетов, критериев; в проекте правила нет.
+        "fos_regulation_thresholds"
     };
 }
 

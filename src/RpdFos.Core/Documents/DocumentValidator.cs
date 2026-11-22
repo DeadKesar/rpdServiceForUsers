@@ -18,9 +18,10 @@ public enum ValidationMode { Draft, Submit }
 
 /// <summary>
 /// Замечание проверки содержимого: место (JSON Pointer поля), сообщение для пользователя и уровень. Ошибка
-/// блокирует отправку; предупреждение показывается автору и методисту, но отправку не блокирует.
+/// блокирует отправку; предупреждение показывается автору и методисту, но отправку не блокирует. <paramref name="Rule"/> —
+/// имя правила (<c>x-validation-rule</c>), если замечание его: по нему редактор ФОС собирает панель «Сквозная проверка».
 /// </summary>
-public sealed record DocumentValidationError(string Path, string Message, string Level = IssueLevels.Error);
+public sealed record DocumentValidationError(string Path, string Message, string Level = IssueLevels.Error, string? Rule = null);
 
 public static class IssueLevels
 {
