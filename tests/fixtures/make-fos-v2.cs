@@ -163,6 +163,39 @@ foreach (var (line, caption, labelTab) in new[] { (42, 43, 2500), (48, 49, 0), (
     SignatureLine((Paragraph)b[line], (Paragraph)b[caption], SignTab, labelTab);
 }
 
+// 9. Председатель УМК: «Председатель УМК <код> <направление>» — в первой строке, под ней — строка подписи «______ (Ф.И.О.)».
+// Расшифровка «Ф.И.О.» была набрана текстом без закладки, и подпись председателя не подставлялась: теперь вокруг неё
+// закладка AutofillPredWay (место umk_chair, как в РПД); пока председателя нет, остаётся бланк «Ф.И.О.». Подпись под
+// строкой — по центру подчёркивания, а не под расшифровкой.
+Expect(63, "Председатель"); Expect(64, "AutofillWayCode"); Expect(65, "(подпись)");
+{
+    var umkTitle = (Paragraph)b[63];
+    var line = (Paragraph)b[64];
+    var umkCaption = (Paragraph)b[65];
+    var nameMark = line.Elements<BookmarkStart>().First(mark => mark.Name!.Value == "AutofillWayName7");
+    var runProperties = line.Elements<Run>().First().RunProperties;
+    var moved = new List<OpenXmlElement>();
+    foreach (var child in line.ChildElements.Where(c => c is not ParagraphProperties).ToList())
+    {
+        child.Remove();
+        if (moved.Count > 0 && moved[^1] is BookmarkEnd last && last.Id?.Value == nameMark.Id?.Value) continue;
+        moved.Add(child);
+    }
+    foreach (var element in moved) umkTitle.Append(element);
+
+    line.Append(new Run((RunProperties?)runProperties?.CloneNode(true) ?? new RunProperties(), new TabChar()), Text("(", runProperties));
+    Wrap(line, "AutofillPredWay1", Text("Ф.И.О.", runProperties));
+    line.Append(Text(")", runProperties));
+    var linePr = line.ParagraphProperties ??= new ParagraphProperties();
+    linePr.Tabs = new Tabs(new TabStop { Val = TabStopValues.Left, Leader = TabStopLeaderCharValues.Underscore, Position = SignTab });
+    linePr.Justification = new Justification { Val = JustificationValues.Left };
+
+    var captionRun = umkCaption.Elements<Run>().First(r => r.InnerText.Contains("подпись")).RunProperties;
+    umkCaption.RemoveAllChildren<Run>();
+    umkCaption.Append(new Run((RunProperties?)captionRun?.CloneNode(true) ?? new RunProperties(), new TabChar()), Text("(подпись)", captionRun));
+    (umkCaption.ParagraphProperties ??= new ParagraphProperties()).Tabs = new Tabs(new TabStop { Val = TabStopValues.Center, Position = SignTab / 2 });
+}
+
 main.Document.Save();
 Console.WriteLine($"Готово: {args[1]}");
 
@@ -188,7 +221,9 @@ void SignatureLine(Paragraph line, Paragraph caption, int tab, int labelTab)
     var runs = line.Elements<Run>().ToList();
     var first = runs.First(r => r.InnerText.Contains('_'));
     var name = runs.First(r => r.InnerText.StartsWith("Autofill", StringComparison.Ordinal) && r.InnerText.EndsWith("Name", StringComparison.Ordinal));
-    var properties = first.RunProperties;
+    // «(» и табуляция — по оформлению имени, без подчёркивания: подчёркивается только расшифровка.
+    var properties = (RunProperties?)name.RunProperties?.CloneNode(true);
+    properties?.Underline?.Remove();
     var start = runs.IndexOf(first);
     foreach (var removed in runs.Skip(start).Take(runs.IndexOf(name) - start).ToList()) removed.Remove();
     OpenXmlElement anchor = name;
@@ -208,7 +243,7 @@ void SignatureLine(Paragraph line, Paragraph caption, int tab, int labelTab)
         stops.Add(new TabStop { Val = TabStopValues.Center, Position = labelTab });
         caption.Append(new Run((RunProperties?)captionProperties?.CloneNode(true) ?? new RunProperties(), new TabChar()), Text("наименование кафедры", captionProperties));
     }
-    stops.Add(new TabStop { Val = TabStopValues.Center, Position = SignCaption });
+    stops.Add(new TabStop { Val = TabStopValues.Center, Position = labelTab > 0 ? SignCaption + 600 : SignCaption });
     caption.Append(new Run((RunProperties?)captionProperties?.CloneNode(true) ?? new RunProperties(), new TabChar()), Text("(подпись)", captionProperties));
     (caption.ParagraphProperties ??= new ParagraphProperties()).Tabs = new Tabs(stops);
 }

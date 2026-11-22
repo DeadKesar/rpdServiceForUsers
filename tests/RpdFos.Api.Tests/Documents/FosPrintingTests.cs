@@ -242,7 +242,8 @@ public class FosPrintingTests
         var seats = new SignatoryReport(
         [
             new ResolvedSignatory("department_head", "Заведующий кафедрой", Guid.NewGuid(), "И. О. Сотрудник17", "Заведующий кафедрой", "ИС"),
-            new ResolvedSignatory("umu_head", "Начальник УМУ", Guid.NewGuid(), "И. О. Сотрудник39", "Начальник УМУ", null)
+            new ResolvedSignatory("umu_head", "Начальник УМУ", Guid.NewGuid(), "И. О. Сотрудник39", "Начальник УМУ", null),
+            new ResolvedSignatory("umk_chair", "Председатель УМК", Guid.NewGuid(), "У. М. Умков", null, null)
         ], []);
         var (docx, _) = Print(Payload(), seats);
         var body = docx.MainDocumentPart!.Document!.Body!;
@@ -255,6 +256,28 @@ public class FosPrintingTests
         Assert.NotNull(line.Descendants<TabChar>().FirstOrDefault());
         Assert.DoesNotContain("_", line.InnerText);
         Assert.Equal(TabStopLeaderCharValues.Underscore, line.ParagraphProperties!.Tabs!.Elements<TabStop>().Single().Leader!.Value);
+    }
+
+    [Fact]
+    public void Umk_chair_is_printed_under_the_direction_and_blank_stays_without_him()
+    {
+        var chair = new SignatoryReport([new ResolvedSignatory("umk_chair", "Председатель УМК", Guid.NewGuid(), "У. М. Умков", null, null)], []);
+        var (with, withResult) = Print(Payload(), chair);
+        var (without, withoutResult) = Print(Payload());
+
+        // Расшифровка — в строке подписи под «Председатель УМК …»; подпись под подчёркиванием, а не под расшифровкой.
+        var line = with.MainDocumentPart!.Document!.Body!.Elements<Paragraph>().First(p => p.InnerText.Contains("Умков"));
+        Assert.Equal("(У.\u00A0М.\u00A0Умков)", line.InnerText.Trim().TrimStart());
+        Assert.DoesNotContain(withResult.Report.Unfilled, u => u.StartsWith("AutofillPredWay"));
+        var caption = line.NextSibling<Paragraph>()!;
+        Assert.Equal("(подпись)", caption.InnerText.Trim());
+        Assert.Equal(TabStopValues.Center, caption.ParagraphProperties!.Tabs!.Elements<TabStop>().Single().Val!.Value);
+        // Председателя нет — бланк «Ф.И.О.» остаётся для ручного заполнения, в отчёте — незаполненное место.
+        Assert.Contains(without.MainDocumentPart!.Document!.Body!.Descendants<Paragraph>(), p => p.InnerText.Contains("(Ф.И.О.)"));
+        Assert.Contains(withoutResult.Report.Unfilled, u => u.StartsWith("AutofillPredWay"));
+        // Направление — в строке с названием должности председателя.
+        var title = with.MainDocumentPart.Document.Body.Elements<Paragraph>().First(p => p.InnerText.StartsWith("Председатель УМК"));
+        Assert.Contains("09.04.01", title.InnerText);
     }
 
     [Fact]

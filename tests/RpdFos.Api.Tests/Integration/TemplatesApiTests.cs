@@ -20,7 +20,7 @@ public class TemplatesApiTests(DatabaseFixture app)
 {
     [Theory]
     [InlineData(DocumentTypeRegistry.Rpd, DocxBookmarksTests.Rpd, 57)]
-    [InlineData(DocumentTypeRegistry.Fos, DocxBookmarksTests.Fos, 34)] // вторая версия файла оформления ФОС (этап 7, B2)
+    [InlineData(DocumentTypeRegistry.Fos, DocxBookmarksTests.Fos, 35)] // вторая версия файла оформления ФОС (этап 7, B2; +председатель УМК)
     public async Task Methodist_creates_uploads_print_template_and_publishes(string type, string file, int bookmarks)
     {
         var (client, plan) = await MethodistWithPlanAsync();

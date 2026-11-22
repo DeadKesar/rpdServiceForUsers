@@ -79,6 +79,10 @@
     "kind": "field", "target": "/exam_tickets/0/questions",
     "note": "Вопросы билета нумерованными абзацами: «1.», «2.», …"
   },
+  "AutofillPredWay": {
+    "kind": "signature", "target": "umk_chair", "part": "name",
+    "note": "Строка подписи председателя УМК: «Председатель УМК <код> <направление>», под ней «____ (Ф.И.О.)». Закладка вокруг бланка «Ф.И.О.»: нет председателя у направления — бланк остаётся."
+  },
   "AutofillProOD": { "kind": "signature", "target": "vice_rector_edu", "part": "position" },
   "AutofillProODName": { "kind": "signature", "target": "vice_rector_edu", "part": "name" },
   "AutofillPositionKaf": { "kind": "signature", "target": "department_head", "part": "position" },
