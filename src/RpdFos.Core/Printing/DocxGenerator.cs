@@ -304,8 +304,16 @@ public static partial class DocxGenerator
             else
             {
                 text.Text = token.Replace(text.Text, _ => value.Inline, 1);
+                Uncondense(text.Ancestors<Run>().FirstOrDefault()?.RunProperties);
                 text.Space = SpaceProcessingModeValues.Preserve;
             }
+        }
+
+        // Заглушка шаблона бывает набрана со сжатием знаков (w:spacing < 0: в билете ФОС −1,3 пт), чтобы уместиться в строку;
+        // значение другой длины с таким сжатием слипается, особенно в PDF — сжатие снимается.
+        private static void Uncondense(RunProperties? properties)
+        {
+            if (properties?.Spacing?.Val?.Value < 0) properties.Spacing = null;
         }
 
         /// <summary>
@@ -346,6 +354,7 @@ public static partial class DocxGenerator
         private void ReplaceParagraph(Paragraph paragraph, Run placeholder, PrintValue value)
         {
             var runProperties = placeholder.RunProperties?.CloneNode(true) as RunProperties;
+            Uncondense(runProperties);
             var paragraphProperties = paragraph.ParagraphProperties?.CloneNode(true) as ParagraphProperties;
             foreach (var child in paragraph.ChildElements.ToList())
                 if (child is not ParagraphProperties and not BookmarkStart and not BookmarkEnd) child.Remove();

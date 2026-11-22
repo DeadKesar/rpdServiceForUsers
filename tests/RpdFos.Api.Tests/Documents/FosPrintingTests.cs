@@ -237,6 +237,16 @@ public class FosPrintingTests
     }
 
     [Fact]
+    public void Ticket_questions_are_not_printed_with_condensed_character_spacing()
+    {
+        // Заглушка вопросов в шаблоне набрана со сжатием знаков (−1,3 пт): текст вопросов в PDF слипался.
+        var (docx, _) = Print(Payload());
+        var question = docx.MainDocumentPart!.Document!.Body!.Descendants<Paragraph>().First(p => p.InnerText.StartsWith("1. Модель и её свойства"));
+
+        Assert.DoesNotContain(question.Descendants<Spacing>(), s => s.Val?.Value < 0);
+    }
+
+    [Fact]
     public void File_name_of_fos_starts_with_fos_and_carries_academic_year()
     {
         var document = new RpdFos.Core.Data.Entities.Document { Type = TemplateTypes.Fos, Payload = """{ "title_page": { "academic_year": "2026/2027" } }""", CreatedAt = new DateTimeOffset(2026, 9, 1, 0, 0, 0, TimeSpan.Zero) };
