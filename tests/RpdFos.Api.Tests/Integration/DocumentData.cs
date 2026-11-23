@@ -136,9 +136,9 @@ public static class DocumentData
             }
         };
         if (visible.Contains("practical_classes"))
-            sections["practical_classes"] = new JsonArray(new JsonObject { ["number"] = 1, ["title"] = "Построение модели", ["hours"] = plan.Practice });
+            sections["practical_classes"] = new JsonArray(new JsonObject { ["number"] = "1", ["title"] = "Построение модели", ["hours"] = plan.Practice });
         if (visible.Contains("lab_works"))
-            sections["lab_works"] = new JsonArray(new JsonObject { ["number"] = 1, ["title"] = "Исследование модели", ["hours"] = plan.Labs });
+            sections["lab_works"] = new JsonArray(new JsonObject { ["number"] = "1", ["title"] = "Исследование модели", ["hours"] = plan.Labs });
         if (visible.Contains("course_work"))
             sections["course_work"] = new JsonObject { ["kind"] = "course_project", ["topics"] = new JsonArray("Модель системы массового обслуживания") };
 

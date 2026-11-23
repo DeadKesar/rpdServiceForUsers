@@ -87,7 +87,15 @@
                         </select>
                     </div>
                 }
-                <div class="@(BySemester && DocumentSemesters.Count > 1 ? "col-md-7" : "col-md-9")">
+                @if (HasWeek)
+                {
+                    <div class="col-md-2">
+                        <label class="form-label small">Неделя семестра</label>
+                        <ScalarInput Context="Context" Schema="Week" Parent="topic" Key="week"
+                                     Path="@($"{Path}/{index}/week")" Compact="true" Placeholder="3; 1–4; 5, 6" />
+                    </div>
+                }
+                <div class="@TitleColumns">
                     <label class="form-label small">Тема</label>
                     <ScalarInput Context="Context" Schema="TopicTitle" Parent="topic" Key="topic_title"
                                  Path="@($"{Path}/{index}/topic_title")" Compact="true" />
@@ -177,6 +185,14 @@
     private JsonElement SectionNumber => Property("section_number");
     private JsonElement TopicTitle => Property("topic_title");
     private JsonElement ControlForms => Property("current_control_forms");
+    private JsonElement Week => Property("week");
+
+    // Неделя семестра есть в схеме нового шаблона (этап 7.1); у прежних шаблонов поля нет.
+    private bool HasWeek => Week.ValueKind == JsonValueKind.Object;
+
+    // Ширина поля темы — остаток строки из 12 колонок после раздела, семестра (если их несколько) и недели.
+    private string TitleColumns =>
+        $"col-md-{9 - (BySemester && DocumentSemesters.Count > 1 ? 2 : 0) - (HasWeek ? 2 : 0)}";
 
     private JsonElement HoursProperty(string name) =>
         Property("hours") is { ValueKind: JsonValueKind.Object } h && h.GetProperty("properties").TryGetProperty(name, out var p) ? p : default;

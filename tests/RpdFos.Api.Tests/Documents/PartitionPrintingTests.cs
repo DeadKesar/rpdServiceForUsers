@@ -71,6 +71,20 @@ public class PartitionPrintingTests
     }
 
     [Fact]
+    public void Week_of_semester_is_printed_in_its_column_and_is_empty_without_it()
+    {
+        // Неделя семестра (этап 7.1): номер, диапазон или перечень — как введено; у темы без недели и в строках итогов ячейка пустая.
+        var table = Partition(Semester(1, 24, 8, 16, 24, 36, "exam"), null,
+            """
+            [ { "section_number": 1, "semester": 1, "topic_title": "Основы моделирования", "week": "3", "hours": { "lectures": 8, "practice": 8, "lab_hours": 8, "self_study": 8 } },
+              { "section_number": 2, "semester": 1, "topic_title": "Построение моделей", "week": "1–4, 7", "hours": { "lectures": 8, "practice": 0, "lab_hours": 4, "self_study": 8 } },
+              { "section_number": 3, "semester": 1, "topic_title": "Анализ моделей", "hours": { "lectures": 8, "practice": 0, "lab_hours": 4, "self_study": 8 } } ]
+            """, out _);
+
+        Assert.Equal(["3", "1–4, 7", "", "", ""], Rows(table).Select(r => r[3]));
+    }
+
+    [Fact]
     public void Kind_absent_in_every_semester_is_a_dash_in_total_too()
     {
         // ФТД.В.01: 1 и 2 семестр, зачёты, лабораторных нет ни в одном.

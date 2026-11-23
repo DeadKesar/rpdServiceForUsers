@@ -16,7 +16,7 @@ public class DocumentSubmissionTests
 
     [Theory]
     [InlineData(16, "exam", """{ "lab_works": [] }""", "/lab_works")]
-    [InlineData(16, "exam", """{ "lab_works": [ { "number": 1, "title": "Работа", "hours": 4 } ] }""", null)]
+    [InlineData(16, "exam", """{ "lab_works": [ { "number": "1", "title": "Работа", "hours": 4 } ] }""", null)]
     [InlineData(0, "exam", "{}", null)]                                      // лабораторных нет в плане — раздел скрыт
     [InlineData(0, "course_project", "{}", "/course_work")]
     [InlineData(0, "course_project", """{ "course_work": { "kind": "course_project" } }""", null)]

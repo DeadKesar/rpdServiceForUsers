@@ -229,7 +229,8 @@ internal static class DocxTables
             foreach (var topic in group)
             {
                 var hours = Property(topic, "hours");
-                Add(false, Merge(), Number(topic, "section_number"), Text(topic, "topic_title") ?? "", number, "",
+                // Неделя семестра есть у тем новых шаблонов (этап 7.1); нет — пустая ячейка, как раньше.
+                Add(false, Merge(), Number(topic, "section_number"), Text(topic, "topic_title") ?? "", number, Text(topic, "week")?.Trim() ?? "",
                     Hour(hours, "lectures", semester?.Lectures), Hour(hours, "lab_hours", semester?.LabHours),
                     Hour(hours, "practice", semester?.Practice), Number(hours, "self_study"),
                     string.Join(", ", Items(Property(topic, "competence_indicators")).Select(i => i.GetString())),
@@ -318,7 +319,7 @@ internal static class DocxTables
         var items = Items(context.At($"/{section}"));
         if (items.Count == 0) unfilled.Add($"{bookmark} — раздел {section} не заполнен");
         foreach (var item in items)
-            Add(false, Number(item, "number"), Number(item, "section_number"), Text(item, "title") ?? "", Number(item, "hours"),
+            Add(false, NumberOrText(item, "number"), Number(item, "section_number"), Text(item, "title") ?? "", Number(item, "hours"),
                 Text(item, "control_form") ?? "");
         Add(true, "", "", "Итого:", items.Sum(i => int.TryParse(Number(i, "hours"), out var n) ? n : 0).ToString(), "");
 
@@ -458,4 +459,8 @@ internal static class DocxTables
 
     private static string Number(JsonElement? node, string name) =>
         Property(node, name) is { ValueKind: JsonValueKind.Number } v ? v.GetRawText() : "";
+
+    // № занятия: у новых шаблонов — текст («3», «1–2», «4, 5»), у прежних — число; печатается как введено.
+    private static string NumberOrText(JsonElement? node, string name) =>
+        Property(node, name) is { ValueKind: JsonValueKind.String } v ? v.GetString()!.Trim() : Number(node, name);
 }

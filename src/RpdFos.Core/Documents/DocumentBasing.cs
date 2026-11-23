@@ -155,7 +155,20 @@ public static class DocumentBasing
             var carried = value!.DeepClone();
             if (child.TryGetProperty("x-plan-disciplines", out var relation) && carried is JsonArray items)
                 carried = PlanDisciplines(items, relation.GetString(), titles);
+            else if (carried is JsonArray list)
+                NumbersToText(list, SchemaInspector.SubschemaAt(targetSchema, pointer + "/0", resolve));
             if (Has(carried)) target[name] = carried;
+        }
+
+        // В схеме нового шаблона поле записи списка стало текстом, а в основе там число (№ занятия, этап 7.1): число переходит
+        // в запись текстом, иначе проверка отклонила бы тип, а поле в форме выглядело бы пустым.
+        private static void NumbersToText(JsonArray list, JsonElement? itemSchema)
+        {
+            if (itemSchema is not { ValueKind: JsonValueKind.Object } schema || !schema.TryGetProperty("properties", out var properties)) return;
+            foreach (var item in list.OfType<JsonObject>())
+                foreach (var field in properties.EnumerateObject().Where(f => Text(f.Value, "type") == "string"))
+                    if (item[field.Name] is JsonValue value && value.GetValueKind() == JsonValueKind.Number)
+                        item[field.Name] = JsonValue.Create(value.ToJsonString());
         }
 
         // Выбранные индикаторы остаются по кодам; компетенции и формулировки индикаторов — из матрицы цели.

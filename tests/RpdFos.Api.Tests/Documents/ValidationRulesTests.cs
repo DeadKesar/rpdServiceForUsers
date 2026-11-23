@@ -273,6 +273,17 @@ public class ValidationRulesTests
     }
 
     [Fact]
+    public void Class_hours_do_not_depend_on_the_form_of_the_number()
+    {
+        // № занятия — текст (этап 7.1): одна работа на несколько занятий, «1–2», сумму часов не меняет — суммируются строки.
+        var rule = new ClassHoursMatchTotal();
+
+        Assert.Empty(Run(rule, """[ { "number": "1–2", "hours": 10 }, { "number": "3", "hours": 6 } ]""", "/practical_classes"));
+        Assert.Equal([new DocumentValidationError("/lab_works", "Лабораторные работы: по таблице 12 ч, по распределению часов 16 ч")],
+            Run(rule, """[ { "number": "1, 2", "hours": 8 }, { "number": "4", "hours": 4 } ]""", "/lab_works"));
+    }
+
+    [Fact]
     public void Class_hours_rule_is_only_in_new_schema()
     {
         // Таблица лабораторных на 4 ч из 16: в новой схеме — ошибка правила, в снимке схемы прежнего шаблона правила нет.

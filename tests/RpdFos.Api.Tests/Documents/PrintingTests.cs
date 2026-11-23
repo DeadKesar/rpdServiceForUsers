@@ -82,7 +82,7 @@ public class PrintingTests
         var payload = JsonDocument.Parse("""
             {
               "hours_distribution": { "semesters": [ { "semester": 1, "lectures": 16, "lab_hours": 0, "control_types": ["exam", "course_project"] } ] },
-              "lab_works": [ { "number": 1, "title": "Исследование модели", "hours": 16 } ],
+              "lab_works": [ { "number": "1", "title": "Исследование модели", "hours": 16 } ],
               "course_work": { "kind": "course_project", "topics": ["Модель системы"] }
             }
             """).RootElement;

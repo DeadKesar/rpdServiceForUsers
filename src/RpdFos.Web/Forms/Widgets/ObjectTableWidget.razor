@@ -132,8 +132,12 @@
     {
         var rows = EnsureArray();
         var row = new JsonObject();
-        // Номер по порядку — следующий: так у занятий не нужно набирать его вручную.
-        if (Columns.Any(c => c.Name == "number")) row["number"] = rows.Count + 1;
+        // Номер занятия — следующий за последним номером предыдущей строки («1–2» → «3»): так его не нужно набирать вручную.
+        // У нового шаблона номер — текст, у прежних — целое число.
+        if (Columns.FirstOrDefault(c => c.Name == "number") is { Schema.ValueKind: JsonValueKind.Object } number)
+            row["number"] = SchemaContext.Type(number.Schema) == "string"
+                ? JsonValue.Create(ClassNumbers.Next(rows).ToString())
+                : JsonValue.Create(ClassNumbers.Next(rows));
         rows.Add(row);
         Context.Changed();
     }

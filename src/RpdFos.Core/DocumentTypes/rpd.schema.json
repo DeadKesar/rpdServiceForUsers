@@ -264,6 +264,12 @@
           "semester": { "type": "integer", "title": "Семестр", "minimum": 1, "maximum": 12, "description": "Семестр из распределения часов документа" },
           "topic_title": { "type": "string", "title": "Тема", "minLength": 5 },
           "topic_description": { "type": "string", "title": "Содержание" },
+          "week": {
+            "type": "string",
+            "title": "Неделя семестра",
+            "pattern": "^([1-9][0-9]?(\\s*[-–]\\s*[1-9][0-9]?)?(\\s*,\\s*[1-9][0-9]?(\\s*[-–]\\s*[1-9][0-9]?)?)*)?$",
+            "description": "Номер недели, диапазон или перечень: 3; 1–4; 5, 6"
+          },
           "hours": {
             "type": "object",
             "title": "Часы",
@@ -515,7 +521,12 @@
       "type": "object",
       "required": ["number", "title", "hours"],
       "properties": {
-        "number": { "type": "integer", "title": "№", "minimum": 1 },
+        "number": {
+          "type": "string",
+          "title": "№",
+          "pattern": "^[1-9][0-9]?(\\s*[-–]\\s*[1-9][0-9]?)?(\\s*,\\s*[1-9][0-9]?(\\s*[-–]\\s*[1-9][0-9]?)?)*$",
+          "description": "Номер занятия, диапазон или перечень: 3; 1–2; 4, 5"
+        },
         "title": { "type": "string", "title": "Тема занятия", "x-ui-widget": "textarea" },
         "hours": { "type": "integer", "title": "Часов", "minimum": 0 },
         "section_number": { "type": "integer", "title": "Раздел", "minimum": 1, "description": "Раздел тематического плана" },

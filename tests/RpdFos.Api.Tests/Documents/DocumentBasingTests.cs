@@ -232,6 +232,28 @@ public class DocumentBasingTests
         Assert.Equal("<p>Цели автора</p>", Text(result.Payload, "goals_and_objectives", "goals"));
     }
 
+    [Fact]
+    public void Class_numbers_of_a_former_template_pass_into_the_text_numbers_of_a_new_one()
+    {
+        // Основа по прежнему шаблону: № занятия — число. В новой схеме он текст («1–2» и перечни, этап 7.1): число переходит
+        // записью, иначе проверка отклонила бы тип, а в форме поле выглядело бы пустым. Прочее содержимое записей не тронуто.
+        var former = JsonNode.Parse(Rpd.SchemaJson)!;
+        former["$defs"]!["class_item"]!["properties"]!["number"] = JsonNode.Parse("""{ "type": "integer", "title": "№", "minimum": 1 }""");
+        var formerSchema = JsonDocument.Parse(former.ToJsonString()).RootElement;
+        var basePayload = BasePayload();
+        basePayload["lab_works"] = JsonNode.Parse("""[ { "number": 1, "title": "Исследование модели", "hours": 8 }, { "number": 2, "title": "Оптимизация модели", "hours": 8 } ]""");
+        var facts = Facts();
+
+        var result = DocumentBasing.Transfer(Fresh(facts), Rpd.Schema, formerSchema, DefaultsOf(Rpd), basePayload, facts, AuthorId,
+            Hidden(facts), Registry.FindSchema);
+
+        var works = result.Payload["lab_works"]!.AsArray();
+        Assert.Equal(["1", "2"], works.Select(w => (string)w!["number"]!));
+        Assert.Equal(["Исследование модели", "Оптимизация модели"], works.Select(w => (string)w!["title"]!));
+        Assert.Equal([8, 8], works.Select(w => (int)w!["hours"]!));
+        Assert.DoesNotContain(result.NotTransferred, n => n.Contains("Лабораторные"));
+    }
+
     // ───── вспомогательное ─────
 
     private static BasingResult Transfer(
@@ -293,8 +315,8 @@ public class DocumentBasingTests
             { "code": "ПК-3", "formulation": "ПК-3 в матрице цели нет", "indicators": [ { "code": "ПК-3.1", "text": "Текст" } ] }
           ],
           "thematic_plan": [ { "section_number": 1, "semester": 3, "topic_title": "Основы моделирования", "hours": { "lectures": 16 } } ],
-          "practical_classes": [ { "number": 1, "title": "Построение модели", "hours": 16, "control_form": "Отчёт" } ],
-          "lab_works": [ { "number": 1, "title": "Исследование модели", "hours": 16 } ],
+          "practical_classes": [ { "number": "1", "title": "Построение модели", "hours": 16, "control_form": "Отчёт" } ],
+          "lab_works": [ { "number": "1", "title": "Исследование модели", "hours": 16 } ],
           "course_work": { "kind": "course_project", "topics": ["Модель системы"] },
           "education_technologies": ["Лекции"],
           "literature": { "main": [ { "citation": "Петров П. П. Моделирование систем : учебник. — Москва : Наука, 2024. — 320 с.", "year": 2024 } ], "additional": [] },

@@ -114,7 +114,7 @@ public sealed class ListOrderRenderingTests
         // Занятия нумерует автор: порядок остаётся порядком добавления.
         var payload = new JsonObject
         {
-            ["lab_works"] = new JsonArray(new JsonObject { ["number"] = 1, ["hours"] = 4 }, new JsonObject { ["number"] = 2, ["hours"] = 4 })
+            ["lab_works"] = new JsonArray(new JsonObject { ["number"] = "1", ["hours"] = 4 }, new JsonObject { ["number"] = "2", ["hours"] = 4 })
         };
 
         var html = await RenderAsync<ObjectTableWidget>(Context(payload), Field("lab_works"), payload, "lab_works", "/lab_works");
