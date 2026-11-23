@@ -64,7 +64,7 @@ public sealed class DocumentTimeline(AppDbContext db)
             items.Add(new(h.ChangedAt, "status", code, title, h.ChangedBy, NameOf(h.ChangedBy), StatusTitle(h.FromStatus),
                 DocumentStatuses.Title(h.ToStatus), h.Comment, []));
         }
-        foreach (var (entry, payload) in audits) items.Add(Describe(entry, payload, NameOf));
+        foreach (var (entry, payload) in audits) items.Add(AuditDescriber.Describe(entry, payload, NameOf));
 
         // OrderBy устойчив: строки одного момента остаются в порядке источников, а после разворота идут от новых к старым.
         var ordered = items.OrderBy(i => i.At).Reverse().ToList();
@@ -94,62 +94,11 @@ public sealed class DocumentTimeline(AppDbContext db)
         _ => ("status_changed", "Статус изменён")
     };
 
-    private HistoryEntry Describe(AuditLogEntry a, JsonNode? p, Func<Guid?, string?> nameOf)
-    {
-        string? Text(string key) => p?[key]?.ToString();
-        string Person(string key) => Guid.TryParse(Text(key), out var id) ? nameOf(id) ?? "не найден в справочнике" : "не назначен";
-        string Seat(string? role) => role is null ? "место" : SignatoryRoles.Title(role);
-
-        HistoryEntry Entry(string title, string? from = null, string? to = null, string? comment = null, params string[] details) =>
-            new(a.OccurredAt, "event", a.EventType, title, a.UserId, nameOf(a.UserId),
-                from is null ? null : DocumentStatuses.Title(from), to is null ? null : DocumentStatuses.Title(to), comment, details);
-
-        return a.EventType switch
-        {
-            AuditEvents.ReturnedForCorrection => Entry("Возвращён на исправление", Text("from"), Text("to"), Text("comment")),
-            AuditEvents.StatusForced => Entry("Статус сменён принудительно", Text("from"), Text("to"), Text("comment"),
-                p?["approval_interrupted"]?.GetValue<bool>() == true ? ["Круг согласования прерван"] : []),
-            AuditEvents.DocumentArchived => Entry("Отправлен в архив", Text("from"), Text("to")),
-            AuditEvents.DocumentTransferred => Entry("Передан другому автору", comment: Text("reason"),
-                details: $"Прежний автор: {Person("from")}; новый автор: {Person("to")}"),
-            AuditEvents.PlanFieldCorrected => Entry("Исправлено поле из учебного плана",
-                details: $"{Text("path")}: было «{Text("before")}», стало «{Text("after")}»"),
-            AuditEvents.ApprovalStarted => Entry("Начат круг согласования", details: Seats(p, nameOf)),
-            AuditEvents.SignatureApproved => Entry("Согласовано", details: $"Место: {Seat(Text("role"))}"),
-            AuditEvents.SignatureRejected => Entry("Согласующий вернул документ", details: $"Место: {Seat(Text("role"))}"),
-            AuditEvents.SignatoryAssigned => Entry("Назначен согласующий",
-                details: $"Место: {Seat(Text("role"))}; было: {Person("before")}; стало: {Person("after")}"),
-            AuditEvents.DocumentBasedOn => Entry("Создан на основе другого документа", details: $"Основа: «{Text("title")}»"),
-            AuditEvents.DocumentOutdated => Entry("Помечен «устарел»", details: "Согласован документ на его основе для той же дисциплины"),
-            AuditEvents.RpdSnapshotRefreshed => Entry("Снимок РПД обновлён",
-                details: $"Версия РПД: {Text("from_version")} → {Text("to_version")}"),
-            AuditEvents.BankRenumbered => Entry("Перенумерована группа банка заданий", details: $"Группа: {Text("group")}"),
-            _ => Entry(a.EventType)
-        };
-    }
-
-    private static string[] Seats(JsonNode? p, Func<Guid?, string?> nameOf) =>
-        p?["seats"] is JsonArray seats
-            ? seats.OfType<JsonObject>().Select(s =>
-            {
-                var role = s["role"]?.ToString();
-                var who = Guid.TryParse(s["signatory"]?.ToString(), out var id) ? nameOf(id) ?? "не найден в справочнике" : "не найден";
-                return $"{(role is null ? "место" : SignatoryRoles.Title(role))} — {who}";
-            }).ToArray()
-            : [];
-
     private async Task<Dictionary<Guid, string>> NamesAsync(
         IEnumerable<DocumentStatusChange> statuses, IEnumerable<AuditLogEntry> audits, IEnumerable<JsonNode?> payloads, CancellationToken ct)
     {
         var ids = statuses.Select(h => h.ChangedBy).Concat(audits.Where(a => a.UserId is not null).Select(a => a.UserId!.Value)).ToHashSet();
-        foreach (var p in payloads)
-        {
-            foreach (var key in new[] { "from", "to", "before", "after" })
-                if (p?[key] is JsonValue v && Guid.TryParse(v.ToString(), out var id)) ids.Add(id);
-            if (p?["seats"] is JsonArray seats)
-                foreach (var s in seats)
-                    if (Guid.TryParse(s?["signatory"]?.ToString(), out var id)) ids.Add(id);
-        }
+        foreach (var p in payloads) ids.UnionWith(AuditDescriber.PeopleIn(p));
         return await db.Employees.AsNoTracking().Where(e => ids.Contains(e.Id)).ToDictionaryAsync(e => e.Id, e => e.ShortName, ct);
     }
 

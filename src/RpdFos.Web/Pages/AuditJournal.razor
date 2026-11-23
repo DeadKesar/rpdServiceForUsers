@@ -1,0 +1,208 @@
+@page "/audit"
+@attribute [Authorize(Roles = "admin")]
+@using System.Net.Http.Json
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.WebAssembly.Authentication
+@using RpdFos.Web.Models
+@inject HttpClient Http
+
+<PageTitle>Журнал аудита</PageTitle>
+
+@* Журнал аудита (этап 8, A11; FR-ADM-02, S-53): события системы от новых к старым, с отбором по пользователю, периоду и типу.
+   Только чтение. Лента приходит частями; условия отбора применяются кнопкой, а не на каждое изменение поля. *@
+<h1>Журнал аудита</h1>
+
+<form class="row g-2 align-items-end mb-3" @onsubmit="ApplyAsync" @onsubmit:preventDefault>
+    <div class="col-12 col-md-3">
+        <label class="form-label small mb-0" for="audit-user">Пользователь</label>
+        <select id="audit-user" class="form-select form-select-sm" @bind="userId">
+            <option value="">Все</option>
+            @foreach (var u in options.Users)
+            {
+                <option value="@u.Id">@u.Name</option>
+            }
+        </select>
+    </div>
+    <div class="col-6 col-md-2">
+        <label class="form-label small mb-0" for="audit-from">С</label>
+        <input id="audit-from" class="form-control form-control-sm" type="date" @bind="from" />
+    </div>
+    <div class="col-6 col-md-2">
+        <label class="form-label small mb-0" for="audit-to">По (включительно)</label>
+        <input id="audit-to" class="form-control form-control-sm" type="date" @bind="to" />
+    </div>
+    <div class="col-12 col-md-3">
+        <label class="form-label small mb-0" for="audit-event">Событие</label>
+        <select id="audit-event" class="form-select form-select-sm" @bind="eventType">
+            <option value="">Все</option>
+            @foreach (var e in options.Events)
+            {
+                <option value="@e.Code">@e.Title</option>
+            }
+        </select>
+    </div>
+    <div class="col-12 col-md-2 text-nowrap">
+        <button class="btn btn-primary btn-sm" type="submit" disabled="@loading">Показать</button>
+        <button class="btn btn-outline-secondary btn-sm" type="button" disabled="@loading" @onclick="ResetAsync">Сбросить</button>
+    </div>
+</form>
+
+@if (message is not null)
+{
+    <div class="alert alert-danger py-2 small">@message</div>
+}
+
+@if (!loaded)
+{
+    <p>Загрузка…</p>
+}
+else if (items.Count == 0 && message is null)
+{
+    <p class="text-muted">Событий по этим условиям нет.</p>
+}
+else if (items.Count > 0)
+{
+    <div class="small text-muted mb-1">Найдено событий: @total</div>
+    <div class="table-responsive">
+        <table class="table table-sm small align-top">
+            <thead>
+                <tr><th>Когда</th><th>Кто</th><th>Что сделано</th><th>Объект</th></tr>
+            </thead>
+            <tbody>
+                @foreach (var r in items)
+                {
+                    <tr>
+                        <td class="text-nowrap">@r.At.ToLocalTime().ToString("dd.MM.yyyy HH:mm:ss")</td>
+                        <td class="text-nowrap">@(r.UserName ?? "система")</td>
+                        <td>
+                            <div class="fw-semibold">@r.Title</div>
+                            @if (r.FromStatus is not null && r.ToStatus is not null)
+                            {
+                                <div class="text-muted">@r.FromStatus → @r.ToStatus</div>
+                            }
+                            @foreach (var line in r.Details)
+                            {
+                                <div class="text-muted">@line</div>
+                            }
+                            @if (r.Comment is not null)
+                            {
+                                <div>Комментарий: @r.Comment</div>
+                            }
+                        </td>
+                        <td>
+                            <div class="text-muted">@KindTitle(r.EntityType)</div>
+                            @if (r.DocumentId is { } documentId)
+                            {
+                                <a href="documents/@documentId">@(r.EntityTitle ?? "документ")</a>
+                            }
+                            else
+                            {
+                                <div>@(r.EntityTitle ?? "—")</div>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+    @if (items.Count < total)
+    {
+        <button class="btn btn-sm btn-link px-0" type="button" disabled="@loading" @onclick="MoreAsync">Показать ещё (@(total - items.Count))</button>
+    }
+}
+
+@code {
+    private const int Page = 50;
+
+    private AuditFilterOptions options = new([], []);
+    private List<AuditRecord> items = [];
+    private int total;
+    private bool loaded, loading;
+    private string? message;
+
+    // Поля формы; в запрос уходят условия, применённые кнопкой «Показать», — «Ещё» не должно менять отбор на ходу.
+    private string userId = "", eventType = "";
+    private DateTime? from, to;
+    private string applied = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            options = await Http.GetFromJsonAsync<AuditFilterOptions>("api/audit/filters") ?? options;
+        }
+        catch (AccessTokenNotAvailableException e)
+        {
+            e.Redirect();
+            return;
+        }
+        catch (HttpRequestException e) when (ConnectionLoss.Is(e))
+        {
+            message = ConnectionLoss.Message;
+        }
+        await ApplyAsync();
+    }
+
+    private static string KindTitle(string? kind) => kind switch
+    {
+        "document" => "Документ",
+        "employee" => "Сотрудник",
+        "discipline" => "Дисциплина",
+        "matrix_row" => "Строка матрицы",
+        _ => "—"
+    };
+
+    private Task ApplyAsync()
+    {
+        var parts = new List<string>();
+        if (userId != "") parts.Add($"userId={userId}");
+        if (from is { } f) parts.Add($"from={f:yyyy-MM-dd}");
+        if (to is { } t) parts.Add($"to={t:yyyy-MM-dd}");
+        if (eventType != "") parts.Add($"eventType={Uri.EscapeDataString(eventType)}");
+        applied = string.Join('&', parts);
+        return LoadAsync(reset: true);
+    }
+
+    private async Task ResetAsync()
+    {
+        (userId, eventType, from, to) = ("", "", null, null);
+        await ApplyAsync();
+    }
+
+    private Task MoreAsync() => LoadAsync(reset: false);
+
+    private async Task LoadAsync(bool reset)
+    {
+        loading = true;
+        message = null;
+        try
+        {
+            var skip = reset ? 0 : items.Count;
+            var response = await Http.GetAsync($"api/audit?{applied}{(applied == "" ? "" : "&")}skip={skip}&take={Page}");
+            if (!response.IsSuccessStatusCode)
+            {
+                message = response.StatusCode == System.Net.HttpStatusCode.UnprocessableEntity
+                    ? "Период задан неверно: дата «по» раньше даты «с»."
+                    : $"Журнал не загружен (код ответа {(int)response.StatusCode}).";
+                return;
+            }
+            var page = await response.Content.ReadFromJsonAsync<AuditPage>();
+            if (page is null) return;
+            if (reset) items = page.Items; else items.AddRange(page.Items);
+            total = page.Total;
+        }
+        catch (AccessTokenNotAvailableException e)
+        {
+            e.Redirect();
+        }
+        catch (HttpRequestException e) when (ConnectionLoss.Is(e))
+        {
+            message = ConnectionLoss.Message;
+        }
+        finally
+        {
+            loading = false;
+            loaded = true;
+        }
+    }
+}
