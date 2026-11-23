@@ -98,8 +98,14 @@ public class DocumentReviewApiTests(DatabaseFixture app)
         Assert.Equal(HttpStatusCode.Created, added.StatusCode);
         var comment = (await added.Content.ReadFromJsonAsync<CommentItem>())!;
 
-        // С неразрешённым замечанием не принять — только вернуть.
-        Assert.Equal(HttpStatusCode.Conflict, (await methodist.PostAsJsonAsync(Url(created, "accept"), new DocumentVersionRequest(version))).StatusCode);
+        // С неразрешённым замечанием не принять. Отказ называет оба выхода — как плашка возврата с согласования: снять замечания
+        // (кнопка «Разрешено» у поля) или вернуть документ автору.
+        var refused = await methodist.PostAsJsonAsync(Url(created, "accept"), new DocumentVersionRequest(version));
+        Assert.Equal(HttpStatusCode.Conflict, refused.StatusCode);
+        var refusal = (await refused.Content.ReadFromJsonAsync<ProblemDetails>())!.Detail;
+        Assert.Contains("снимите их", refusal);
+        Assert.Contains("«Разрешено»", refusal);
+        Assert.Contains("верните документ автору на доработку", refusal);
         version = await ExpectAsync(methodist.PostAsJsonAsync(Url(created, "return"), new ReturnRequest(version, null)), DocumentStatuses.Returned);
 
         // Доработка: правка и «Сохранить» статус не меняют.

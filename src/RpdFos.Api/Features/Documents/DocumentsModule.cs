@@ -471,7 +471,8 @@ public class DocumentsModule : ICarterModule
         var (problem, issues, _) = await review.AcceptAsync(document!, reviewerId, ct);
         if (problem == ReviewProblem.UnresolvedComments)
             return Results.Problem(statusCode: StatusCodes.Status409Conflict, title: "Есть неразрешённые замечания",
-                detail: "Документ с неразрешёнными замечаниями не принимается — верните его на доработку.");
+                // Два выхода, теми же словами, что плашка возврата с согласования в клиенте: замечания можно снять или вернуть документ.
+                detail: "Документ с неразрешёнными замечаниями не принимается: снимите их (кнопка «Разрешено» у поля) или верните документ автору на доработку.");
         // Как при отправке: принимается только документ без ошибок полной проверки (этап 5.2).
         if (problem == ReviewProblem.CheckFailed)
             return Results.Problem(statusCode: StatusCodes.Status422UnprocessableEntity, title: "Документ не прошёл проверку",
