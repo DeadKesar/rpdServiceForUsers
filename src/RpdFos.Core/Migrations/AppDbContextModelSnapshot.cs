@@ -489,6 +489,10 @@ namespace RpdFos.Core.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("lockout_end");
 
+                    b.Property<bool>("MustChangePassword")
+                        .HasColumnType("boolean")
+                        .HasColumnName("must_change_password");
+
                     b.Property<string>("NormalizedEmail")
                         .HasMaxLength(256)
                         .HasColumnType("character varying(256)")

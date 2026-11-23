@@ -49,7 +49,7 @@ public class AuthorizeTests(DatabaseFixture app)
             RedirectUris = { new Uri(Callback) },
             Permissions =
             {
-                Permissions.Endpoints.Authorization, Permissions.GrantTypes.AuthorizationCode,
+                Permissions.Endpoints.Authorization, Permissions.Endpoints.Token, Permissions.GrantTypes.AuthorizationCode,
                 Permissions.ResponseTypes.Code, Permissions.Scopes.Profile, Permissions.Scopes.Roles
             },
             Requirements = { Requirements.Features.ProofKeyForCodeExchange }

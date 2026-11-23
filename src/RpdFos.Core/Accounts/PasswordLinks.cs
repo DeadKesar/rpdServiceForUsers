@@ -124,6 +124,12 @@ public sealed class PasswordLinks(
 
         await users.ResetAccessFailedCountAsync(user);
         await users.SetLockoutEndDateAsync(user, null);
+        // Человек сам задал пароль по ссылке — временный пароль администратора больше не действует (этап 8, A7).
+        if (user.MustChangePassword)
+        {
+            user.MustChangePassword = false;
+            await users.UpdateAsync(user);
+        }
         return IdentityResult.Success;
     }
 

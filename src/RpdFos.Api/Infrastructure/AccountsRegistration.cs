@@ -23,6 +23,7 @@ public static class AccountsRegistration
         services.AddOptions<InvitationTokenProviderOptions>()
             .Configure<IOptions<AccountSettings>>((o, s) => o.TokenLifespan = TimeSpan.FromHours(s.Value.InviteLinkHours));
         services.AddScoped<PasswordLinks>();
+        services.AddScoped<AccountPasswords>();
         return identity
             .AddTokenProvider<InvitationTokenProvider>(InvitationTokenProvider.ProviderName)
             .AddErrorDescriber<RussianIdentityErrorDescriber>();

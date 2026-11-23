@@ -55,7 +55,7 @@ else
                     <td>@(a.Directory is { } d ? Describe(d) : "— не связана")</td>
                     <td>
                         @* Этап 5.2 (FR-ADM-01): временный пароль, отключение и возврат; запись справочника не меняется. *@
-                        <div class="small mb-1">@(a.IsActive ? "активна" : "отключена — вход запрещён")@(a.HasPassword ? "" : ", пароль не задан")</div>
+                        <div class="small mb-1">@(a.IsActive ? "активна" : "отключена — вход запрещён")@(a.HasPassword ? "" : ", пароль не задан")@(a.MustChangePassword ? ", пароль временный — сменит при входе" : "")</div>
                         @if (passwordFor == a.Id)
                         {
                             @* В прокручиваемой таблице колонка сжимается до самого узкого содержимого — поле пароля держит ширину. *@
@@ -100,7 +100,7 @@ else
         <InputText class="form-control" @bind-Value="model.FullName" />
     </div>
     <div class="mb-2">
-        <label class="form-label">Временный пароль (необязательно)</label>
+        <label class="form-label">Временный пароль (необязательно; при первом входе человек задаст свой)</label>
         <InputText class="form-control" type="password" @bind-Value="model.Password" />
     </div>
     <fieldset class="mb-3">
@@ -277,7 +277,7 @@ else
     private async Task SetPasswordAsync(Account account)
     {
         await RunAsync(() => Http.PostAsJsonAsync($"api/admin/users/{account.Id}/password", new { password = newPassword }),
-            $"Для {account.Email} задан новый временный пароль — сообщите его сотруднику.");
+            $"Для {account.Email} задан новый временный пароль — сообщите его сотруднику: при первом входе он задаст свой.");
         if (!messageIsError) (passwordFor, newPassword) = (null, "");
     }
 
@@ -337,6 +337,7 @@ else
     private sealed record DirectoryRecord(
         Guid Id, string ShortName, string? FullName, string? Position, string? OfficialDesignation, string? Department, bool IsActive);
     private sealed record Account(
-        Guid Id, string Email, string FullName, List<string> Roles, DirectoryRecord? Directory, bool IsActive = true, bool HasPassword = true);
+        Guid Id, string Email, string FullName, List<string> Roles, DirectoryRecord? Directory, bool IsActive = true, bool HasPassword = true,
+        bool MustChangePassword = false);
     private sealed record Problem(string? Title, string? Detail, Dictionary<string, string[]>? Errors);
 }

@@ -1,5 +1,7 @@
 using Carter;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using RpdFos.Core.Accounts;
 using RpdFos.Core.Data;
 using RpdFos.Core.Data.Entities;
 using RpdFos.Core.Directory;
@@ -25,6 +27,7 @@ public class ProfileModule : ICarterModule
         g.MapGet("/", Get);
         g.MapGet("/notification-settings", GetSettings);
         g.MapPut("/notification-settings", SaveSettings);
+        g.MapPost("/password", ChangePassword);
     }
 
     /// <summary>
@@ -100,6 +103,27 @@ public class ProfileModule : ICarterModule
         return Results.Ok(Table(await settings.GetAsync(me, ct)));
     }
 
+    /// <summary>
+    /// «Сменить пароль» (этап 8, A7): текущий пароль и новый. Неверный текущий пароль, совпадение нового с текущим и слабый
+    /// новый — 422; запись заблокирована или отключена — 409. Повтор нового пароля проверяет форма: серверу он не нужен.
+    /// Смена обновляет штамп безопасности: открытые сеансы входа в других браузерах прекратятся.
+    /// </summary>
+    private static async Task<IResult> ChangePassword(
+        PasswordChangeRequest? request, HttpContext http, UserManager<AppUser> users, AccountPasswords passwords)
+    {
+        var subject = http.User.FindFirst(DirectoryAccounts.SubjectClaim)?.Value;
+        if (await users.FindByIdAsync(subject ?? "") is not { } user)
+            return Results.Problem(statusCode: StatusCodes.Status404NotFound, title: "Учётная запись не найдена");
+
+        var result = await passwords.ChangeAsync(user, request?.CurrentPassword, request?.NewPassword);
+        if (result.Succeeded) return Results.NoContent();
+        return Results.Problem(
+            statusCode: result.Outcome is PasswordChange.LockedOut or PasswordChange.Disabled
+                ? StatusCodes.Status409Conflict
+                : StatusCodes.Status422UnprocessableEntity,
+            title: "Пароль не изменён", detail: string.Join(" ", result.Errors));
+    }
+
     private static List<NotificationSettingItem> Table(IReadOnlyList<(NotificationEventInfo Event, EventSetting Setting)> rows) =>
         rows.Select(r => new NotificationSettingItem(r.Event.Type, r.Event.Title, r.Setting.InApp, MailModeCodes.Code(r.Setting.Mail)))
             .ToList();
@@ -128,3 +152,6 @@ public record NotificationSettingItem(string EventType, string Title, bool InApp
 
 /// <summary>Новая настройка события; <c>Mail</c> — как в <see cref="NotificationSettingItem"/>.</summary>
 public record NotificationSettingRequest(string? EventType, bool InApp, string? Mail);
+
+/// <summary>Смена своего пароля: текущий и новый.</summary>
+public record PasswordChangeRequest(string? CurrentPassword, string? NewPassword);

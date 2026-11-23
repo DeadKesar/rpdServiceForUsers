@@ -25,7 +25,8 @@ public class UsersModule : ICarterModule
         g.MapGet("/", async (AppDbContext db, CancellationToken ct) =>
         {
             var accounts = await db.Users.OrderBy(u => u.Email)
-                .Select(u => new { u.Id, u.Email, u.FullName, u.LockoutEnd, HasPassword = u.PasswordHash != null }).ToListAsync(ct);
+                .Select(u => new { u.Id, u.Email, u.FullName, u.LockoutEnd, HasPassword = u.PasswordHash != null, u.MustChangePassword })
+                .ToListAsync(ct);
             var roles = (await db.UserRoles.Join(db.Roles, ur => ur.RoleId, r => r.Id, (ur, r) => new { ur.UserId, r.Name })
                     .ToListAsync(ct))
                 .ToLookup(x => x.UserId, x => x.Name);
@@ -37,7 +38,8 @@ public class UsersModule : ICarterModule
                 .ToDictionary(r => subjectOf[r.Id]);
 
             return accounts.Select(a => new AccountItem(a.Id, a.Email ?? "", a.FullName, Ordered(roles[a.Id]),
-                recordBySubject.GetValueOrDefault(a.Id.ToString()), a.LockoutEnd != DateTimeOffset.MaxValue, a.HasPassword)).ToList();
+                recordBySubject.GetValueOrDefault(a.Id.ToString()), a.LockoutEnd != DateTimeOffset.MaxValue, a.HasPassword,
+                a.MustChangePassword)).ToList();
         });
 
         g.MapPost("/{id:guid}/password", SetPassword);
@@ -56,7 +58,12 @@ public class UsersModule : ICarterModule
             // и учётная запись без роли или без записи справочника не останется.
             await using var tx = await db.Database.BeginTransactionAsync(ct);
 
-            var user = new AppUser { UserName = rq.Email, Email = rq.Email, EmailConfirmed = true, FullName = rq.FullName };
+            // Пароль, заданный администратором, — временный: человек сменит его при первом входе (этап 8, A7).
+            var user = new AppUser
+            {
+                UserName = rq.Email, Email = rq.Email, EmailConfirmed = true, FullName = rq.FullName,
+                MustChangePassword = !string.IsNullOrEmpty(rq.Password)
+            };
             // Пароль необязателен (этап 8, A6): без него войти нельзя, пока человек не задаст его по приглашению.
             var created = string.IsNullOrEmpty(rq.Password) ? await users.CreateAsync(user) : await users.CreateAsync(user, rq.Password);
             if (!created.Succeeded)
@@ -161,6 +168,9 @@ public class UsersModule : ICarterModule
         await users.ResetAccessFailedCountAsync(user);
         // Временная блокировка за неудачные попытки снимается; отключённая администратором — остаётся.
         if (!user.IsDisabled) await users.SetLockoutEndDateAsync(user, null);
+        // Пароль известен администратору, поэтому при первом входе его придётся сменить (этап 8, A7).
+        user.MustChangePassword = true;
+        await users.UpdateAsync(user);
         return Results.NoContent();
     }
 
@@ -202,9 +212,10 @@ public record UserItem(Guid Id, string Email, string FullName, IReadOnlyList<str
 /// <summary>Учётная запись: роли и связанная запись справочника сотрудников (null — не связана).</summary>
 /// <param name="IsActive">Учётная запись не отключена администратором (этап 5.2).</param>
 /// <param name="HasPassword">Пароль задан: у созданной без пароля записи он появится после приглашения (этап 8, A6).</param>
+/// <param name="MustChangePassword">Пароль временный: человек ещё не сменил его при входе (этап 8, A7).</param>
 public record AccountItem(
     Guid Id, string Email, string FullName, IReadOnlyList<string> Roles, DirectoryRecordItem? Directory, bool IsActive = true,
-    bool HasPassword = true);
+    bool HasPassword = true, bool MustChangePassword = false);
 
 /// <summary>Новый набор ролей учётной записи.</summary>
 public record RolesRequest(string[]? Roles);

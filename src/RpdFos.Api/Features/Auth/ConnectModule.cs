@@ -33,9 +33,13 @@ public class ConnectModule : ICarterModule
             ?? throw new InvalidOperationException("Запрос OpenID Connect не найден.");
 
         var auth = await http.AuthenticateAsync(IdentityConstants.ApplicationScheme);
+        // Пароль, заданный администратором, надо сменить до входа в приложение (этап 8, A7). Обычно это выясняет страница
+        // входа, но сеанс мог быть открыт до того, как администратор задал новый пароль: такого не пускаем дальше.
+        var user = auth.Succeeded ? await users.GetUserAsync(auth.Principal!) : null;
+        var mustChange = user is { MustChangePassword: true };
         // Тихий вход клиента (prompt=none) не вошедшему — сразу login_required, как в образцах OpenIddict. Иначе
         // скрытое окно клиента открывает страницу входа и клиент ждёт ответа до тайм-аута, ~10 с (этап 6, A4).
-        if (!auth.Succeeded && request.HasPromptValue(PromptValues.None))
+        if ((!auth.Succeeded || mustChange) && request.HasPromptValue(PromptValues.None))
             return Results.Forbid(
                 new AuthenticationProperties(new Dictionary<string, string?>
                 {
@@ -51,8 +55,15 @@ public class ConnectModule : ICarterModule
                 },
                 [IdentityConstants.ApplicationScheme]);
 
-        var user = await users.GetUserAsync(auth.Principal!)
-            ?? throw new InvalidOperationException("Пользователь не найден.");
+        if (mustChange)
+        {
+            // Сеанс закрываем: прежний пароль уже не действует, а новый человек задаёт на странице смены и входит заново.
+            await http.SignOutAsync(IdentityConstants.ApplicationScheme);
+            var back = http.Request.PathBase + http.Request.Path + http.Request.QueryString;
+            return Results.Redirect($"{http.Request.PathBase}/Account/ChangePassword?ReturnUrl={Uri.EscapeDataString(back)}&Email={Uri.EscapeDataString(user!.Email ?? "")}");
+        }
+        if (user is null)
+            throw new InvalidOperationException("Пользователь не найден.");
 
         var identity = new ClaimsIdentity(
             authenticationType: TokenValidationParameters.DefaultAuthenticationType,
@@ -80,7 +91,9 @@ public class ConnectModule : ICarterModule
         var result = await http.AuthenticateAsync(OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
         var user = await users.FindByIdAsync(result.Principal!.GetClaim(Claims.Subject)!);
         // Отключённая администратором учётная запись (бессрочная блокировка) не получает и не обновляет токены.
-        if (user is null || !await signIn.CanSignInAsync(user) || await users.IsLockedOutAsync(user))
+        // Так же — не обновляет токены тот, кому администратор задал временный пароль и кто его ещё не сменил (этап 8, A7):
+        // приложение откроется только после смены, через страницу входа.
+        if (user is null || user.MustChangePassword || !await signIn.CanSignInAsync(user) || await users.IsLockedOutAsync(user))
             return Results.Forbid(
                 new AuthenticationProperties(new Dictionary<string, string?>
                 {
