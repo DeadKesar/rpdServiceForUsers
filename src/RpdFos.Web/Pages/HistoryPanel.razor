@@ -1,0 +1,129 @@
+@using System.Net.Http.Json
+@using Microsoft.AspNetCore.Components.WebAssembly.Authentication
+@using RpdFos.Web.Models
+@inject HttpClient Http
+
+@* История документа (этап 8, A10; FR-ADM-02): переходы статусов и события аудита — методисту и администратору. Лента
+   раскрывается по требованию и приходит частями от новых к старым; пока она закрыта, запросов нет. *@
+<div class="card mb-3">
+    <div class="card-body py-2">
+        <div class="d-flex flex-wrap align-items-center gap-2">
+            <span class="fw-semibold me-2">История</span>
+            <button class="btn btn-sm btn-outline-secondary" disabled="@loading" @onclick="ToggleAsync">@(open ? "Скрыть" : "Показать")</button>
+            @if (open)
+            {
+                <button class="btn btn-sm btn-link" disabled="@loading" @onclick="ReloadAsync">Обновить</button>
+            }
+        </div>
+        @if (message is not null)
+        {
+            <div class="alert alert-danger py-1 small mt-2 mb-0">@message</div>
+        }
+        @if (open && !loading && items.Count == 0 && message is null)
+        {
+            <div class="small text-muted mt-2">Записей пока нет.</div>
+        }
+        @if (open && items.Count > 0)
+        {
+            <div class="table-responsive">
+                <table class="table table-sm small mt-2 mb-0 align-top">
+                    <tbody>
+                        @foreach (var e in items)
+                        {
+                            <tr>
+                                <td class="text-nowrap">@e.At.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</td>
+                                <td class="text-nowrap">@(e.ByName ?? "—")</td>
+                                <td>
+                                    <div class="fw-semibold">@e.Title</div>
+                                    @if (e.FromStatus is not null && e.ToStatus is not null)
+                                    {
+                                        <div class="text-muted">@e.FromStatus → @e.ToStatus</div>
+                                    }
+                                    else if (e.ToStatus is not null)
+                                    {
+                                        <div class="text-muted">Статус: @e.ToStatus</div>
+                                    }
+                                    @foreach (var line in e.Details)
+                                    {
+                                        <div class="text-muted">@line</div>
+                                    }
+                                    @if (e.Comment is not null)
+                                    {
+                                        <div>Комментарий: @e.Comment</div>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+            @if (items.Count < total)
+            {
+                <button class="btn btn-sm btn-link px-0" disabled="@loading" @onclick="MoreAsync">Показать ещё (@(total - items.Count))</button>
+            }
+        }
+    </div>
+</div>
+
+@code {
+    private const int Page = 50;
+
+    [Parameter, EditorRequired] public Guid DocumentId { get; set; }
+
+    /// <summary>Статус документа: сменился — открытая лента перечитывается.</summary>
+    [Parameter] public string? Status { get; set; }
+
+    private List<HistoryEntry> items = [];
+    private int total;
+    private bool open, loading;
+    private string? message, shownFor;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var key = $"{DocumentId}/{Status}";
+        if (shownFor is not null && shownFor != key && open) await LoadAsync(reset: true);
+        shownFor = key;
+    }
+
+    private async Task ToggleAsync()
+    {
+        open = !open;
+        if (open && items.Count == 0) await LoadAsync(reset: true);
+    }
+
+    private Task ReloadAsync() => LoadAsync(reset: true);
+
+    private Task MoreAsync() => LoadAsync(reset: false);
+
+    private async Task LoadAsync(bool reset)
+    {
+        loading = true;
+        message = null;
+        try
+        {
+            var skip = reset ? 0 : items.Count;
+            var response = await Http.GetAsync($"api/documents/{DocumentId}/history?skip={skip}&take={Page}");
+            if (!response.IsSuccessStatusCode)
+            {
+                message = $"История не загружена (код ответа {(int)response.StatusCode}).";
+                return;
+            }
+            var page = await response.Content.ReadFromJsonAsync<HistoryPage>();
+            if (page is null) return;
+            if (reset) items = page.Items; else items.AddRange(page.Items);
+            total = page.Total;
+        }
+        catch (AccessTokenNotAvailableException e)
+        {
+            e.Redirect();
+        }
+        catch (HttpRequestException e) when (ConnectionLoss.Is(e))
+        {
+            message = ConnectionLoss.Message;
+        }
+        finally
+        {
+            loading = false;
+        }
+    }
+}

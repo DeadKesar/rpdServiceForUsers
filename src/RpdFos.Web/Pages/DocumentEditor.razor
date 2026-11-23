@@ -278,6 +278,11 @@ else
                        OnStart="StartApprovalAsync" OnChanged="OnApprovalChangedAsync" />
     }
 
+    @* История документа — методисту и администратору (этап 8, A10). *@
+    <AuthorizeView Roles="methodist,admin" Context="historyAuth">
+        <HistoryPanel DocumentId="Id" Status="@d.Status" />
+    </AuthorizeView>
+
     @if (returning && details.Actions.Review)
     {
         <div class="card mb-3">

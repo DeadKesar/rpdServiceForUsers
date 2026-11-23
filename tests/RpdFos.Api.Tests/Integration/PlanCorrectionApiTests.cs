@@ -38,6 +38,9 @@ public class PlanCorrectionApiTests(DatabaseFixture app)
         Assert.Contains(details.PlanCorrections!, c => c.Path == "/course_work/kind");
         Assert.DoesNotContain(details.Metadata.PlanValues.Keys, p => p.StartsWith("/course_work"));
         Assert.Empty(added.Sections!.Single(s => s.Key == "course_work").Warnings);
+        // Правка данных плана методистом — в истории документа (этап 8, A10): путь, было и стало.
+        var history = (await methodist.GetFromJsonAsync<HistoryPage>($"/api/documents/{created.Document.Id}/history"))!;
+        Assert.Contains(history.Items, e => e.Event == AuditEvents.PlanFieldCorrected && e.Details.Any(d => d.StartsWith("/course_work/kind")));
 
         var accept = await methodist.PostAsJsonAsync(Url(created, "accept"), new DocumentVersionRequest(added.Version));
         Assert.Equal(HttpStatusCode.UnprocessableEntity, accept.StatusCode);

@@ -79,6 +79,8 @@ public static class DependencyInjection
         services.AddScoped<DocumentReopening>();
         services.AddScoped<DocumentArchiving>();
         services.AddScoped<DocumentTransfer>();
+        // История документа для методиста и администратора (этап 8, A10).
+        services.AddScoped<DocumentTimeline>();
         // Закрепление дисциплин за сотрудниками (этап 7, A10): доступ к документам дисциплины и право их создавать.
         services.AddScoped<DisciplineAssignments>();
         // Печатные формы: хранилище сформированных файлов на диске, настройки — раздел Generation.
