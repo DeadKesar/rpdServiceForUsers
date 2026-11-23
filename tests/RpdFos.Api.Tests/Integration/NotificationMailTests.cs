@@ -194,6 +194,63 @@ public class NotificationMailTests(DatabaseFixture app)
     }
 
     [Fact]
+    public async Task All_letters_of_a_run_go_by_one_connection_even_when_one_of_them_is_rejected()
+    {
+        var (_, first, firstEmail) = await AccountAsync(AppRoles.Teacher);
+        var (_, second, secondEmail) = await AccountAsync(AppRoles.Teacher);
+        var (_, third, thirdEmail) = await AccountAsync(AppRoles.Teacher);
+        var now = DateTimeOffset.UtcNow;
+        var ids = new[]
+        {
+            await AddNotificationAsync(first.Id, createdAt: now.AddMinutes(-3)),
+            await AddNotificationAsync(second.Id, createdAt: now.AddMinutes(-2)),
+            await AddNotificationAsync(third.Id, createdAt: now.AddMinutes(-1))
+        };
+        // Второе письмо сервер не принял: соединение остаётся, третье уходит по нему же (A5).
+        Mail.FailFor(secondEmail, new InvalidOperationException("550 Адрес не принят (тест)"));
+        var (opened, closed) = (Mail.Connections, Mail.Closed);
+
+        await RunJobAsync();
+
+        Assert.Single(Mail.SentTo(firstEmail));
+        Assert.Empty(Mail.SentTo(secondEmail));
+        Assert.Single(Mail.SentTo(thirdEmail));
+        Assert.Equal((opened + 1, closed + 1), (Mail.Connections, Mail.Closed));
+        var mailed = await Task.WhenAll(ids.Select(async id => await EmailedAtAsync(id) is not null));
+        Assert.Equal(new[] { true, false, true }, mailed);
+
+        // Отказанное письмо повторится при следующем запуске — снова одним соединением.
+        Mail.Recover(secondEmail);
+        await RunJobAsync();
+        Assert.Single(Mail.SentTo(secondEmail));
+        Assert.Equal((opened + 2, closed + 2), (Mail.Connections, Mail.Closed));
+        Assert.NotNull(await EmailedAtAsync(ids[1]));
+    }
+
+    [Fact]
+    public async Task A_server_that_refuses_the_connection_leaves_the_letters_for_the_next_run()
+    {
+        var (_, recipient, email) = await AccountAsync(AppRoles.Teacher);
+        var id = await AddNotificationAsync(recipient.Id);
+
+        Mail.Down = true;
+        try
+        {
+            Assert.Equal(0, await RunJobAsync());
+        }
+        finally
+        {
+            Mail.Down = false;
+        }
+        Assert.Empty(Mail.SentTo(email));
+        Assert.Null(await EmailedAtAsync(id));
+
+        await RunJobAsync();
+        Assert.Single(Mail.SentTo(email));
+        Assert.NotNull(await EmailedAtAsync(id));
+    }
+
+    [Fact]
     public async Task Read_and_outdated_notifications_are_not_mailed()
     {
         var maxAge = TimeSpan.FromHours(app.Services.GetRequiredService<IOptions<MailSettings>>().Value.MaxAgeHours);

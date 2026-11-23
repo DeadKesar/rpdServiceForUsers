@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Options;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using RpdFos.Core.Data;
@@ -90,6 +91,7 @@ public static class DependencyInjection
         // Час дайджеста проверяется при старте: неверный час иначе ломал бы задачу при каждом запуске.
         services.AddOptions<MailSettings>()
             .Validate(s => s.DigestHour is >= 0 and <= 23, "Mail:DigestHour — час от 0 до 23.")
+            .Validate(s => MimeKit.MailboxAddress.TryParse(s.From, out _), "Mail:From — адрес отправителя не разобрать: «Имя <адрес>» или адрес.")
             .ValidateOnStart();
         services.AddSingleton<IMailSender, SmtpMailSender>();
         services.AddScoped<NotificationMailJob>();
@@ -101,6 +103,8 @@ public static class DependencyInjection
             .Validate(s => s.ReworkDays >= 2 && s.WarnDaysBefore >= 1 && s.WarnDaysBefore < s.ReworkDays,
                 "Reminders:ReworkDays — не меньше 2 дней; Reminders:WarnDaysBefore — от 1 дня и меньше срока доработки.")
             .ValidateOnStart();
+        // Час задачи — раньше часа дайджеста (A5, решение 4): правило смотрит и в настройки почты.
+        services.AddSingleton<IValidateOptions<RemindersSettings>, RemindersSettingsValidator>();
         services.AddScoped<ReworkReminders>();
         return services;
     }

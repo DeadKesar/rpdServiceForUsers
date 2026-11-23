@@ -5,6 +5,7 @@ using Hangfire.PostgreSql.Factories;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using OpenIddict.Abstractions;
 using OpenIddict.Validation.AspNetCore;
 using RpdFos.Api.Infrastructure;
@@ -34,7 +35,6 @@ builder.Services.Configure<MailSettings>(builder.Configuration.GetSection("Mail"
 var mailEnabled = builder.Configuration.GetValue("Mail:Enabled", true);
 // Срок доработки и напоминания о нём: 14 дней, предупреждение за 3 (этап 7, A6).
 builder.Services.Configure<RemindersSettings>(builder.Configuration.GetSection("Reminders"));
-var remindersEnabled = builder.Configuration.GetValue("Reminders:Enabled", true);
 
 // Учётные записи: ASP.NET Core Identity. Пароли хранятся только здесь, в виде хеша.
 builder.Services.AddIdentity<AppUser, IdentityRole<Guid>>(o =>
@@ -223,24 +223,11 @@ if (jobsEnabled)
     // Проверку доступа делает политика конечной точки; фильтры самой панели отключены.
     app.MapHangfireDashboard("/hangfire", new DashboardOptions { Authorization = [], DashboardTitle = "Фоновые задачи" })
        .RequireAuthorization(Policies.JobsDashboard);
-    // Сформированные файлы с истёкшим сроком хранения удаляются раз в сутки (FR-GEN-06).
-    var recurring = app.Services.GetRequiredService<IRecurringJobManager>();
-    recurring.AddOrUpdate<GeneratedFilesCleanup>(
-        "generated-files-cleanup", JobQueues.Generation, job => job.RunAsync(CancellationToken.None), Cron.Daily());
-    // Письма о событиях уходят раз в минуту: «в пределах минуты после события» (A4). Выключенная почта снимает и
-    // расписание, оставшееся в хранилище от прежнего запуска, — иначе задача шла бы и без настройки.
-    if (mailEnabled)
-        recurring.AddOrUpdate<NotificationMailJob>(
-            "notification-mail", JobQueues.Mail, job => job.RunAsync(CancellationToken.None), Cron.Minutely());
-    else
-        recurring.RemoveIfExists("notification-mail");
-    // Напоминания о сроке доработки — раз в сутки в полночь по UTC (A6): до часа дайджеста, и письма «раз в день» о них
-    // уходят в то же утро. Очередь формирования — как у очистки файлов: в ней исполнитель есть и при выключенной почте.
-    if (remindersEnabled)
-        recurring.AddOrUpdate<ReworkReminders>(
-            "rework-reminders", JobQueues.Generation, job => job.RunAsync(CancellationToken.None), Cron.Daily());
-    else
-        recurring.RemoveIfExists("rework-reminders");
+    // Расписание — в JobSchedule: час и пояс напоминаний проверяются тестом. Настройки уже проверены при старте.
+    JobSchedule.Register(app.Services.GetRequiredService<IRecurringJobManager>(),
+        app.Services.GetRequiredService<IOptions<MailSettings>>().Value,
+        app.Services.GetRequiredService<IOptions<RemindersSettings>>().Value,
+        app.Services.GetRequiredService<TimeProvider>().LocalTimeZone);
 }
 app.MapFallbackToFile(ClientShell.FileName, ClientShell.CreateStaticFileOptions()); // адреса клиента: /, /documents…
 

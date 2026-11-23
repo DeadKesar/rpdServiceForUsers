@@ -27,7 +27,7 @@ namespace RpdFos.Core.Mail;
 /// </para>
 /// <para>
 /// Событие и его уведомление сохранены раньше и от отправки не зависят: сбой оставляет <c>emailed_at</c> пустым, и
-/// следующий запуск повторяет попытку. Время отправки пишется после каждого письма отдельно — при обрыве запуска
+/// следующий запуск повторяет попытку. Все письма запуска идут по одному соединению (этап 8, A5). Время отправки пишется после каждого письма отдельно — при обрыве запуска
 /// отправленное не повторится; у дайджеста оно пишется у всех его уведомлений разом. Недоступный сервер прерывает запуск,
 /// неудача с одним письмом (сервер не принял адрес) — только это письмо.
 /// </para>
@@ -95,29 +95,39 @@ public sealed class NotificationMailJob(
         letters.AddRange(digests.Select(d => new Letter(d.Value.Notifications,
             NotificationLetter.ComposeDigest(d.Value.Notifications, d.Value.Email, d.Value.ShortName, options.PublicUrl, now, zone))));
 
+        // Одно соединение на запуск (этап 8, A5): открывается перед первым письмом — без писем сервер не беспокоим.
         var sent = 0;
-        foreach (var letter in letters)
+        IMailConnection? connection = null;
+        try
         {
-            try
+            foreach (var letter in letters)
             {
-                await sender.SendAsync(letter.Mail, ct);
-            }
-            catch (MailServerUnavailableException e)
-            {
-                log.LogWarning(e, "Почтовый сервер недоступен: отправка повторится при следующем запуске");
-                break;
-            }
-            catch (Exception e) when (e is not OperationCanceledException)
-            {
-                log.LogWarning(e, "Письмо по уведомлениям {NotificationIds} не отправлено: попытка повторится при следующем запуске",
-                    string.Join(", ", letter.Notifications.Select(n => n.Id)));
-                continue;
-            }
+                try
+                {
+                    connection ??= await sender.OpenAsync(ct);
+                    await connection.SendAsync(letter.Mail, ct);
+                }
+                catch (MailServerUnavailableException e)
+                {
+                    log.LogWarning(e, "Почтовый сервер недоступен: отправка повторится при следующем запуске");
+                    break;
+                }
+                catch (Exception e) when (e is not OperationCanceledException)
+                {
+                    log.LogWarning(e, "Письмо по уведомлениям {NotificationIds} не отправлено: попытка повторится при следующем запуске",
+                        string.Join(", ", letter.Notifications.Select(n => n.Id)));
+                    continue;
+                }
 
-            var at = clock.GetUtcNow();
-            foreach (var notification in letter.Notifications) notification.EmailedAt = at;
-            await db.SaveChangesAsync(ct);
-            sent++;
+                var at = clock.GetUtcNow();
+                foreach (var notification in letter.Notifications) notification.EmailedAt = at;
+                await db.SaveChangesAsync(ct);
+                sent++;
+            }
+        }
+        finally
+        {
+            if (connection is not null) await connection.DisposeAsync();
         }
 
         if (sent > 0) log.LogInformation("Отправлено писем: {Count}", sent);
