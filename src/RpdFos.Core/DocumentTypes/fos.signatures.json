@@ -1,7 +1,7 @@
 [
   {
     "id": "department_head", "title": "Заведующий кафедрой",
-    "role": "department_head", "resolver": "discipline.department.head", "electronic": true, "placement": "approval_sheet"
+    "role": "department_head", "resolver": "discipline.department.head", "electronic": false, "placement": "approval_sheet"
   },
   {
     "id": "vice_rector_edu", "title": "Проректор по образовательной деятельности и молодёжной политике",
@@ -17,6 +17,6 @@
   },
   {
     "id": "umk_chair", "title": "Председатель учебно-методической комиссии по направлению подготовки",
-    "role": "umk_chair", "resolver": "discipline.direction.umk_chair", "electronic": false, "placement": "approval_sheet"
+    "role": "umk_chair", "resolver": "discipline.direction.umk_chair", "electronic": true, "placement": "approval_sheet"
   }
 ]

@@ -129,8 +129,10 @@ public class SignatoryResolutionTests(DatabaseFixture app)
         Assert.All(new[] { DocumentTypeRegistry.Rpd, DocumentTypeRegistry.Fos }, type =>
         {
             var seat = registry.Get(type).Signatures.Single(s => s.Id == SignatoryRoles.UmkChair);
-            // Место остаётся бумажным: меняется только то, кто подписывает.
-            Assert.Equal((UmkChairResolver.Rule, false, SignaturePlacements.ApprovalSheet), (seat.Resolver, seat.Electronic, seat.Placement));
+            // У РПД место остаётся бумажным: меняется только то, кто подписывает. У ФОС председатель УМК согласует
+            // электронно (Положение о ФОС, этап 8, A3): правило то же, находится по направлению плана.
+            Assert.Equal((UmkChairResolver.Rule, type == DocumentTypeRegistry.Fos, SignaturePlacements.ApprovalSheet),
+                (seat.Resolver, seat.Electronic, seat.Placement));
         });
         // Оба имени правила — в каталоге: с названием для редактора шаблона и для проверки листа согласования.
         Assert.Contains(UmkChairResolver.Rule, SignatureResolvers.All.Keys);

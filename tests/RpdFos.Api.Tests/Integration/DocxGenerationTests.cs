@@ -400,7 +400,7 @@ public class DocxGenerationTests(DatabaseFixture app)
     }
 
     /// <summary>Постановка в очередь (202) и опрос статуса, пока фоновая задача не завершится.</summary>
-    private static async Task<GenerationItem> PrintAsync(HttpClient client, DocumentDetails document,
+    internal static async Task<GenerationItem> PrintAsync(HttpClient client, DocumentDetails document,
         string format = GenerationFormats.Docx, string expected = GenerationStatuses.Succeeded)
     {
         var response = await client.PostAsync($"/api/documents/{document.Document.Id}/print/{format}", null);
@@ -427,7 +427,7 @@ public class DocxGenerationTests(DatabaseFixture app)
         .First(r => r.Elements<TableCell>().First().InnerText.StartsWith(label))
         .Elements<TableCell>().Skip(1).Select(c => c.InnerText).ToList();
 
-    private static async Task<WordprocessingDocument> DownloadAsync(HttpClient client, DocumentDetails document, GenerationItem item)
+    internal static async Task<WordprocessingDocument> DownloadAsync(HttpClient client, DocumentDetails document, GenerationItem item)
     {
         var response = await client.GetAsync($"/api/documents/{document.Document.Id}/files/{item.FileId}");
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);

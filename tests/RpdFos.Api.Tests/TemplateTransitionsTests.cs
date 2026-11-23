@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using RpdFos.Core.Data.Entities;
 using RpdFos.Core.DocumentTypes;
 using Xunit;
@@ -51,6 +52,31 @@ public class TemplateTransitionsTests
         Assert.Equal((type.SchemaJson, type.SignaturesJson), (t.Schema, t.SignaturesConfig));
         Assert.Null(t.PrintTemplateFileId);
     }
+
+    [Fact]
+    public void Fos_circle_reaches_new_templates_only_and_a_revision_keeps_the_snapshot_it_copies()
+    {
+        // Лист согласования — снимок в шаблоне (этап 8, A3): правка реестра доходит только до новых шаблонов ФОС.
+        var fos = Registry.Get(DocumentTypeRegistry.Fos);
+        var fresh = DocumentTemplate.Create(fos, "ФОС новый", Guid.NewGuid(), Guid.NewGuid());
+        Assert.Equal(["umk_chair", "umu_head"], ElectronicSeats(fresh.SignaturesConfig).Order());
+
+        // Шаблон, созданный до A3: электронные места — заведующий кафедрой и начальник УМУ. Новая редакция копирует лист,
+        // а не берёт заново из реестра, — прежний круг остаётся и у неё.
+        var old = DocumentTemplate.Create(fos, "ФОС прежний", Guid.NewGuid(), Guid.NewGuid());
+        var seats = JsonNode.Parse(old.SignaturesConfig)!.AsArray();
+        foreach (var seat in seats) seat!["electronic"] = (string)seat["id"]! is "department_head" or "umu_head";
+        old.SignaturesConfig = seats.ToJsonString();
+        old.AttachPrintTemplate(Guid.NewGuid(), "{}");
+        old.Publish(DateTimeOffset.UtcNow);
+
+        var revision = old.CreateRevision(2, Guid.NewGuid());
+
+        Assert.Equal(["department_head", "umu_head"], ElectronicSeats(revision.SignaturesConfig).Order());
+    }
+
+    private static IEnumerable<string> ElectronicSeats(string signaturesConfig) =>
+        PrintMappingJson.ReadSignatures(signaturesConfig).Where(s => s.Electronic).Select(s => s.Id);
 
     [Fact]
     public void Lifecycle_goes_through_draft_saved_published_archived()

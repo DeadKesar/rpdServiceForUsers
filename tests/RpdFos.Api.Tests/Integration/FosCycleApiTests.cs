@@ -12,7 +12,9 @@ using RpdFos.Core.Documents;
 using RpdFos.Core.DocumentTypes;
 using Xunit;
 using static RpdFos.Api.Tests.Integration.DocumentCircles;
+using PrintNames = RpdFos.Core.Printing.PrintNames;
 using S = RpdFos.Core.Documents.DocumentStatuses;
+using Text = DocumentFormat.OpenXml.Wordprocessing.Text;
 
 namespace RpdFos.Api.Tests.Integration;
 
@@ -22,14 +24,23 @@ namespace RpdFos.Api.Tests.Integration;
 /// распространяются на её согласованный ФОС, а РПД с незавершённым ФОС в архив не уходит. Круг строит
 /// <see cref="DocumentCircles.ApprovedAsync"/> для РПД: те же автор, методист и согласующие ведут и ФОС — подписанты листа
 /// согласования ФОС находятся теми же правилами по дисциплине.
+/// <para>
+/// Круг подписей ФОС (этап 8, A3; решение 9) — по Положению о ФОС (2022): электронно согласуют начальник УМУ и председатель
+/// УМК направления, заведующий кафедрой — только в печатном листе. Так устроен лист новых шаблонов; шаблон с прежним
+/// снимком (заведующий и УМУ) ведёт прежний круг. Председателя направления плана 09.04.04 в общей базе тестов нет, и другие
+/// тесты на это опираются, поэтому председатель создаётся на время теста (<see cref="ChairOfAsync"/>).
+/// </para>
 /// </summary>
 [Collection(DatabaseCollection.Name)]
 public class FosCycleApiTests(DatabaseFixture fixture) : AssignmentTestBase(fixture)
 {
+    private const string ChairTitle = "Председатель учебно-методической комиссии по направлению подготовки";
+
     [Fact]
     public async Task A_fos_goes_the_whole_circle_review_remark_return_acceptance_marks_and_approved()
     {
         var c = await DocumentCircles.ApprovedAsync(App, "Б1.О.13");
+        await using var chair = await ChairOfAsync(c.Created.Document.DisciplineId);
         var (fos, version) = await FilledFosAsync(c, c.Created);
 
         // Отправка автором: ушёл на проверку, у методиста — в очереди «Проверка» среди других документов, с типом ФОС.
@@ -47,23 +58,28 @@ public class FosCycleApiTests(DatabaseFixture fixture) : AssignmentTestBase(fixt
         Assert.Equal(HttpStatusCode.OK, (await c.Author.PostAsync(Url(fos, $"comments/{comment.Id}/resolve"), null)).StatusCode);
         version = await ExpectAsync(c.Author.PostAsJsonAsync(Url(fos, "submit"), new DocumentVersionRequest(version)), S.UnderReview);
 
-        // Приём запускает круг по листу согласования ФОС: два электронных места — заведующий кафедрой и начальник УМУ.
+        // Приём запускает круг по листу согласования ФОС: два электронных места — начальник УМУ и председатель УМК направления
+        // (в порядке листа шаблона); заведующий кафедрой строки не получает.
         version = await ExpectAsync(c.Methodist.PostAsJsonAsync(Url(fos, "accept"), new DocumentVersionRequest(version)), S.Approval);
         var circle = (await DetailsAsync(c.Methodist, fos.Document.Id)).Approval!;
-        Assert.Equal([SignatoryRoles.DepartmentHead, SignatoryRoles.UmuHead], circle.Seats.Select(s => s.Role));
-        Assert.Equal([c.HeadRecord.Id, c.UmuRecord.Id], circle.Seats.Select(s => s.SignatoryId!.Value));
+        Assert.Equal([SignatoryRoles.UmuHead, SignatoryRoles.UmkChair], circle.Seats.Select(s => s.Role));
+        Assert.Equal([c.UmuRecord.Id, chair.Record.Id], circle.Seats.Select(s => s.SignatoryId!.Value));
+        Assert.All(circle.Seats, s => Assert.True(s.CanSign, s.Role));
+        // Заведующему ФОС закрыт: в круге его нет, и очередь согласующего у него без этого документа.
+        Assert.DoesNotContain((await c.Head.GetFromJsonAsync<List<ApprovalQueueItem>>("/api/approvals"))!, q => q.Id == fos.Document.Id);
+        Assert.Equal(HttpStatusCode.Forbidden, (await c.Head.GetAsync(Url(fos, ""))).StatusCode);
 
         // Согласующий видит ФОС в своей очереди; замечание к полю — несогласие: «Согласовать» отказывает, пока оно не снято.
-        var queue = (await c.Head.GetFromJsonAsync<List<ApprovalQueueItem>>("/api/approvals"))!;
+        var queue = (await chair.Client.GetFromJsonAsync<List<ApprovalQueueItem>>("/api/approvals"))!;
         Assert.Contains(queue, q => q.Id == fos.Document.Id);
         Assert.Equal(HttpStatusCode.Created,
-            (await c.Head.PostAsJsonAsync(Url(fos, "comments"), new CommentRequest("/current_control/forms", "Дополните формы"))).StatusCode);
-        Assert.Equal(HttpStatusCode.Conflict, (await c.Head.PostAsync(Url(fos, "approval/approve"), null)).StatusCode);
-        var open = (await c.Head.GetFromJsonAsync<List<CommentItem>>(Url(fos, "comments")))!.Single(x => !x.IsResolved);
-        Assert.Equal(HttpStatusCode.OK, (await c.Head.PostAsync(Url(fos, $"comments/{open.Id}/resolve"), null)).StatusCode);
+            (await chair.Client.PostAsJsonAsync(Url(fos, "comments"), new CommentRequest("/current_control/forms", "Дополните формы"))).StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, (await chair.Client.PostAsync(Url(fos, "approval/approve"), null)).StatusCode);
+        var open = (await chair.Client.GetFromJsonAsync<List<CommentItem>>(Url(fos, "comments")))!.Single(x => !x.IsResolved);
+        Assert.Equal(HttpStatusCode.OK, (await chair.Client.PostAsync(Url(fos, $"comments/{open.Id}/resolve"), null)).StatusCode);
 
         // Отметки обоих мест: «Согласован», время согласования, снимок версии и журнал; автор получает уведомление.
-        await ExpectAsync(c.Head.PostAsync(Url(fos, "approval/approve"), null), S.Approval);
+        await ExpectAsync(chair.Client.PostAsync(Url(fos, "approval/approve"), null), S.Approval);
         Assert.Contains(await DocumentCircles.FeedAsync(c.Umu, fos, NotificationEvents.AwaitingMark), n => n.Text.Contains(fos.Document.Title));
         await ExpectAsync(c.Umu.PostAsync(Url(fos, "approval/approve"), null), S.Approved);
         Assert.Contains(await DocumentCircles.FeedAsync(c.Author, fos, NotificationEvents.Approved), n => n.Text.Contains(fos.Document.Title));
@@ -81,12 +97,13 @@ public class FosCycleApiTests(DatabaseFixture fixture) : AssignmentTestBase(fixt
     public async Task The_next_fos_is_created_on_the_approved_one_for_the_new_rpd_and_the_old_pair_becomes_outdated()
     {
         var c = await DocumentCircles.ApprovedAsync(App, "Б1.О.05");
+        await using var chair = await ChairOfAsync(c.Created.Document.DisciplineId);
         var (oldRpd, templateId, disciplineId) = (c.Created.Document.Id, c.Created.Document.TemplateId, c.Created.Document.DisciplineId);
         // Рисунок в задании банка: при переносе «на основе» файл остаётся тем же, новому ФОС добавляется связь (B4а).
         var draft = await CreatedFosAsync(c.Author, c.Created);
         var image = await DocumentImagesApiTests.UploadedAsync(c.Author, draft.Document.Id, Documents.TestImages.Png(seed: 91));
         var figure = DocumentImagesApiTests.Tag(image.Id, "width=\"90\" alt=\"Схема\"");
-        var oldVersion = await ApproveFosAsync(c, draft, await FillFosAsync(c.Author, draft, figure));
+        var oldVersion = await ApproveFosAsync(c, chair, draft, await FillFosAsync(c.Author, draft, figure));
         var oldFos = await DetailsAsync(c.Author, draft.Document.Id);
         Assert.Equal(S.Approved, oldFos.Document.Status);
         Assert.True(oldFos.Actions.CreateBasedOn, "автору согласованного ФОС кнопка «Создать на основе» положена");
@@ -143,7 +160,7 @@ public class FosCycleApiTests(DatabaseFixture fixture) : AssignmentTestBase(fixt
         });
 
         // Новый ФОС согласуется — прежний уже устарел, статус и версия его прежние.
-        await ApproveFosAsync(c, next, await PositionAsync(c.Author, next.Document.Id, next.Document.Version));
+        await ApproveFosAsync(c, chair, next, await PositionAsync(c.Author, next.Document.Id, next.Document.Version));
         var still = await DetailsAsync(c.Methodist, oldFos.Document.Id);
         Assert.Equal((S.Approved, true, oldVersion), (still.Document.Status, still.Document.IsOutdated, still.Document.Version));
         Assert.False((await DetailsAsync(c.Methodist, next.Document.Id)).Document.IsOutdated);
@@ -153,6 +170,7 @@ public class FosCycleApiTests(DatabaseFixture fixture) : AssignmentTestBase(fixt
     public async Task An_unfinished_fos_keeps_its_rpd_out_of_the_archive_and_an_approved_one_goes_with_it()
     {
         var c = await DocumentCircles.ApprovedAsync(App, "Б1.О.13");
+        await using var chair = await ChairOfAsync(c.Created.Document.DisciplineId);
         var rpd = await DetailsAsync(c.Methodist, c.Created.Document.Id);
         var draft = await CreatedFosAsync(c.Author, c.Created);
 
@@ -167,7 +185,7 @@ public class FosCycleApiTests(DatabaseFixture fixture) : AssignmentTestBase(fixt
         Assert.Equal((S.Approved, rpd.Document.Version), (held.Document.Status, held.Document.Version));
 
         // ФОС доведён до согласования — архив РПД уводит в архив и его: два перехода, записи аудита, уведомление автору.
-        var version = await ApproveFosAsync(c, draft, await FillFosAsync(c.Author, draft));
+        var version = await ApproveFosAsync(c, chair, draft, await FillFosAsync(c.Author, draft));
         await ExpectAsync(c.Methodist.PostAsJsonAsync(Url(rpd, "archive"), new DocumentVersionRequest(rpd.Document.Version)), S.Archived);
         var fos = await DetailsAsync(c.Methodist, draft.Document.Id);
         Assert.Equal((S.Archived, version + 1), (fos.Document.Status, fos.Document.Version));
@@ -203,15 +221,119 @@ public class FosCycleApiTests(DatabaseFixture fixture) : AssignmentTestBase(fixt
         await ExpectAsync(c.Methodist.PostAsJsonAsync(Url(rpd, "archive"), new DocumentVersionRequest(rpd.Document.Version)), S.Archived);
     }
 
+    // ───── круг подписей ФОС по Положению (этап 8, A3) ─────
+
+    [Fact]
+    public async Task A_fos_stays_accepted_when_the_direction_has_no_chair_and_the_circle_starts_after_assignment()
+    {
+        var c = await DocumentCircles.ApprovedAsync(App, "Б1.О.12");
+        // Запись председателя без направления — такую допускает база — правилом не находится: чужого направления ей не дают.
+        await App.WithDbAsync(async db => await ChairData.AddChairAsync(db, null));
+        var (substitute, substituteRecord) = await DocumentCircles.AccountAsync(App, AppRoles.Approver);
+        var (fos, version) = await FilledFosAsync(c, c.Created);
+        version = await ExpectAsync(c.Author.PostAsJsonAsync(Url(fos, "submit"), new DocumentVersionRequest(version)), S.UnderReview);
+
+        // Подтверждение «Принять» заранее называет место без подписанта.
+        Assert.Equal([ChairTitle], (await DetailsAsync(c.Methodist, fos.Document.Id)).AcceptUnassigned);
+
+        // Начальник УМУ найден, председатель — нет: документ «Принят», круг ждёт назначения (FR-REV-13).
+        version = await ExpectAsync(c.Methodist.PostAsJsonAsync(Url(fos, "accept"), new DocumentVersionRequest(version)), S.Accepted);
+        var panel = (await DetailsAsync(c.Methodist, fos.Document.Id)).Approval!;
+        Assert.Equal([(SignatoryRoles.UmuHead, c.UmuRecord.Id), (SignatoryRoles.UmkChair, (Guid?)null)],
+            panel.Seats.Select(s => (s.Role, s.SignatoryId)));
+        Assert.Equal((true, false), (panel.CanAssign, panel.CanStart));
+        var refused = await c.Methodist.PostAsJsonAsync(Url(fos, "approval/start"), new DocumentVersionRequest(version));
+        Assert.Equal(HttpStatusCode.Conflict, refused.StatusCode);
+        Assert.Equal("Не все согласующие назначены", (await refused.Content.ReadFromJsonAsync<ProblemDetails>())!.Title);
+
+        // Методист назначает председателя и запускает круг — дальше он идёт как у любого документа.
+        var assigned = await c.Methodist.PostAsJsonAsync(
+            Url(fos, $"approval/seats/{SignatoryRoles.UmkChair}/assign"), new AssignRequest(substituteRecord.Id));
+        Assert.Equal(HttpStatusCode.OK, assigned.StatusCode);
+        var afterAssign = (await assigned.Content.ReadFromJsonAsync<ApprovalChanged>())!;
+        Assert.Equal(S.Accepted, afterAssign.Status);
+        var ready = (await DetailsAsync(c.Methodist, fos.Document.Id)).Approval!;
+        Assert.Equal((true, substituteRecord.Id), (ready.CanStart, ready.Seats[1].SignatoryId));
+        await ExpectAsync(c.Methodist.PostAsJsonAsync(Url(fos, "approval/start"), new DocumentVersionRequest(afterAssign.Version)), S.Approval);
+        await ExpectAsync(substitute.PostAsync(Url(fos, "approval/approve"), null), S.Approval);
+        await ExpectAsync(c.Umu.PostAsync(Url(fos, "approval/approve"), null), S.Approved);
+    }
+
+    [Fact]
+    public async Task A_fos_by_a_template_with_the_old_sheet_keeps_the_old_circle_of_the_head_and_the_umu()
+    {
+        var c = await DocumentCircles.ApprovedAsync(App, "Б1.О.05");
+        // Шаблон, созданный до этапа 8: электронные места его снимка — заведующий кафедрой и начальник УМУ, председатель УМК
+        // только печатается. Председателя направления для круга не нужно: приём сразу запускает согласование.
+        var template = await FosTemplateAsync(electronicSeats: [SignatoryRoles.DepartmentHead, SignatoryRoles.UmuHead]);
+        var fos = await CreatedFosAsync(c.Author, c.Created, templateId: template.Id);
+        var version = await FillFosAsync(c.Author, fos);
+        version = await ExpectAsync(c.Author.PostAsJsonAsync(Url(fos, "submit"), new DocumentVersionRequest(version)), S.UnderReview);
+        Assert.Empty((await DetailsAsync(c.Methodist, fos.Document.Id)).AcceptUnassigned!);
+
+        await ExpectAsync(c.Methodist.PostAsJsonAsync(Url(fos, "accept"), new DocumentVersionRequest(version)), S.Approval);
+        var circle = (await DetailsAsync(c.Methodist, fos.Document.Id)).Approval!;
+        Assert.Equal([SignatoryRoles.DepartmentHead, SignatoryRoles.UmuHead], circle.Seats.Select(s => s.Role));
+        Assert.Equal([c.HeadRecord.Id, c.UmuRecord.Id], circle.Seats.Select(s => s.SignatoryId!.Value));
+        await ExpectAsync(c.Head.PostAsync(Url(fos, "approval/approve"), null), S.Approval);
+        await ExpectAsync(c.Umu.PostAsync(Url(fos, "approval/approve"), null), S.Approved);
+    }
+
+    [Fact]
+    public async Task The_printed_approval_sheet_of_a_new_fos_has_the_department_head_though_he_does_not_sign_in_the_circle()
+    {
+        var c = await DocumentCircles.UnderReviewAsync(App, "Б1.О.10");
+        await using var chair = await ChairOfAsync(c.Created.Document.DisciplineId);
+        var fos = await CreatedFosAsync(c.Author, c.Created);
+
+        // Печать читает лист шаблона целиком, а не его электронные места: заведующий кафедрой подписывает лист на бумаге.
+        var item = await DocxGenerationTests.PrintAsync(c.Author, fos);
+        using var docx = await DocxGenerationTests.DownloadAsync(c.Author, fos, item);
+        var printed = docx.MainDocumentPart!.Document!.Body!.Descendants<Text>().Select(t => t.Text).ToList();
+
+        foreach (var signatory in new[] { c.HeadRecord, c.UmuRecord, chair.Record })
+            Assert.Contains(PrintNames.NoBreak(signatory.NameForDocument), printed);
+        Assert.DoesNotContain(item.Warnings, w => w.Contains("Не найден подписант"));
+    }
+
     // ───── вспомогательное ─────
 
-    /// <summary>Согласие всех согласующих круга: отправка автором, приём методистом, отметки заведующего и начальника УМУ.</summary>
-    private static async Task<int> ApproveFosAsync(DocumentCircle c, DocumentDetails fos, int version)
+    /// <summary>Согласие всех согласующих круга ФОС: отправка автором, приём методистом, отметки председателя УМК и начальника УМУ.</summary>
+    private static async Task<int> ApproveFosAsync(DocumentCircle c, TemporaryChair chair, DocumentDetails fos, int version)
     {
         version = await ExpectAsync(c.Author.PostAsJsonAsync(Url(fos, "submit"), new DocumentVersionRequest(version)), S.UnderReview);
         await ExpectAsync(c.Methodist.PostAsJsonAsync(Url(fos, "accept"), new DocumentVersionRequest(version)), S.Approval);
-        await ExpectAsync(c.Head.PostAsync(Url(fos, "approval/approve"), null), S.Approval);
+        await ExpectAsync(chair.Client.PostAsync(Url(fos, "approval/approve"), null), S.Approval);
         return await ExpectAsync(c.Umu.PostAsync(Url(fos, "approval/approve"), null), S.Approved);
+    }
+
+    /// <summary>
+    /// Председатель УМК направления плана дисциплины — на время теста: действующая запись справочника с категорией и
+    /// направлением плана и учётная запись «Утверждающий», как заводит администратор. Без неё правило листа ФОС никого не
+    /// находит: у направления 09.04.04 в общей базе тестов председателя нет. По окончании запись снимается с должности
+    /// (<see cref="TemporaryChair.DisposeAsync"/>) — тесты одной коллекции идут по очереди, и следующим председателя снова нет.
+    /// </summary>
+    private async Task<TemporaryChair> ChairOfAsync(Guid disciplineId)
+    {
+        var (client, record) = await DocumentCircles.AccountAsync(App, AppRoles.Approver, "Председатель Комиссии Обезличенный");
+        await App.WithDbAsync(async db =>
+        {
+            var directionId = await db.Disciplines.Where(d => d.Id == disciplineId)
+                .Join(db.CurriculumPlans, d => d.CurriculumPlanId, p => p.Id, (d, p) => p.DirectionId).SingleAsync();
+            var row = await db.Employees.SingleAsync(e => e.Id == record.Id);
+            (row.SignatoryRole, row.DirectionId) = (SignatoryRoles.UmkChair, directionId);
+            await db.SaveChangesAsync();
+        });
+        return new TemporaryChair(App, client, record);
+    }
+
+    private sealed class TemporaryChair(DatabaseFixture app, HttpClient client, Employee record) : IAsyncDisposable
+    {
+        public HttpClient Client { get; } = client;
+        public Employee Record { get; } = record;
+
+        public async ValueTask DisposeAsync() => await app.WithDbAsync(async db =>
+            await db.Employees.Where(e => e.Id == Record.Id).ExecuteUpdateAsync(s => s.SetProperty(e => e.IsActive, false)));
     }
 
     /// <summary>То же для РПД, созданной на основе прежней: сначала заполнение.</summary>
@@ -243,11 +365,13 @@ public class FosCycleApiTests(DatabaseFixture fixture) : AssignmentTestBase(fixt
 
     private static async Task<DocumentDetails> DetailsAsync(HttpClient client, Guid id) => await DocumentCircles.DetailsAsync(client, id);
 
-    private async Task<DocumentTemplate> FosTemplateAsync(Guid? planId = null)
+    /// <param name="electronicSeats">Электронные места листа вместо нынешних: так выглядит снимок шаблона, созданного до A3 этапа 8.</param>
+    private async Task<DocumentTemplate> FosTemplateAsync(Guid? planId = null, IReadOnlyCollection<string>? electronicSeats = null)
     {
         var plan = planId ?? await App.RealPlanIdAsync();
         DocumentTemplate? template = null;
-        await App.WithDbAsync(async db => template = await TemplateData.AddPublishedAsync(db, plan, DocumentTypeRegistry.Fos));
+        await App.WithDbAsync(async db =>
+            template = await TemplateData.AddPublishedAsync(db, plan, DocumentTypeRegistry.Fos, electronicSeats));
         return template!;
     }
 

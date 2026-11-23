@@ -60,8 +60,13 @@ public class PrintMappingTests
         var signatures = Registry.Get(type).Signatures;
 
         Assert.Empty(PrintMappingValidator.ValidateSignatures(signatures));
-        // Электронные места в прототипе — заведующий кафедрой дисциплины и начальник УМУ, остальные — бумажные.
-        Assert.Equal(["department_head", "umu_head"], signatures.Where(s => s.Electronic).Select(s => s.Id).Order());
+        // Электронные места РПД — заведующий кафедрой дисциплины и начальник УМУ; ФОС согласуют по Положению о ФОС (2022)
+        // председатель УМК направления и начальник УМУ, заведующий кафедрой — только в листе согласования (этап 8, A3).
+        // Остальные места обоих типов — бумажные.
+        string[] electronic = type == DocumentTypeRegistry.Fos ? ["umk_chair", "umu_head"] : ["department_head", "umu_head"];
+        Assert.Equal(electronic, signatures.Where(s => s.Electronic).Select(s => s.Id).Order());
+        // Бумажное место остаётся в листе и печатается: от электронной отметки зависит круг, а не печатная форма.
+        Assert.Contains(signatures, s => s is { Id: "department_head", Placement: SignaturePlacements.ApprovalSheet });
     }
 
     [Fact]
