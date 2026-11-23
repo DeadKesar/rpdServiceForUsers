@@ -1670,6 +1670,58 @@ namespace RpdFos.Core.Migrations
                     b.ToTable("document_versions", (string)null);
                 });
 
+            modelBuilder.Entity("RpdFos.Core.Data.Entities.EmailChangeRequest", b =>
+                {
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<DateTimeOffset>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("expires_at");
+
+                    b.Property<DateTimeOffset?>("NewConfirmedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("new_confirmed_at");
+
+                    b.Property<string>("NewEmail")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("new_email");
+
+                    b.Property<string>("NewTokenHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("new_token_hash");
+
+                    b.Property<DateTimeOffset?>("OldConfirmedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("old_confirmed_at");
+
+                    b.Property<string>("OldTokenHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("old_token_hash");
+
+                    b.HasKey("UserId")
+                        .HasName("pk_email_change_requests");
+
+                    b.HasIndex("NewTokenHash")
+                        .HasDatabaseName("ix_email_change_requests_new_token_hash");
+
+                    b.HasIndex("OldTokenHash")
+                        .HasDatabaseName("ix_email_change_requests_old_token_hash");
+
+                    b.ToTable("email_change_requests", (string)null);
+                });
+
             modelBuilder.Entity("RpdFos.Core.Data.Entities.Employee", b =>
                 {
                     b.Property<Guid>("Id")
@@ -2829,6 +2881,16 @@ namespace RpdFos.Core.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_document_versions_employees_saved_by");
+                });
+
+            modelBuilder.Entity("RpdFos.Core.Data.Entities.EmailChangeRequest", b =>
+                {
+                    b.HasOne("RpdFos.Core.Data.Entities.AppUser", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_email_change_requests_asp_net_users_user_id");
                 });
 
             modelBuilder.Entity("RpdFos.Core.Data.Entities.Employee", b =>

@@ -40,6 +40,34 @@ else
         <dd class="col-sm-9">@(profile.Roles.Count == 0 ? "—" : string.Join(", ", profile.Roles.Select(r => r.Title)))</dd>
     </dl>
 
+    <h2 class="h5 mt-4">Изменить email</h2>
+    @* Этап 8, A8 (FR-USR-01, решение 7): сам пользователь меняет только email и пароль; остальное — в справочнике у методиста
+       и администратора. Адрес меняется, когда подтверждены оба письма — на прежний и на новый адрес; до того вход по прежнему. *@
+    <p class="text-muted small" style="max-width: 560px">
+        Письма со ссылками уйдут на прежний и на новый адрес. Адрес изменится, когда подтверждены оба; до тех пор вход — по прежнему.
+        ФИО, должность и подразделение правит методист или администратор.
+    </p>
+    @if (profile.EmailChange is { } pending)
+    {
+        <div class="alert alert-info py-2" role="status" style="max-width: 560px">
+            Запрошена смена адреса на <strong>@pending.NewEmail</strong>.
+            Прежний адрес: @(pending.OldConfirmed ? "подтверждён" : "ждём подтверждения").
+            Новый адрес: @(pending.NewConfirmed ? "подтверждён" : "ждём подтверждения").
+            Ссылки действуют до @pending.ExpiresAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm"). Новый запрос заменит этот.
+        </div>
+    }
+    <EditForm Model="emailForm" OnValidSubmit="ChangeEmailAsync" style="max-width: 420px">
+        <div class="mb-2">
+            <label class="form-label" for="new-email">Новый email</label>
+            <InputText id="new-email" class="form-control" type="email" autocomplete="email" @bind-Value="emailForm.NewEmail" />
+        </div>
+        <button type="submit" class="btn btn-primary" disabled="@changingEmail">Отправить письма</button>
+    </EditForm>
+    @if (emailMessage is not null)
+    {
+        <div class="alert @(emailMessageIsError ? "alert-danger" : "alert-success") py-2 mt-3" role="status" style="max-width: 560px">@emailMessage</div>
+    }
+
     <h2 class="h5 mt-4">Сменить пароль</h2>
     @* Этап 8, A7 (FR-AUTH-01): текущий пароль, новый и повтор. Успех обновляет штамп безопасности — сеансы в других браузерах прекратятся. *@
     <EditForm Model="passwordForm" OnValidSubmit="ChangePasswordAsync" style="max-width: 420px">
@@ -183,6 +211,56 @@ else
         {
             saving = false;
         }
+    }
+
+    private readonly EmailForm emailForm = new();
+    private string? emailMessage;
+    private bool emailMessageIsError, changingEmail;
+
+    private async Task ChangeEmailAsync()
+    {
+        emailMessage = null;
+        if (string.IsNullOrWhiteSpace(emailForm.NewEmail))
+        {
+            (emailMessage, emailMessageIsError) = ("Введите новый адрес.", true);
+            return;
+        }
+
+        changingEmail = true;
+        try
+        {
+            var response = await Http.PostAsJsonAsync("api/profile/email-change", new { newEmail = emailForm.NewEmail });
+            if (response.IsSuccessStatusCode)
+            {
+                (emailMessage, emailMessageIsError) =
+                    ($"Письма отправлены на {profile?.Email} и {emailForm.NewEmail.Trim()}. Откройте ссылку в каждом и нажмите «Подтвердить».", false);
+                emailForm.NewEmail = "";
+                // Состояние «ждём подтверждения» приходит с сервером: перечитываем профиль.
+                var refreshed = await Http.GetAsync("api/profile");
+                if (refreshed.IsSuccessStatusCode) profile = await refreshed.Content.ReadFromJsonAsync<ProfileItem>();
+            }
+            else
+            {
+                (emailMessage, emailMessageIsError) = (await ProblemTextAsync(response, "Email не изменён"), true);
+            }
+        }
+        catch (AccessTokenNotAvailableException e)
+        {
+            e.Redirect();
+        }
+        catch (HttpRequestException e) when (ConnectionLoss.Is(e))
+        {
+            (emailMessage, emailMessageIsError) = (ConnectionLoss.Message, true);
+        }
+        finally
+        {
+            changingEmail = false;
+        }
+    }
+
+    private sealed class EmailForm
+    {
+        public string NewEmail { get; set; } = "";
     }
 
     private readonly PasswordForm passwordForm = new();

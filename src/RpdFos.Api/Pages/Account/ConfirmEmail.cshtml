@@ -1,0 +1,51 @@
+@page
+@model RpdFos.Api.Pages.Account.ConfirmEmailModel
+@{
+    Layout = "_AccountLayout";
+    ViewData["Title"] = "Подтверждение email";
+}
+<h1>Смена email</h1>
+@if (Model.Result is { } result)
+{
+    @switch (result.Outcome)
+    {
+        case RpdFos.Core.Accounts.EmailConfirmation.Completed:
+            <p class="ok" role="status">Адрес изменён на @result.NewEmail. Входить в систему теперь нужно по новому адресу.</p>
+            <p><a href="/">Войти</a></p>
+            break;
+        case RpdFos.Core.Accounts.EmailConfirmation.Waiting:
+            <p class="ok" role="status">
+                Подтверждено@(result.ConfirmedOld ? " с прежнего адреса" : " с нового адреса").
+                Адрес изменится на @result.NewEmail, когда будет подтверждено и письмо
+                @(result.ConfirmedOld ? "на новый адрес" : "на прежний адрес"). До тех пор вход — по прежнему адресу.
+            </p>
+            break;
+        case RpdFos.Core.Accounts.EmailConfirmation.Taken:
+            <p class="err" role="alert">Адрес @result.NewEmail за это время занят другой учётной записью. Адрес не изменён: укажите другой в профиле.</p>
+            break;
+        case RpdFos.Core.Accounts.EmailConfirmation.AccountDisabled:
+            <p class="err" role="alert">Учётная запись отключена администратором. Адрес не изменён.</p>
+            break;
+        default:
+            <p class="err" role="alert">Ссылка недействительна: она устарела, уже использована или заменена новым запросом. Запросите смену адреса в профиле ещё раз.</p>
+            break;
+    }
+}
+else
+{
+    <p>Подтвердите смену адреса электронной почты вашей учётной записи.</p>
+    <form method="post">
+        @* Токен приходит во фрагменте адреса (после #): браузер не отправляет его серверу, и он не попадает в журналы
+           хоста и прокси. Скрипт переносит его в скрытое поле. Подтверждает кнопка, а не переход по ссылке: почтовые
+           сканеры открывают ссылки из писем и подтвердили бы смену за человека. *@
+        <input type="hidden" asp-for="Token" />
+        <button type="submit">Подтвердить</button>
+    </form>
+    <noscript><p class="err">Для этой страницы нужен включённый JavaScript.</p></noscript>
+    <script>
+        (function () {
+            var token = new URLSearchParams(location.hash.slice(1)).get('t');
+            if (token) document.getElementById('Token').value = token;
+        })();
+    </script>
+}

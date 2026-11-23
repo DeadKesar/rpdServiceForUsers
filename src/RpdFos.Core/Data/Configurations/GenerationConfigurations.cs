@@ -85,3 +85,19 @@ internal sealed class NotificationPreferenceConfiguration : IEntityTypeConfigura
         e.HasOne<Employee>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
     }
 }
+
+// Незавершённая смена email (этап 8, A8): ключ — учётная запись, запрос исчезает вместе с ней.
+internal sealed class EmailChangeRequestConfiguration : IEntityTypeConfiguration<EmailChangeRequest>
+{
+    public void Configure(EntityTypeBuilder<EmailChangeRequest> e)
+    {
+        e.ToTable("email_change_requests");
+        e.HasKey(x => x.UserId);
+        e.Property(x => x.NewEmail).HasMaxLength(255);
+        e.Property(x => x.OldTokenHash).HasMaxLength(64);
+        e.Property(x => x.NewTokenHash).HasMaxLength(64);
+        e.HasIndex(x => x.OldTokenHash);
+        e.HasIndex(x => x.NewTokenHash);
+        e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+    }
+}

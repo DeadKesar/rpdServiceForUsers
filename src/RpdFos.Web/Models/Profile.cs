@@ -7,7 +7,11 @@ namespace RpdFos.Web.Models;
 /// (<c>HasDirectoryRecord</c> — <c>false</c>) настроек уведомлений нет.
 /// </summary>
 public sealed record ProfileItem(
-    string FullName, string? Email, string? Position, string? Unit, List<ProfileRole> Roles, bool HasDirectoryRecord);
+    string FullName, string? Email, string? Position, string? Unit, List<ProfileRole> Roles, bool HasDirectoryRecord,
+    EmailChangeItem? EmailChange = null);
+
+/// <summary>Незавершённая смена email: новый адрес и какие из двух ссылок (с прежнего и с нового адреса) подтверждены.</summary>
+public sealed record EmailChangeItem(string NewEmail, bool OldConfirmed, bool NewConfirmed, DateTimeOffset ExpiresAt);
 
 public sealed record ProfileRole(string Code, string Title);
 

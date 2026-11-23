@@ -28,6 +28,7 @@ public class ProfileModule : ICarterModule
         g.MapGet("/notification-settings", GetSettings);
         g.MapPut("/notification-settings", SaveSettings);
         g.MapPost("/password", ChangePassword);
+        g.MapPost("/email-change", ChangeEmail);
     }
 
     /// <summary>
@@ -36,7 +37,7 @@ public class ProfileModule : ICarterModule
     /// Нет записи справочника — только имя и роли из токена. Нет и учётной записи в базе (так бывает лишь в тестах) —
     /// роли из токена.
     /// </summary>
-    private static async Task<IResult> Get(HttpContext http, AppDbContext db, CancellationToken ct)
+    private static async Task<IResult> Get(HttpContext http, AppDbContext db, EmailChanges emailChanges, CancellationToken ct)
     {
         var subject = http.User.FindFirst(DirectoryAccounts.SubjectClaim)?.Value;
         var record = string.IsNullOrEmpty(subject)
@@ -68,7 +69,10 @@ public class ProfileModule : ICarterModule
             fullName, Filled(account?.Email) ?? Filled(record?.Email), Filled(record?.Position), Filled(record?.Unit),
             // Роли — в порядке списка ролей системы; чужих названий в токене быть не должно, но показывать их незачем.
             AppRoles.All.Where(roles.Contains).Select(r => new ProfileRole(r, AppRoles.Title(r))).ToList(),
-            record is not null));
+            record is not null,
+            accountId is Guid me && await emailChanges.PendingAsync(me, ct) is { } pending
+                ? new EmailChangeItem(pending.NewEmail, pending.OldConfirmedAt is not null, pending.NewConfirmedAt is not null, pending.ExpiresAt)
+                : null));
     }
 
     /// <summary>Таблица настроек: все события перечня с действующей настройкой — сохранённой или умолчанием.</summary>
@@ -124,6 +128,40 @@ public class ProfileModule : ICarterModule
             title: "Пароль не изменён", detail: string.Join(" ", result.Errors));
     }
 
+    /// <summary>
+    /// «Изменить email» (этап 8, A8; решение 7): письма на прежний и на новый адрес, у каждого своя ссылка; адрес меняется,
+    /// когда подтверждены обе. 204 — письма отправлены (прежний запрос заменён); 422 — адрес не разбирается, совпал с
+    /// текущим или сервер не принял письмо; 409 — адрес занят, запись отключена или не задан адрес системы для ссылок;
+    /// 503 — почтовый сервер недоступен; 404 — нет учётной записи.
+    /// </summary>
+    private static async Task<IResult> ChangeEmail(
+        EmailChangeRequestBody? request, HttpContext http, UserManager<AppUser> users, EmailChanges emailChanges, CancellationToken ct)
+    {
+        var subject = http.User.FindFirst(DirectoryAccounts.SubjectClaim)?.Value;
+        if (await users.FindByIdAsync(subject ?? "") is not { } user)
+            return Results.Problem(statusCode: StatusCodes.Status404NotFound, title: "Учётная запись не найдена");
+
+        var email = request?.NewEmail?.Trim();
+        return await emailChanges.RequestAsync(user, email, ct) switch
+        {
+            EmailChangeStart.Requested => Results.NoContent(),
+            EmailChangeStart.InvalidEmail => Results.Problem(statusCode: StatusCodes.Status422UnprocessableEntity,
+                title: "Email не изменён", detail: "Укажите адрес электронной почты в виде name@example.ru."),
+            EmailChangeStart.SameAsCurrent => Results.Problem(statusCode: StatusCodes.Status422UnprocessableEntity,
+                title: "Email не изменён", detail: "Новый адрес совпадает с текущим."),
+            EmailChangeStart.Taken => Results.Problem(statusCode: StatusCodes.Status409Conflict,
+                title: "Адрес уже занят", detail: $"Адрес {email} уже используется другой учётной записью или записью справочника сотрудников."),
+            EmailChangeStart.AccountDisabled => Results.Problem(statusCode: StatusCodes.Status409Conflict,
+                title: "Учётная запись отключена", detail: "Администратор отключил учётную запись: адрес изменить нельзя."),
+            EmailChangeStart.NoPublicUrl => Results.Problem(statusCode: StatusCodes.Status409Conflict,
+                title: "Письма отправить нельзя", detail: "В настройках системы не задан адрес для ссылок в письмах (Mail:PublicUrl). Обратитесь к администратору."),
+            EmailChangeStart.ServerUnavailable => Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable,
+                title: "Почтовый сервер недоступен", detail: "Письма не отправлены, адрес не изменён. Повторите позже."),
+            _ => Results.Problem(statusCode: StatusCodes.Status422UnprocessableEntity,
+                title: "Почтовый сервер не принял письмо", detail: $"Проверьте адреса {user.Email} и {email}: сервер отказал в доставке.")
+        };
+    }
+
     private static List<NotificationSettingItem> Table(IReadOnlyList<(NotificationEventInfo Event, EventSetting Setting)> rows) =>
         rows.Select(r => new NotificationSettingItem(r.Event.Type, r.Event.Title, r.Setting.InApp, MailModeCodes.Code(r.Setting.Mail)))
             .ToList();
@@ -140,7 +178,14 @@ public class ProfileModule : ICarterModule
 /// справочника» — без неё настроек уведомлений нет.
 /// </summary>
 public record ProfileItem(
-    string FullName, string? Email, string? Position, string? Unit, IReadOnlyList<ProfileRole> Roles, bool HasDirectoryRecord);
+    string FullName, string? Email, string? Position, string? Unit, IReadOnlyList<ProfileRole> Roles, bool HasDirectoryRecord,
+    EmailChangeItem? EmailChange = null);
+
+/// <summary>Незавершённая смена email: новый адрес и какие из двух ссылок уже подтверждены.</summary>
+public record EmailChangeItem(string NewEmail, bool OldConfirmed, bool NewConfirmed, DateTimeOffset ExpiresAt);
+
+/// <summary>Запрос смены email: новый адрес.</summary>
+public record EmailChangeRequestBody(string? NewEmail);
 
 public record ProfileRole(string Code, string Title);
 

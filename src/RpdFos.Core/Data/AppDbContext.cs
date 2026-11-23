@@ -45,6 +45,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<AuditLogEntry> AuditLog => Set<AuditLogEntry>();
     public DbSet<Notification> Notifications => Set<Notification>();
     public DbSet<NotificationPreference> NotificationPreferences => Set<NotificationPreference>();
+    public DbSet<EmailChangeRequest> EmailChangeRequests => Set<EmailChangeRequest>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {

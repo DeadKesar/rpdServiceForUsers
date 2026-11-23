@@ -24,6 +24,7 @@ public static class AccountsRegistration
             .Configure<IOptions<AccountSettings>>((o, s) => o.TokenLifespan = TimeSpan.FromHours(s.Value.InviteLinkHours));
         services.AddScoped<PasswordLinks>();
         services.AddScoped<AccountPasswords>();
+        services.AddScoped<EmailChanges>();
         return identity
             .AddTokenProvider<InvitationTokenProvider>(InvitationTokenProvider.ProviderName)
             .AddErrorDescriber<RussianIdentityErrorDescriber>();
