@@ -30,7 +30,8 @@ namespace RpdFos.Core.Reminders;
 /// Заведующего кафедрой находит то же правило, что и лист согласования, — <c>discipline.department.head</c> (с
 /// исполняющим обязанности, если заведующего нет). Не найден, не имеет действующей учётной записи (прочитать уведомление
 /// он не сможет) — эскалация идёт только методистам. Ссылку на документ получает тот, кто его откроет — автор, методист,
-/// администратор, согласующий со строкой в документе или закреплённый за дисциплиной (A10); заведующий без этого получает
+/// администратор, согласующий со строкой в документе, закреплённый за дисциплиной (A10) или автор связанного РПД/ФОС (этап 8,
+/// A4) — правило <see cref="DocumentVisibility"/>, то же, что в API; заведующий без этого получает
 /// уведомление без ссылки,
 /// как прежний согласующий при замене (A3): переход по ней дал бы 403.
 /// </para>
@@ -39,7 +40,7 @@ namespace RpdFos.Core.Reminders;
 /// </summary>
 public sealed class ReworkReminders(
     AppDbContext db, DocumentNotifications notifications, SignatoryResolution signatories, DirectoryAccounts directory,
-    DocumentApproval approval, DisciplineAssignments assignments, IOptions<RemindersSettings> settings, TimeProvider clock,
+    DocumentApproval approval, DisciplineAssignments assignments, LinkedDocuments links, IOptions<RemindersSettings> settings, TimeProvider clock,
     ILogger<ReworkReminders> log)
 {
     private static readonly string[] ReminderEvents = [NotificationEvents.ReworkDeadlineNear, NotificationEvents.ReworkOverdue];
@@ -110,7 +111,7 @@ public sealed class ReworkReminders(
         if (await signatories.FindAsync(DepartmentHeadResolver.Rule, document.DisciplineId, ct) is { } head
             && !linked.Contains(head.Id)
             && await directory.RolesOfActiveAsync(head.Id, ct) is { } roles)
-            (await DocumentVisibility.CanOpenAsync(approval, assignments, document, head.Id, roles, ct) ? linked : unlinked).Add(head.Id);
+            (await DocumentVisibility.CanOpenAsync(approval, assignments, links, document, head.Id, roles, ct) ? linked : unlinked).Add(head.Id);
 
         await notifications.ReworkOverdueAsync(document, settings.Value.ReworkDays, since, linked, unlinked, zone, now, ct);
     }

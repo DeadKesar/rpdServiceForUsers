@@ -4,7 +4,9 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using RpdFos.Api.Features.Documents;
+using RpdFos.Core.Data;
 using RpdFos.Core.Data.Entities;
 using RpdFos.Core.Documents;
 using RpdFos.Core.DocumentTypes;
@@ -119,7 +121,8 @@ public class FosCreationApiTests(DatabaseFixture fixture) : AssignmentTestBase(f
         var byMethodist = await CreatedAsync(methodist, fosTemplate.Id, second.Document.DisciplineId, second.Document.Id);
         Assert.Equal(methodistRecord.Id, byMethodist.Document.AuthorId);
         var listed = Assert.Single((await DetailsAsync(author, second.Document.Id)).LinkedFos!);
-        Assert.Equal((byMethodist.Document.Id, false), (listed.Id, listed.CanOpen));
+        // ФОС методиста автору РПД открыт для чтения (этап 8, A4).
+        Assert.Equal((byMethodist.Document.Id, true), (listed.Id, listed.CanOpen));
     }
 
     [Fact]
@@ -391,10 +394,71 @@ public class FosCreationApiTests(DatabaseFixture fixture) : AssignmentTestBase(f
         Assert.Equal(HttpStatusCode.Forbidden, forbidden.StatusCode);
         Assert.False((await reader.PostAsync($"/api/documents/{rpd.Document.Id}/archive", null)).IsSuccessStatusCode);
 
-        // Связанная РПД открывается из ФОС; автору РПД, не связанному с ФОС, ссылка на ФОС не положена, постороннему РПД закрыта.
+        // Связанная РПД открывается из ФОС; автору РПД ссылка на ФОС по ней положена (этап 8, A4), постороннему РПД закрыта.
         Assert.True((await DetailsAsync(reader, fos.Document.Id)).LinkedRpd!.CanOpen);
-        Assert.False(Assert.Single((await DetailsAsync(author, rpd.Document.Id)).LinkedFos!).CanOpen);
+        Assert.True(Assert.Single((await DetailsAsync(author, rpd.Document.Id)).LinkedFos!).CanOpen);
         Assert.Equal(HttpStatusCode.Forbidden, (await stranger.GetAsync($"/api/documents/{rpd.Document.Id}")).StatusCode);
+    }
+
+    [Fact]
+    public async Task The_rpd_author_reads_every_fos_made_by_others_without_editing_and_strangers_do_not()
+    {
+        var (author, _) = await AccountAsync(App, AppRoles.Teacher);
+        var (stranger, _) = await AccountAsync(App, AppRoles.Teacher);
+        var (methodist, _) = await AccountAsync(App, AppRoles.Methodist);
+        var plan = await IsolatedPlanAsync("Б1.О.10");
+        var rpd = await FilledRpdAsync(author, plan.Rpd.Id, plan.Disciplines[0].Id);
+        var fos = await CreatedAsync(methodist, plan.Fos.Id, plan.Disciplines[0].Id, rpd.Document.Id);
+
+        // Из списка ФОС в РПД и по ссылке; правка, действия и удаление — нет.
+        var listed = Assert.Single((await DetailsAsync(author, rpd.Document.Id)).LinkedFos!);
+        Assert.Equal((fos.Document.Id, true), (listed.Id, listed.CanOpen));
+        var read = await DetailsAsync(author, fos.Document.Id);
+        Assert.False(read.Editable);
+        Assert.Equal(new DocumentActions(false, false, false, false), read.Actions);
+        Assert.Equal((rpd.Document.Id, true), (read.LinkedRpd!.Id, read.LinkedRpd.CanOpen));
+        Assert.True(read.LinkedRpd.CrossCheck, "панель сквозной проверки — тем, кто читает ФОС по своей РПД");
+        Assert.True((await author.GetAsync($"/api/documents/{fos.Document.Id}/comments")).IsSuccessStatusCode);
+        var forbidden = await author.PatchAsJsonAsync($"/api/documents/{fos.Document.Id}/sections/linked_rpd",
+            new SectionUpdateRequest(read.Document.Version, read.Payload.GetProperty("linked_rpd")));
+        Assert.Equal(HttpStatusCode.Forbidden, forbidden.StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden,
+            (await author.DeleteAsync($"/api/documents/{fos.Document.Id}?version={read.Document.Version}")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await stranger.GetAsync($"/api/documents/{fos.Document.Id}")).StatusCode);
+    }
+
+    [Fact]
+    public async Task The_reading_follows_the_current_rpd_author_after_a_transfer()
+    {
+        var (author, authorRecord) = await AccountAsync(App, AppRoles.Teacher);
+        var (next, nextRecord) = await AccountAsync(App, AppRoles.Teacher);
+        var (methodist, _) = await AccountAsync(App, AppRoles.Methodist);
+        var plan = await IsolatedPlanAsync("Б1.О.10");
+        var rpd = await FilledRpdAsync(author, plan.Rpd.Id, plan.Disciplines[0].Id);
+        var fos = await CreatedAsync(methodist, plan.Fos.Id, plan.Disciplines[0].Id, rpd.Document.Id);
+        Assert.Equal(HttpStatusCode.Forbidden, (await next.GetAsync($"/api/documents/{fos.Document.Id}")).StatusCode);
+        Assert.True(await VisibleToAsync(fos.Document.Id, authorRecord.Id));
+        Assert.False(await VisibleToAsync(fos.Document.Id, nextRecord.Id));
+
+        var transfer = await methodist.PostAsJsonAsync(Url(rpd, "transfer"), new TransferRequest(rpd.Document.Version, nextRecord.Id, "Ведёт дисциплину"));
+        Assert.True(transfer.IsSuccessStatusCode, await transfer.Content.ReadAsStringAsync());
+
+        // Новый автор РПД читает ФОС, прежний — нет; правило ядра (напоминания, уведомления) говорит то же, что API.
+        Assert.True((await next.GetAsync($"/api/documents/{fos.Document.Id}")).IsSuccessStatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await author.GetAsync($"/api/documents/{fos.Document.Id}")).StatusCode);
+        Assert.True(await VisibleToAsync(fos.Document.Id, nextRecord.Id));
+        Assert.False(await VisibleToAsync(fos.Document.Id, authorRecord.Id));
+    }
+
+    // Правило «кто откроет документ» вне API (DocumentVisibility): по ролям учётной записи из базы, без токена.
+    private async Task<bool> VisibleToAsync(Guid documentId, Guid employeeId)
+    {
+        await using var scope = App.Services.CreateAsyncScope();
+        var services = scope.ServiceProvider;
+        var document = await services.GetRequiredService<AppDbContext>().Documents.AsNoTracking().SingleAsync(d => d.Id == documentId);
+        return await DocumentVisibility.CanOpenAsync(
+            services.GetRequiredService<DocumentApproval>(), services.GetRequiredService<DisciplineAssignments>(),
+            services.GetRequiredService<LinkedDocuments>(), document, employeeId, [AppRoles.Teacher]);
     }
 
     [Fact]

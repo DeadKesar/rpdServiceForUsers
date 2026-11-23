@@ -796,8 +796,9 @@ public class DocumentsModule : ICarterModule
     }
 
     // Документ видят автор, методист, администратор, согласующий со строкой согласования в нём (этап 6, B1) и сотрудник,
-    // за которым закреплена дисциплина документа (этап 7, A10), и автор ФОС, созданного по этой РПД (B3). Закреплённый и автор
-    // ФОС — последними: запрос к базе только тем, кто иначе документа не видит.
+    // за которым закреплена дисциплина документа (этап 7, A10), автор ФОС, созданного по этой РПД (B3), и автор РПД, по
+    // которой создан этот ФОС (этап 8, A4). Закреплённый и авторы связанных — последними: запрос к базе только тем, кто иначе
+    // документа не видит. То же правило для мест вне API — в <c>DocumentVisibility</c>.
     private static async Task<(Document? Document, DocumentViewer? Viewer, IResult? Refusal)> VisibleDocumentAsync(
         Guid id, HttpContext http, AppDbContext db, DirectoryAccounts directory, DocumentApproval approval,
         DisciplineAssignments assignments, LinkedDocuments links, CancellationToken ct)
@@ -812,11 +813,13 @@ public class DocumentsModule : ICarterModule
                 viewer = viewer with { IsAssigned = true };
             else if (document.Type == TemplateTypes.Rpd && await links.IsFosAuthorAsync(document, employeeId, ct))
                 viewer = viewer with { IsFosAuthor = true };
+            else if (document.Type == TemplateTypes.Fos && await links.IsRpdAuthorAsync(document, employeeId, ct))
+                viewer = viewer with { IsRpdAuthor = true };
         }
         if (!viewer.Sees)
             return (null, null, Results.Problem(statusCode: StatusCodes.Status403Forbidden, title: "Чужой документ",
                 detail: "Документ видят его автор, методист, администратор, назначенные согласующие, сотрудники, " +
-                        "за которыми закреплена дисциплина, и авторы ФОС по этой РПД."));
+                        "за которыми закреплена дисциплина, и авторы связанных РПД и ФОС."));
         return (document, viewer, null);
     }
 
@@ -957,7 +960,7 @@ public class DocumentsModule : ICarterModule
         var (version, at) = FosSnapshot.Taken(stored);
         var rpd = await links.RpdOfAsync(fos, ct);
         // Панель «Сквозная проверка» (этап 7, B8) — автору, методисту, администратору и закреплённому за дисциплиной.
-        var seesCrossCheck = viewer.IsAuthor || viewer.IsReviewer || viewer.IsCorrector || viewer.IsAssigned;
+        var seesCrossCheck = viewer.IsAuthor || viewer.IsReviewer || viewer.IsCorrector || viewer.IsAssigned || viewer.IsRpdAuthor;
         if (rpd is null || rpd.IsDeleted)
             return new LinkedRpdItem(rpdId, rpd?.Title, DocumentStatuses.Deleted, DocumentStatuses.Title(DocumentStatuses.Deleted), null,
                 CanOpen: false, Deleted: true, Changed: false, version, rpd?.Version, at, CrossCheck: seesCrossCheck);
@@ -972,7 +975,8 @@ public class DocumentsModule : ICarterModule
 
     /// <summary>
     /// ФОС, созданные по РПД (этап 7, B3), — новейшие первыми, с признаком, открывается ли ФОС зрителю: методисту и
-    /// администратору, его автору и закреплённому за дисциплиной.
+    /// администратору, его автору, закреплённому за дисциплиной и автору самой РПД (этап 8, A4): РПД, которую открыл зритель,
+    /// и есть та, по которой созданы все перечисленные ФОС.
     /// </summary>
     private static async Task<List<LinkedFosItem>> LinkedFosAsync(
         Document rpd, DocumentViewer viewer, AppDbContext db, DisciplineAssignments assignments, LinkedDocuments links, FosCrossCheck cross,
@@ -986,7 +990,7 @@ public class DocumentsModule : ICarterModule
         var items = new List<LinkedFosItem>();
         foreach (var f in found)
         {
-            var canOpen = viewer.IsCorrector || assigned || f.AuthorId == viewer.Id;
+            var canOpen = viewer.IsCorrector || assigned || viewer.IsAuthor || f.AuthorId == viewer.Id;
             // Расхождения сквозной проверки (этап 7, B8) — у ФОС, который зритель откроет; у архивного ФОС их не считаем.
             int? discrepancies = canOpen && f.Status != DocumentStatuses.Archived
                 ? FosCrossCheck.Discrepancies(await cross.RunAsync(f, ct)) : null;

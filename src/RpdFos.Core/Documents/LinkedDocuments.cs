@@ -34,6 +34,27 @@ public sealed class LinkedDocuments(AppDbContext db)
             .ToListAsync(ct), rpd.Id).Count > 0;
 
     /// <summary>
+    /// Автор ли сотрудник РПД, по которой создан этот ФОС (этап 8, A4; решение 14): ФОС открыт ему для чтения, кто бы его ни
+    /// создал. Удалённая РПД чтения не даёт: у документа, которого нет в списках, нет и читающего «по нему». Автором считается
+    /// нынешний — после передачи РПД право переходит вместе с ней.
+    /// </summary>
+    public async Task<bool> IsRpdAuthorAsync(Document fos, Guid employeeId, CancellationToken ct = default) =>
+        FosSnapshot.RpdIdOf(fos.Payload) is { } rpdId
+        && await db.Documents.AsNoTracking().AnyAsync(d => d.Id == rpdId && d.Type == TemplateTypes.Rpd && d.AuthorId == employeeId, ct);
+
+    /// <summary>
+    /// Читает ли сотрудник документ только потому, что он автор связанного: у РПД — автор её ФОС, у ФОС — автор его РПД.
+    /// Единое правило для API и для мест, считающих доступ по ролям из базы (<see cref="DocumentVisibility"/>).
+    /// </summary>
+    public Task<bool> IsLinkedAuthorAsync(Document document, Guid employeeId, CancellationToken ct = default) =>
+        document.Type switch
+        {
+            TemplateTypes.Rpd => IsFosAuthorAsync(document, employeeId, ct),
+            TemplateTypes.Fos => IsRpdAuthorAsync(document, employeeId, ct),
+            _ => Task.FromResult(false)
+        };
+
+    /// <summary>
     /// РПД, по которой создан ФОС, — и удалённая: у ФОС есть что показать («связанная РПД удалена»). null — связи нет или записи
     /// физически нет.
     /// </summary>

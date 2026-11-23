@@ -9,7 +9,7 @@ namespace RpdFos.Api.Features.Documents;
 /// Документ видят автор, методист, администратор и согласующий, у которого в документе есть строка согласования
 /// (этап 6, B1): роль «Утверждающий» без назначения доступа не даёт. Закреплённый за дисциплиной документа видит его тоже
 /// (этап 7, A10, решение 5), но только для чтения: правят и действуют роль и авторство, а не закрепление. Так же читает связанную
-/// РПД автор ФОС, созданного по ней (этап 7, B3; FR-DOC-19).
+/// РПД автор ФОС, созданного по ней (этап 7, B3; FR-DOC-19), а автор РПД — каждый ФОС по ней (этап 8, A4).
 /// </summary>
 /// <param name="Id">Запись справочника сотрудников пользователя; null — учётная запись с ней не связана.</param>
 /// <param name="IsCorrector">Методист или администратор: видят все документы, исправляют поля из плана, назначают подписантов.</param>
@@ -22,11 +22,15 @@ namespace RpdFos.Api.Features.Documents;
 /// Пользователь — автор ФОС, созданного по этой РПД (этап 7, B3): РПД открыта ему только для чтения. Заполняет
 /// <c>VisibleDocumentAsync</c>, как и <paramref name="IsAssigned"/>.
 /// </param>
+/// <param name="IsRpdAuthor">
+/// Обратная сторона (этап 8, A4; решение 14): пользователь — автор РПД, по которой создан этот ФОС; ФОС открыт ему только для
+/// чтения, кто бы его ни создал.
+/// </param>
 public sealed record DocumentViewer(
     Guid? Id, bool IsAuthor, bool IsReviewer, bool IsCorrector, bool IsSignatory, bool IsAdmin = false, bool IsAssigned = false,
-    bool IsFosAuthor = false)
+    bool IsFosAuthor = false, bool IsRpdAuthor = false)
 {
-    public bool Sees => IsAuthor || IsCorrector || IsSignatory || IsAssigned || IsFosAuthor;
+    public bool Sees => IsAuthor || IsCorrector || IsSignatory || IsAssigned || IsFosAuthor || IsRpdAuthor;
 
     /// <summary>
     /// Роли пользователя из утверждений запроса: токен несёт их утверждением role, cookie входа — ClaimTypes.Role. Правила ядра,

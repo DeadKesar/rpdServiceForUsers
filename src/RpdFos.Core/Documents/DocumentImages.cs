@@ -177,7 +177,7 @@ public sealed partial class DocumentImages(
         var documents = await db.Documents.AsNoTracking()
             .Where(d => db.DocumentImages.Any(i => i.FileId == fileId && i.DocumentId == d.Id)).ToListAsync(ct);
         foreach (var document in documents)
-            if (await DocumentVisibility.CanOpenAsync(approval, assignments, document, employeeId, roles, ct, links))
+            if (await DocumentVisibility.CanOpenAsync(approval, assignments, links, document, employeeId, roles, ct))
                 return true;
         return false;
     }

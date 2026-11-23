@@ -73,7 +73,7 @@ public sealed class DocumentTransfer(
         // Документ уже у нового автора: открытость для прежнего считается без права автора (закреплённым он остаётся, если был).
         if (await directory.RolesOfActiveAsync(previous, ct) is { } previousRoles)
             await notifications.TransferredOutAsync(document, previous, newAuthorId, by, byRole, text,
-                await DocumentVisibility.CanOpenAsync(approval, assignments, document, previous, previousRoles, ct, links), at, ct);
+                await DocumentVisibility.CanOpenAsync(approval, assignments, links, document, previous, previousRoles, ct), at, ct);
         await notifications.TransferredInAsync(document, previous, newAuthorId, by, byRole, text, at, ct);
         return new(null);
     }

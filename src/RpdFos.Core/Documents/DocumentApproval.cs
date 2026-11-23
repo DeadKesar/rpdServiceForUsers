@@ -105,7 +105,7 @@ public sealed class DocumentApproval(
         {
             // Без действующей учётной записи войти и прочесть некому — как у напоминаний о доработке (этап 7, A6).
             if (await directory.RolesOfActiveAsync(id, ct) is not { } roles) continue;
-            (await DocumentVisibility.CanOpenAsync(this, assignments, document, id, roles, ct, links) ? linked : unlinked).Add(id);
+            (await DocumentVisibility.CanOpenAsync(this, assignments, links, document, id, roles, ct) ? linked : unlinked).Add(id);
         }
         await notifications.ApprovalInterruptedAsync(document, by, byTitle, comment, linked, unlinked, at, ct);
     }
