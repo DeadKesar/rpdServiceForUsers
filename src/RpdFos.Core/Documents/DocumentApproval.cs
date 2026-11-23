@@ -213,7 +213,7 @@ public sealed class DocumentApproval(
         {
             var approvedAt = history.StatusChanged(document, document.Approve(now), signatoryId);
             await history.SnapshotAsync(document, signatoryId, VersionTriggers.Approved, ct);
-            await OutdateBaseAsync(document, signatoryId, ct);
+            await OutdateBaseAsync(document, signatoryId, approvedAt, ct);
             await notifications.ApprovedAsync(document, signatoryId, approvedAt, ct);
         }
         return null;
@@ -362,7 +362,7 @@ public sealed class DocumentApproval(
         if (rows.Count == 0)
         {
             var approvedAt = history.StatusChanged(document, document.Approve(clock.GetUtcNow()), by);
-            await OutdateBaseAsync(document, by, ct);
+            await OutdateBaseAsync(document, by, approvedAt, ct);
             await notifications.ApprovedAsync(document, by, approvedAt, ct);
             return;
         }
@@ -463,7 +463,7 @@ public sealed class DocumentApproval(
     // основы прежний, версия тоже (VersioningInterceptor): в архив её отправляют явно (A9). Основа другой дисциплины — документ
     // другого плана — не устаревает: это не прежняя редакция того же документа. Признак ставится в том же сохранении, что и
     // согласие, — неудавшееся сохранение (конфликт версий) его не оставит.
-    private async Task OutdateBaseAsync(Document successor, Guid by, CancellationToken ct)
+    private async Task OutdateBaseAsync(Document successor, Guid by, DateTimeOffset at, CancellationToken ct)
     {
         if (successor.BasedOnDocumentId is not Guid baseId) return;
         var basis = await db.Documents.SingleOrDefaultAsync(
@@ -471,6 +471,7 @@ public sealed class DocumentApproval(
         if (basis is null) return;
         basis.IsOutdated = true;
         db.AuditLog.Add(Audit(basis, by, AuditEvents.DocumentOutdated, new JsonObject { ["successor"] = successor.Id }));
+        await notifications.OutdatedAsync(basis, successor, by, at, ct);
 
         // Согласованный ФОС устаревшей РПД устаревает вместе с ней (этап 7, B10): он создан по РПД, которой больше нет в работе.
         // Незавершённый ФОС остаётся как есть — его автор переведёт на новую РПД или закончит.
@@ -480,6 +481,7 @@ public sealed class DocumentApproval(
             fos.IsOutdated = true;
             db.AuditLog.Add(Audit(fos, by, AuditEvents.DocumentOutdated,
                 new JsonObject { ["successor"] = successor.Id, ["rpd"] = basis.Id }));
+            await notifications.OutdatedAsync(fos, successor, by, at, ct, byRpd: true);
         }
     }
 

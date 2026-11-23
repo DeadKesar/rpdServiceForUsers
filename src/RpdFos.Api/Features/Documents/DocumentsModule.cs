@@ -967,7 +967,7 @@ public class DocumentsModule : ICarterModule
             viewer.Id is Guid me && await assignments.IsAssignedAsync(rpd.DisciplineId, me, ct);
         var changed = FosSnapshot.Differs(stored, FosSnapshot.Take(JsonNode.Parse(rpd.Payload)));
         return new LinkedRpdItem(rpd.Id, rpd.Title, rpd.Status, DocumentStatuses.Title(rpd.Status), author, canOpen, Deleted: false,
-            changed, version, rpd.Version, at, seesCrossCheck);
+            changed, version, changed ? rpd.Version : null, at, seesCrossCheck);
     }
 
     /// <summary>
@@ -1279,7 +1279,7 @@ public record DocumentDetails(
 /// <summary>
 /// Связанная РПД ФОС (этап 7, B3): название и статус сейчас (у удалённой — <paramref name="Deleted"/>), открывается ли она
 /// зрителю, и снимок: версия РПД и время, когда он снят. <paramref name="Changed"/> — наследуемые данные РПД отличаются от снимка
-/// («РПД изменилась»); <paramref name="CurrentVersion"/> — версия РПД сейчас, только для справки: сравниваются данные.
+/// («РПД изменилась»); <paramref name="CurrentVersion"/> — версия РПД сейчас, только для справки и только когда данные снимка расходятся с РПД (этап 8, A2): номер растёт и от переходов статуса.
 /// <paramref name="CrossCheck"/> — зрителю показывается панель «Сквозная проверка» (этап 7, B8).
 /// </summary>
 public record LinkedRpdItem(

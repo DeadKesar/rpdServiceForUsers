@@ -110,6 +110,12 @@ public class FosCycleApiTests(DatabaseFixture fixture) : AssignmentTestBase(fixt
         var outdated = await DetailsAsync(c.Methodist, oldFos.Document.Id);
         Assert.Equal((S.Approved, true, oldVersion), (outdated.Document.Status, outdated.Document.IsOutdated, outdated.Document.Version));
         Assert.True((await DetailsAsync(c.Methodist, oldRpd)).Document.IsOutdated);
+        // Автор прежней РПД и ФОС — один человек, документов два: событие на каждый, по одному; у ФОС преемником названа новая РПД.
+        var told = await OutdatedFeedAsync(c.Author);
+        Assert.Equal(new[] { oldRpd, oldFos.Document.Id }.Order(), told.Select(n => n.DocumentId!.Value).Order());
+        Assert.All(told, n => Assert.Contains(newRpd.Document.Title, n.Text));
+        Assert.Contains("Согласована новая РПД", told.Single(n => n.DocumentId == oldFos.Document.Id).Text);
+        Assert.Contains("Согласован новый документ", told.Single(n => n.DocumentId == oldRpd).Text);
         await App.WithDbAsync(async db =>
         {
             var audit = await db.AuditLog.SingleAsync(a => a.EntityId == oldFos.Document.Id && a.EventType == AuditEvents.DocumentOutdated);
@@ -188,6 +194,7 @@ public class FosCycleApiTests(DatabaseFixture fixture) : AssignmentTestBase(fixt
         var kept = await DetailsAsync(c.Methodist, draft.Document.Id);
         Assert.Equal((S.Draft, false), (kept.Document.Status, kept.Document.IsOutdated));
         Assert.True((await DetailsAsync(c.Methodist, oldRpd)).Document.IsOutdated);
+        Assert.Equal(oldRpd, Assert.Single(await OutdatedFeedAsync(c.Author)).DocumentId); // у ФОС без согласования «устарел» нет, события нет
 
         // Удалённый ФОС РПД не удерживает: архив проходит.
         var deleted = await c.Author.DeleteAsync($"/api/documents/{draft.Document.Id}?version={kept.Document.Version}");

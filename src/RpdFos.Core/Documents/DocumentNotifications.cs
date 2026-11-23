@@ -361,6 +361,23 @@ public sealed class DocumentNotifications(AppDbContext db, DirectoryAccounts dir
     }
 
     /// <summary>
+    /// Автору прежнего документа: согласован преемник, документ получил «устарел» (этап 8, A2). Событие — на каждый устаревший
+    /// документ, поэтому автору РПД и автору её ФОС идёт по одному; совершившему согласование — нет. Ссылка ведёт на прежний
+    /// документ (автору он открыт всегда), в тексте — преемник. <paramref name="byRpd"/> — это ФОС, устаревший вместе с РПД:
+    /// преемником названа новая РПД.
+    /// </summary>
+    public async Task OutdatedAsync(
+        Document outdated, Document successor, Guid by, DateTimeOffset at, CancellationToken ct = default, bool byRpd = false)
+    {
+        var to = Others([outdated.AuthorId], by);
+        if (to.Count == 0) return;
+        await AddAsync(NotificationEvents.DocumentOutdated, outdated, to, at,
+            Text($"Документ устарел: {outdated.Title}",
+                byRpd ? $"Согласована новая РПД: {successor.Title}. ФОС создан по прежней РПД" : $"Согласован новый документ: {successor.Title}"),
+            new JsonObject { ["successor"] = successor.Title, ["successor_id"] = successor.Id.ToString() }, ct);
+    }
+
+    /// <summary>
     /// Тому, кто запустил формирование печатной формы: файл готов или не сформирован — тогда с причиной (этап 7, A3,
     /// FR-GEN-04, UC-10, шаг 4). Это итог его собственного запроса, поэтому фильтра «кроме совершившего» нет.
     /// Вызывается, когда задача уже завершена; уведомление ложится в то же сохранение, что и её завершение.

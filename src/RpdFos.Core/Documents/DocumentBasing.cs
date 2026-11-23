@@ -90,7 +90,7 @@ public static class DocumentBasing
                 if ((Text(p.Value, "x-source") ?? Text(child, "x-source")) is { } source)
                 {
                     if (source == CompetenceSource) Competences(value, target, p.Name, named);
-                    else if (source == DeveloperSource) Developers(value, named);
+                    else if (source == DeveloperSource) Developers(value, target, p.Name, named);
                     continue;
                 }
                 if (Declares(p.Value, child, "x-required-for-status"))
@@ -200,13 +200,25 @@ public static class DocumentBasing
             }
         }
 
-        // Составители в новом документе — только автор: остальных основа не называет, их добавляет автор.
-        private void Developers(JsonNode? value, IReadOnlyList<string> titles)
+        // Составители в новом документе — только автор: остальных основа не называет, их добавляет автор. Должность автора, которую
+        // он вводил в основе, переносится (иначе отправка недоступна, пока он не введёт её снова); если автор другой, строка
+        // «должность составителя» названа в списке, как и число остальных составителей (этап 8, A2).
+        private void Developers(JsonNode? value, JsonObject target, string name, IReadOnlyList<string> titles)
         {
             List<JsonObject> listed = value switch { JsonArray a => a.OfType<JsonObject>().ToList(), JsonObject o => [o], _ => [] };
-            var others = listed.Count(d => Str(d["user_id"]) != authorId.ToString());
-            if (others > 0)
-                Notes.Add($"{Join(titles)}: в новом документе указан только автор, остальные составители основы не перенесены ({others})");
+            var mine = listed.FirstOrDefault(d => Str(d["user_id"]) == authorId.ToString());
+            var others = listed.Where(d => d != mine).ToList();
+            if (others.Count > 0)
+                Notes.Add($"{Join(titles)}: в новом документе указан только автор, остальные составители основы не перенесены ({others.Count})");
+
+            if (mine is not null)
+            {
+                var position = Str(mine["position"]);
+                var current = target[name] switch { JsonArray a => a.OfType<JsonObject>().FirstOrDefault(), JsonObject o => o, _ => null };
+                if (!string.IsNullOrWhiteSpace(position) && current is not null) current["position"] = position;
+            }
+            else if (others.Any(d => !string.IsNullOrWhiteSpace(Str(d["position"]))))
+                Notes.Add($"{Join(titles)}: должность составителя основы не перенесена — в новом документе другой автор, его должность из справочника");
         }
 
         // Ссылки на дисциплины плана — только на те, что есть в плане нового документа: у другого плана свои строки.

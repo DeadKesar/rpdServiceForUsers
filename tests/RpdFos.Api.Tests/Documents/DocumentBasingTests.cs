@@ -130,6 +130,35 @@ public class DocumentBasingTests
     }
 
     [Fact]
+    public void The_position_of_the_same_author_is_carried_even_when_the_directory_has_none()
+    {
+        // Автор ввёл должность в основе; в справочнике её нет — в новом документе поле осталось бы пустым (этап 8, A2).
+        var facts = Facts();
+        var fresh = DocumentPrefill.Build(Rpd.Schema, facts, new DocumentAuthor(AuthorId, "А. А. Авторов", null), Registry.FindSchema);
+        Assert.Null(fresh["approval_sheet"]!["developers"]![0]!["position"]);
+        var basePayload = BasePayload();
+        basePayload["approval_sheet"] = JsonNode.Parse($$"""{ "developers": [ { "user_id": "{{AuthorId}}", "name_for_document": "А. А. Авторов", "position": "старший преподаватель" } ] }""");
+
+        var result = DocumentBasing.Transfer(fresh, Rpd.Schema, Rpd.Schema, DefaultsOf(Rpd), basePayload, facts, AuthorId, Hidden(facts),
+            Registry.FindSchema);
+
+        var developer = Assert.Single(result.Payload["approval_sheet"]!["developers"]!.AsArray())!;
+        Assert.Equal("старший преподаватель", (string)developer["position"]!);
+        Assert.DoesNotContain(result.NotTransferred, n => n.Contains("должность"));
+    }
+
+    [Fact]
+    public void The_position_of_another_base_author_is_named_among_the_not_transferred()
+    {
+        var result = Transfer(BasePayload(), Facts());
+
+        // В основе составители другие (с должностями): новому автору должность из справочника, а прежние названы в списке.
+        var developer = Assert.Single(result.Payload["approval_sheet"]!["developers"]!.AsArray())!;
+        Assert.Equal("доцент", (string)developer["position"]!);
+        Assert.Contains(result.NotTransferred, n => n.StartsWith("Лист согласования → Составители:") && n.Contains("должность составителя основы не перенесена"));
+    }
+
+    [Fact]
     public void Developers_are_not_named_when_the_author_was_the_only_one_and_a_missing_protocol_is_not_named()
     {
         var basePayload = BasePayload();

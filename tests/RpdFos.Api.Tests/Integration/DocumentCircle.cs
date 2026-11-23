@@ -105,6 +105,11 @@ public static class DocumentCircles
             .Where(n => n.EventType == eventType && (n.DocumentId == document.Document.Id || n.Text.Contains(document.Document.Title)))
             .ToList();
 
+    /// <summary>События «Документ устарел» в ленте пользователя (этап 8, A2): по одному на каждый устаревший документ.</summary>
+    public static async Task<List<NotificationItem>> OutdatedFeedAsync(HttpClient client) =>
+        (await client.GetFromJsonAsync<List<NotificationItem>>($"/api/notifications?limit={NotificationsModule.MaxLimit}"))!
+            .Where(n => n.EventType == NotificationEvents.DocumentOutdated).ToList();
+
     public static async Task<JsonElement> PayloadAsync(DatabaseFixture app, NotificationItem item)
     {
         var payload = default(JsonElement);

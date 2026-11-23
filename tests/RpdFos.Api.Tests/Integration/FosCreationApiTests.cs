@@ -233,7 +233,7 @@ public class FosCreationApiTests(DatabaseFixture fixture) : AssignmentTestBase(f
         await ExpectAsync(author.PostAsJsonAsync(Url(rpd, "submit"), new DocumentVersionRequest(rpd.Document.Version)), S.UnderReview);
         var afterStatus = (await DetailsAsync(author, fos.Document.Id)).LinkedRpd!;
         Assert.Equal((S.UnderReview, false), (afterStatus.Status, afterStatus.Changed));
-        Assert.True(afterStatus.CurrentVersion > afterStatus.SnapshotVersion, "версия РПД выросла");
+        Assert.Null(afterStatus.CurrentVersion); // «сейчас N» — только при расхождении данных (этап 8, A2)
 
         // РПД на доработке: автор добавил индикатор — наследуемые данные изменились.
         await SetStatusAsync(App, rpdId, S.Returned);
@@ -248,6 +248,7 @@ public class FosCreationApiTests(DatabaseFixture fixture) : AssignmentTestBase(f
 
         var changed = await DetailsAsync(author, fos.Document.Id);
         Assert.True(changed.LinkedRpd!.Changed);
+        Assert.True(changed.LinkedRpd.CurrentVersion > changed.LinkedRpd.SnapshotVersion, "при расхождении версия РПД названа");
         Assert.True(changed.Actions.RefreshFromRpd, "автор ФОС в статусе правки обновляет данные РПД");
         var asMethodist = await DetailsAsync(methodist, fos.Document.Id);
         Assert.Equal((true, false), (asMethodist.LinkedRpd!.Changed, asMethodist.Actions.RefreshFromRpd));

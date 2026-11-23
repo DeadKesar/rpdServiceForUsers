@@ -249,6 +249,11 @@
                                     <button class="btn btn-sm btn-primary ms-1" disabled="@busy" @onclick="() => CreateAsync(d)">Создать на основе</button>
                                 }
                             }
+                            else if (d.DocumentStatus == "approved")
+                            {
+                                @* Дисциплина закреплена: автору согласованной РПД кнопка не положена — называем, кто создаёт (этап 8, A2). *@
+                                <div class="small text-muted">Создают закреплённые преподаватели</div>
+                            }
                         }
                         else if (d.CanCreate)
                         {

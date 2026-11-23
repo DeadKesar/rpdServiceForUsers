@@ -127,12 +127,17 @@ public class DocumentBasedOnApiTests(DatabaseFixture fixture) : AssignmentTestBa
         Assert.Equal("Есть незавершённый документ", (await back.Content.ReadFromJsonAsync<ProblemDetails>())!.Title);
         Assert.False((await DetailsAsync(c.Author, baseId)).Document.IsOutdated);
 
+        Assert.Empty(await OutdatedFeedAsync(c.Author)); // «устарел» ещё нет — события нет (этап 8, A2)
         // Преемник согласован — основа устарела; статус, версия и время изменения основы прежние.
         await ApproveAsync(c, created);
         var outdated = await DetailsAsync(c.Author, baseId);
         Assert.Equal((S.Approved, true, original.Document.Version, original.Document.UpdatedAt),
             (outdated.Document.Status, outdated.Document.IsOutdated, outdated.Document.Version, outdated.Document.UpdatedAt));
         Assert.False((await DetailsAsync(c.Author, created.Document.Id)).Document.IsOutdated);
+        // Автору основы — одно событие со ссылкой на основу и названием преемника; преемнику, который не устарел, события нет.
+        var told = Assert.Single(await OutdatedFeedAsync(c.Author));
+        Assert.Equal(baseId, told.DocumentId);
+        Assert.Contains($"Согласован новый документ: {created.Document.Title}", told.Text);
         Assert.Contains((await c.Author.GetFromJsonAsync<List<DocumentListItem>>("/api/documents"))!, d => d.Id == baseId && d.IsOutdated);
         await App.WithDbAsync(async db =>
         {

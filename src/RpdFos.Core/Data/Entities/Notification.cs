@@ -136,6 +136,12 @@ public static class NotificationEvents
     /// </summary>
     public const string ApprovalInterrupted = "approval.interrupted";
 
+    /// <summary>
+    /// Автору прежнего документа: согласован преемник, и документ получил «устарел» (этап 8, A2; FR-DOC-12) — у РПД и у её
+    /// согласованного ФОС. Ссылка — на прежний документ, в тексте — преемник.
+    /// </summary>
+    public const string DocumentOutdated = "document.outdated";
+
     /// <summary>Тому, кто запустил формирование: печатная форма готова — со ссылкой на документ (этап 7, A3).</summary>
     public const string PrintReady = "document.print_ready";
 
@@ -181,6 +187,7 @@ public static class NotificationEvents
         new(ApprovalInterrupted, "Круг согласования прерван", MailMode.Off),
         new(ReturnedFromApproval, "Документ возвращён с согласования", MailMode.Immediately),
         new(Approved, "Документ согласован", MailMode.Off),
+        new(DocumentOutdated, "Документ устарел", MailMode.Off),
         new(ReturnedForCorrection, "Согласованный документ возвращён на исправление", MailMode.Off),
         new(StatusForced, "Статус документа изменён принудительно", MailMode.Immediately),
         new(Archived, "Документ отправлен в архив", MailMode.Off),
