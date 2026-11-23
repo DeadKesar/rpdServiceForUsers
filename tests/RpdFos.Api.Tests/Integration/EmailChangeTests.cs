@@ -196,6 +196,27 @@ public partial class EmailChangeTests(DatabaseFixture app)
         Assert.Contains("Неверный email или пароль", byOld.Html);
     }
 
+    private Task<bool> EmailConfirmedAsync(Guid accountId) =>
+        WithUsersAsync(async users => (await users.FindByIdAsync(accountId.ToString()))!.EmailConfirmed);
+
+    // SetEmailAsync менеджера пользователей сбрасывает EmailConfirmed, а новый адрес подтверждён ссылкой из письма: признак
+    // должен остаться (замечание точки проверки A9: после смены адреса email_confirmed = false).
+    [Fact]
+    public async Task Changed_address_stays_marked_as_confirmed()
+    {
+        var (client, _, oldEmail, accountId) = await NewAccountAsync();
+        var newEmail = NewAddress();
+        await RequestAsync(client, newEmail);
+        var (oldToken, newToken) = Links(oldEmail, newEmail);
+        Assert.True(await EmailConfirmedAsync(accountId), "До смены адрес подтверждён.");
+
+        await ConfirmAsync(oldToken);
+        Assert.True(await EmailConfirmedAsync(accountId), "С одним подтверждением адрес прежний, и он подтверждён.");
+
+        await ConfirmAsync(newToken);
+        Assert.True(await EmailConfirmedAsync(accountId));
+    }
+
     [Fact]
     public async Task Confirmation_order_does_not_matter()
     {

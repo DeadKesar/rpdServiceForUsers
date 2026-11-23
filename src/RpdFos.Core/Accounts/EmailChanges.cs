@@ -189,6 +189,12 @@ public sealed class EmailChanges(
             await using var tx = await db.Database.BeginTransactionAsync(ct);
             var result = await users.SetEmailAsync(user, newEmail);
             if (result.Succeeded) result = await users.SetUserNameAsync(user, newEmail);
+            if (result.Succeeded)
+            {
+                // SetEmailAsync сбрасывает признак подтверждения, а новый адрес как раз подтверждён — ссылкой из письма.
+                user.EmailConfirmed = true;
+                result = await users.UpdateAsync(user);
+            }
             if (!result.Succeeded)
             {
                 await tx.RollbackAsync(ct);
