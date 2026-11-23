@@ -118,6 +118,20 @@ public partial class EmailChangeTests(DatabaseFixture app)
         Assert.Null(profile.EmailChange);
     }
 
+    // «Войти» после смены адреса ведёт сразу ко входу клиента: на его начальной странице «Войдите» пришлось бы нажимать ещё раз
+    // (замечание точки проверки A9).
+    [Fact]
+    public async Task Sign_in_link_after_the_change_starts_the_client_login()
+    {
+        var (client, _, oldEmail, _) = await NewAccountAsync();
+        var newEmail = NewAddress();
+        await RequestAsync(client, newEmail);
+        var (oldToken, newToken) = Links(oldEmail, newEmail);
+        await ConfirmAsync(oldToken);
+
+        Assert.Contains("<a href=\"/authentication/login\">Войти</a>", await ConfirmAsync(newToken));
+    }
+
     private static readonly object Gate = new();
     private static WebApplicationFactory<Program>? _realCookies;
 

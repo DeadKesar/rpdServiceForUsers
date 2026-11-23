@@ -103,6 +103,19 @@ public partial class PasswordLinksTests(DatabaseFixture app)
         Assert.False(await CanLogInAsync(email, Password));
     }
 
+    // «Войти» после нового пароля ведёт сразу ко входу клиента: на его начальной странице «Войдите» пришлось бы нажимать ещё раз
+    // (замечание точки проверки A9).
+    [Fact]
+    public async Task Sign_in_link_after_new_password_starts_the_client_login()
+    {
+        var (email, _) = await NewAccountAsync();
+        await ForgotAsync(email);
+
+        var (_, html) = await SetPasswordAsync(LinkOf(Assert.Single(Mail.SentTo(email))), NewPassword);
+
+        Assert.Contains("<a href=\"/authentication/login\">Войти</a>", html);
+    }
+
     [Fact]
     public async Task Link_keeps_token_in_fragment_so_it_never_reaches_a_request_line()
     {

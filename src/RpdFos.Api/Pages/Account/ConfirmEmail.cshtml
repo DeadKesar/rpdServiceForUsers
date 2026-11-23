@@ -11,7 +11,8 @@
     {
         case RpdFos.Core.Accounts.EmailConfirmation.Completed:
             <p class="ok" role="status">Адрес изменён на @result.NewEmail. Входить в систему теперь нужно по новому адресу.</p>
-            <p><a href="/">Войти</a></p>
+            @* Адрес запускает вход клиента: на его начальной странице (/) «Войдите» пришлось бы нажимать ещё раз. *@
+            <p><a href="/authentication/login">Войти</a></p>
             break;
         case RpdFos.Core.Accounts.EmailConfirmation.Waiting:
             <p class="ok" role="status">
