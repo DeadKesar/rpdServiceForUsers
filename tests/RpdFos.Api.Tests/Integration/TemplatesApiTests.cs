@@ -19,7 +19,8 @@ namespace RpdFos.Api.Tests.Integration;
 public class TemplatesApiTests(DatabaseFixture app)
 {
     [Theory]
-    [InlineData(DocumentTypeRegistry.Rpd, DocxBookmarksTests.Rpd, 57)]
+    [InlineData(DocumentTypeRegistry.Rpd, DocxBookmarksTests.Rpd, 60)] // четвёртая версия файла оформления РПД (этап 7.1, шаг 4): +блок дополнительного раздела
+    [InlineData(DocumentTypeRegistry.Rpd, DocxBookmarksTests.RpdV3, 57)] // третья версия публикуется как прежде: блока в ней нет, сопоставление его не требует
     [InlineData(DocumentTypeRegistry.Fos, DocxBookmarksTests.Fos, 36)] // вторая версия файла оформления ФОС (этап 7, B2; +председатель УМК)
     public async Task Methodist_creates_uploads_print_template_and_publishes(string type, string file, int bookmarks)
     {

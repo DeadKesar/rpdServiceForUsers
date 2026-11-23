@@ -34,7 +34,10 @@ public sealed class PrintContext(
 
     /// <summary>Сколько раз печатается блок места: частей банка по виду аттестации, билетов — по числу в документе.</summary>
     public int RepeatCount(string pointer) =>
-        pointer == "/task_bank" ? FosPrint.Parts(this).Count : At(pointer) is { ValueKind: JsonValueKind.Array } items ? items.GetArrayLength() : 0;
+        pointer == "/task_bank" ? FosPrint.Parts(this).Count
+        // Дополнительный раздел РПД (этап 7.1): печатается один раз и только с текстом — ни заголовка, ни заглушки без него.
+        : pointer == "/additional_section" ? (At(pointer) is { } section && SectionTitleForText.HasText(section) ? 1 : 0)
+        : At(pointer) is { ValueKind: JsonValueKind.Array } items ? items.GetArrayLength() : 0;
 
     /// <summary>
     /// Начало заполнения одного экземпляра блока: до <c>Dispose</c> образец «/exam_tickets/0/…» означает билет с этим номером,

@@ -25,7 +25,8 @@ public static class SectionFill
         var mandatory = requiredAtRoot || section.TryGetProperty("x-visible-if", out _);
         // Правило проверки на разделе или его полях (сверка часов) — тоже обязательный элемент: раздел, где его
         // ошибку исправили, — выполнен, а не «обязательного нет» (найдено при проверке B4 в браузере).
-        var rule = HasRule(section) ? (1, present ? 1 : 0) : (0, 0);
+        // Необязательный раздел, которого нет, правилом не обязан (дополнительный раздел РПД, этап 7.1): не «заполнен» и не «не заполнен».
+        var rule = HasRule(section) && (mandatory || present) ? (1, present ? 1 : 0) : (0, 0);
         if (section.TryGetProperty("type", out var type) && type.GetString() == "array")
             return mandatory ? (1, present ? 1 : 0) : rule;
         if (!section.TryGetProperty("required", out var required) || required.ValueKind != JsonValueKind.Array || !mandatory && !present)

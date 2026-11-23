@@ -56,6 +56,12 @@
     "note": "ПО дисциплины — элементами списка шаблона, перед постоянным ПО вуза."
   },
   "AutofillMaterialSupport": { "kind": "field", "target": "/material_support" },
+  "AutofillAdditionalSection": {
+    "kind": "block", "target": "/additional_section", "part": "present",
+    "note": "Раздел 6 после материально-технического обеспечения (этап 7.1, файл оформления v4): пустые абзацы перед заголовком, заголовок и текст. Без текста блок убирается целиком — ни заголовка, ни заглушки."
+  },
+  "AutofillAdditionalTitle": { "kind": "field", "target": "/additional_section/title", "note": "Заголовок раздела пишет автор." },
+  "AutofillAdditionalText": { "kind": "field", "target": "/additional_section/text" },
   "AutofillProtocolNumber": {
     "kind": "field", "target": "/approval_sheet/department_protocol/number",
     "note": "Закладка вокруг бланка «________»: до заседания кафедры бланк остаётся для ручного заполнения."

@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.Extensions.Options;
 using RpdFos.Core.Data.Entities;
+using RpdFos.Core.Printing;
 
 namespace RpdFos.Core.Documents;
 
@@ -299,4 +300,28 @@ internal static class LiteratureYear
 
     public static bool IsFundamental(JsonElement item) =>
         item.ValueKind == JsonValueKind.Object && item.TryGetProperty("fundamental", out var f) && f.ValueKind == JsonValueKind.True;
+}
+
+/// <summary>
+/// <c>section_title_for_text</c> (этап 7.1): у необязательного раздела с заголовком автора — текст без заголовка — ошибка поля
+/// «Заголовок»: раздел напечатался бы с пустым названием. Раздел без текста не проверяется (в печать он не попадёт), заголовок
+/// без текста — тоже не ошибка. Не проверяется при сохранении: заголовок можно вписать после текста.
+/// </summary>
+public sealed class SectionTitleForText : IValidationRule
+{
+    public string Name => "section_title_for_text";
+    public string Level => IssueLevels.Error;
+
+    public IEnumerable<DocumentValidationError> Check(RuleContext context)
+    {
+        if (context.Value.ValueKind != JsonValueKind.Object) yield break;
+        var title = context.Value.TryGetProperty("title", out var t) && t.ValueKind == JsonValueKind.String ? t.GetString() : null;
+        if (HasText(context.Value) && string.IsNullOrWhiteSpace(title))
+            yield return new($"{context.Path}/title", "Укажите заголовок раздела: текст без заголовка не напечатать");
+    }
+
+    /// <summary>Есть ли у раздела что печатать: абзац, список, таблица или рисунок — «пустой» редактор оставляет только пустые абзацы.</summary>
+    public static bool HasText(JsonElement section) =>
+        section.ValueKind == JsonValueKind.Object && section.TryGetProperty("text", out var text) && text.ValueKind == JsonValueKind.String &&
+        RichTextBlocks.Parse(text.GetString() ?? "", () => 0).Count > 0;
 }

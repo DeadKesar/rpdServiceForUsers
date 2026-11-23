@@ -473,6 +473,17 @@
       "items": { "type": "string", "minLength": 3 }
     },
 
+    "additional_section": {
+      "type": "object",
+      "title": "Дополнительный раздел",
+      "description": "Необязательный раздел после материально-технического обеспечения: заголовок и текст пишет автор. Без текста в печатную форму не попадает",
+      "x-validation-rule": "section_title_for_text",
+      "properties": {
+        "title": { "type": "string", "title": "Заголовок", "maxLength": 200, "description": "Название раздела в печатной форме, например «Особенности освоения дисциплины»" },
+        "text": { "type": "string", "title": "Текст", "x-ui-widget": "richtext", "description": "Форматированный текст, таблицы и рисунки" }
+      }
+    },
+
     "approval_sheet": {
       "type": "object",
       "title": "Лист согласования",
