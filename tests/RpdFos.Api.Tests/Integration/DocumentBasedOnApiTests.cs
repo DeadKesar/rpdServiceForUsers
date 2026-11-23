@@ -128,6 +128,10 @@ public class DocumentBasedOnApiTests(DatabaseFixture fixture) : AssignmentTestBa
         Assert.False((await DetailsAsync(c.Author, baseId)).Document.IsOutdated);
 
         Assert.Empty(await OutdatedFeedAsync(c.Author)); // «устарел» ещё нет — события нет (этап 8, A2)
+        // Название у основы и преемника одно, поэтому в уведомлении их различает дата согласования (замечание точки проверки A9):
+        // основа согласована раньше, преемник — сейчас.
+        await App.WithDbAsync(async db => await db.Documents.Where(d => d.Id == baseId)
+            .ExecuteUpdateAsync(s => s.SetProperty(d => d.ApprovedAt, new DateTimeOffset(2026, 9, 1, 12, 0, 0, TimeSpan.Zero))));
         // Преемник согласован — основа устарела; статус, версия и время изменения основы прежние.
         await ApproveAsync(c, created);
         var outdated = await DetailsAsync(c.Author, baseId);
@@ -138,6 +142,11 @@ public class DocumentBasedOnApiTests(DatabaseFixture fixture) : AssignmentTestBa
         var told = Assert.Single(await OutdatedFeedAsync(c.Author));
         Assert.Equal(baseId, told.DocumentId);
         Assert.Contains($"Согласован новый документ: {created.Document.Title}", told.Text);
+        // Название повторено дважды, но у каждого документа своя дата согласования: у основы — прежняя, у преемника — своя.
+        Assert.Equal(original.Document.Title, created.Document.Title);
+        Assert.Contains($"Документ устарел: {original.Document.Title} (согласован 01.09.2026)", told.Text);
+        Assert.Matches($@"Согласован новый документ: {System.Text.RegularExpressions.Regex.Escape(created.Document.Title)} \(\d{{2}}\.\d{{2}}\.\d{{4}}\)", told.Text);
+        Assert.DoesNotContain($"{created.Document.Title} (01.09.2026)", told.Text);
         Assert.Contains((await c.Author.GetFromJsonAsync<List<DocumentListItem>>("/api/documents"))!, d => d.Id == baseId && d.IsOutdated);
         await App.WithDbAsync(async db =>
         {

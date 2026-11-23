@@ -471,7 +471,7 @@ public sealed class DocumentApproval(
         if (basis is null) return;
         basis.IsOutdated = true;
         db.AuditLog.Add(Audit(basis, by, AuditEvents.DocumentOutdated, new JsonObject { ["successor"] = successor.Id }));
-        await notifications.OutdatedAsync(basis, successor, by, at, ct);
+        await notifications.OutdatedAsync(basis, successor, by, clock.LocalTimeZone, at, ct);
 
         // Согласованный ФОС устаревшей РПД устаревает вместе с ней (этап 7, B10): он создан по РПД, которой больше нет в работе.
         // Незавершённый ФОС остаётся как есть — его автор переведёт на новую РПД или закончит.
@@ -481,7 +481,7 @@ public sealed class DocumentApproval(
             fos.IsOutdated = true;
             db.AuditLog.Add(Audit(fos, by, AuditEvents.DocumentOutdated,
                 new JsonObject { ["successor"] = successor.Id, ["rpd"] = basis.Id }));
-            await notifications.OutdatedAsync(fos, successor, by, at, ct, byRpd: true);
+            await notifications.OutdatedAsync(fos, successor, by, clock.LocalTimeZone, at, ct, byRpd: true);
         }
     }
 

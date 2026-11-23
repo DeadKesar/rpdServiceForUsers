@@ -364,16 +364,22 @@ public sealed class DocumentNotifications(AppDbContext db, DirectoryAccounts dir
     /// Автору прежнего документа: согласован преемник, документ получил «устарел» (этап 8, A2). Событие — на каждый устаревший
     /// документ, поэтому автору РПД и автору её ФОС идёт по одному; совершившему согласование — нет. Ссылка ведёт на прежний
     /// документ (автору он открыт всегда), в тексте — преемник. <paramref name="byRpd"/> — это ФОС, устаревший вместе с РПД:
-    /// преемником названа новая РПД.
+    /// преемником названа новая РПД. Название у прежнего документа и преемника обычно одно (дисциплина и набор), поэтому
+    /// различает их дата согласования: прежнего — когда он был согласован, преемника — <paramref name="at"/>. Даты — по
+    /// часовому поясу сервера (<paramref name="zone"/>).
     /// </summary>
     public async Task OutdatedAsync(
-        Document outdated, Document successor, Guid by, DateTimeOffset at, CancellationToken ct = default, bool byRpd = false)
+        Document outdated, Document successor, Guid by, TimeZoneInfo zone, DateTimeOffset at, CancellationToken ct = default,
+        bool byRpd = false)
     {
         var to = Others([outdated.AuthorId], by);
         if (to.Count == 0) return;
+        // Даты согласования у прежнего документа может не быть: возврат на исправление её сбрасывает (Document.ApprovedAt).
+        var outdatedDate = outdated.ApprovedAt is { } approved ? $" (согласован {Day(approved, zone)})" : "";
+        var successorDate = $" ({Day(at, zone)})";
         await AddAsync(NotificationEvents.DocumentOutdated, outdated, to, at,
-            Text($"Документ устарел: {outdated.Title}",
-                byRpd ? $"Согласована новая РПД: {successor.Title}. ФОС создан по прежней РПД" : $"Согласован новый документ: {successor.Title}"),
+            Text($"Документ устарел: {outdated.Title}{outdatedDate}",
+                byRpd ? $"Согласована новая РПД: {successor.Title}{successorDate}. ФОС создан по прежней РПД" : $"Согласован новый документ: {successor.Title}{successorDate}"),
             new JsonObject { ["successor"] = successor.Title, ["successor_id"] = successor.Id.ToString() }, ct);
     }
 
