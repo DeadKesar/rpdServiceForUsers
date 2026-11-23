@@ -9,6 +9,7 @@ using Microsoft.Extensions.Options;
 using OpenIddict.Abstractions;
 using OpenIddict.Validation.AspNetCore;
 using RpdFos.Api.Infrastructure;
+using RpdFos.Core.Accounts;
 using RpdFos.Core;
 using RpdFos.Core.Data;
 using RpdFos.Core.Data.Entities;
@@ -35,6 +36,8 @@ builder.Services.Configure<MailSettings>(builder.Configuration.GetSection("Mail"
 var mailEnabled = builder.Configuration.GetValue("Mail:Enabled", true);
 // Срок доработки и напоминания о нём: 14 дней, предупреждение за 3 (этап 7, A6).
 builder.Services.Configure<RemindersSettings>(builder.Configuration.GetSection("Reminders"));
+// Сроки ссылок из служебных писем: сутки у восстановления пароля, трое суток у приглашения (этап 8, A6).
+builder.Services.Configure<AccountSettings>(builder.Configuration.GetSection("Accounts"));
 
 // Учётные записи: ASP.NET Core Identity. Пароли хранятся только здесь, в виде хеша.
 builder.Services.AddIdentity<AppUser, IdentityRole<Guid>>(o =>
@@ -44,7 +47,9 @@ builder.Services.AddIdentity<AppUser, IdentityRole<Guid>>(o =>
         o.Lockout.MaxFailedAccessAttempts = 5;
     })
     .AddEntityFrameworkStores<AppDbContext>()
-    .AddDefaultTokenProviders();
+    .AddDefaultTokenProviders()
+    // Ссылки «Забыли пароль?» и приглашения: сроки, провайдер токена приглашения, русские ошибки (этап 8, A6).
+    .AddAccountLinks();
 
 // Сервер авторизации OpenIddict внутри хоста API: OpenID Connect, authorization code + PKCE.
 // Основа — официальный пример OpenIddict «Balosar».

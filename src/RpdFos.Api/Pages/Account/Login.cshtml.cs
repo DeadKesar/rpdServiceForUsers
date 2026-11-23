@@ -36,7 +36,7 @@ public class LoginModel(SignInManager<AppUser> signIn, UserManager<AppUser> user
 
         // Отключённая администратором учётная запись — бессрочная блокировка (этап 5.2): сообщение своё.
         Error = !result.IsLockedOut ? "Неверный email или пароль."
-            : await users.FindByEmailAsync(Email) is { } user && Features.Users.UsersModule.IsDisabled(user)
+            : await users.FindByEmailAsync(Email) is { } user && user.IsDisabled
                 ? "Учётная запись отключена администратором."
                 : "Учётная запись временно заблокирована после нескольких неудачных попыток.";
         return Page();

@@ -55,7 +55,7 @@ else
                     <td>@(a.Directory is { } d ? Describe(d) : "— не связана")</td>
                     <td>
                         @* Этап 5.2 (FR-ADM-01): временный пароль, отключение и возврат; запись справочника не меняется. *@
-                        <div class="small mb-1">@(a.IsActive ? "активна" : "отключена — вход запрещён")</div>
+                        <div class="small mb-1">@(a.IsActive ? "активна" : "отключена — вход запрещён")@(a.HasPassword ? "" : ", пароль не задан")</div>
                         @if (passwordFor == a.Id)
                         {
                             @* В прокручиваемой таблице колонка сжимается до самого узкого содержимого — поле пароля держит ширину. *@
@@ -68,6 +68,11 @@ else
                         else
                         {
                             <button class="btn btn-link btn-sm p-0 me-2" type="button" @onclick="() => (passwordFor, newPassword) = (a.Id, string.Empty)">Новый пароль</button>
+                            @if (a.IsActive)
+                            {
+                                @* Письмо «Задайте пароль»: ссылка одноразовая, действует трое суток (этап 8, A6). *@
+                                <button class="btn btn-link btn-sm p-0 me-2" type="button" @onclick="() => InviteAsync(a)">Отправить приглашение</button>
+                            }
                             <button class="btn btn-link btn-sm p-0" type="button" @onclick="() => SetEnabledAsync(a, !a.IsActive)">
                                 @(a.IsActive ? "Отключить" : "Вернуть")
                             </button>
@@ -95,7 +100,7 @@ else
         <InputText class="form-control" @bind-Value="model.FullName" />
     </div>
     <div class="mb-2">
-        <label class="form-label">Временный пароль</label>
+        <label class="form-label">Временный пароль (необязательно)</label>
         <InputText class="form-control" type="password" @bind-Value="model.Password" />
     </div>
     <fieldset class="mb-3">
@@ -227,6 +232,8 @@ else
                 message = selected is null
                     ? $"Пользователь {model.Email} создан."
                     : $"Пользователь {model.Email} создан и связан с записью «{selected.ShortName}».";
+                if (string.IsNullOrEmpty(model.Password))
+                    message += " Пароль не задан: отправьте приглашение кнопкой в строке пользователя.";
                 model = new();
                 selected = null;
                 surname = "";
@@ -274,6 +281,10 @@ else
         if (!messageIsError) (passwordFor, newPassword) = (null, "");
     }
 
+    private Task InviteAsync(Account account) =>
+        RunAsync(() => Http.PostAsync($"api/admin/users/{account.Id}/invitation", null),
+            $"Приглашение отправлено на {account.Email}: ссылка действует трое суток и срабатывает один раз.");
+
     private Task SetEnabledAsync(Account account, bool enabled) =>
         RunAsync(() => Http.PostAsync($"api/admin/users/{account.Id}/{(enabled ? "activate" : "deactivate")}", null),
             enabled ? $"Учётная запись {account.Email} возвращена." : $"Учётная запись {account.Email} отключена: вход запрещён.");
@@ -317,7 +328,7 @@ else
         [Required(ErrorMessage = "Введите ФИО")]
         public string FullName { get; set; } = "";
 
-        [Required(ErrorMessage = "Введите пароль"), MinLength(8, ErrorMessage = "Не короче 8 символов")]
+        // Без пароля учётная запись создаётся «пустой»: человек задаёт пароль по приглашению (этап 8, A6). Требования к паролю проверяет сервер.
         public string Password { get; set; } = "";
 
         public HashSet<string> Roles { get; } = ["teacher"];
@@ -325,6 +336,7 @@ else
 
     private sealed record DirectoryRecord(
         Guid Id, string ShortName, string? FullName, string? Position, string? OfficialDesignation, string? Department, bool IsActive);
-    private sealed record Account(Guid Id, string Email, string FullName, List<string> Roles, DirectoryRecord? Directory, bool IsActive = true);
+    private sealed record Account(
+        Guid Id, string Email, string FullName, List<string> Roles, DirectoryRecord? Directory, bool IsActive = true, bool HasPassword = true);
     private sealed record Problem(string? Title, string? Detail, Dictionary<string, string[]>? Errors);
 }

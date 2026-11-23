@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using RpdFos.Api.Features.Directory;
 using RpdFos.Api.Infrastructure;
+using RpdFos.Core.Accounts;
 using RpdFos.Core.Data;
 using RpdFos.Core.Data.Entities;
 using RpdFos.Core.Directory;
@@ -24,7 +25,7 @@ public class UsersModule : ICarterModule
         g.MapGet("/", async (AppDbContext db, CancellationToken ct) =>
         {
             var accounts = await db.Users.OrderBy(u => u.Email)
-                .Select(u => new { u.Id, u.Email, u.FullName, u.LockoutEnd }).ToListAsync(ct);
+                .Select(u => new { u.Id, u.Email, u.FullName, u.LockoutEnd, HasPassword = u.PasswordHash != null }).ToListAsync(ct);
             var roles = (await db.UserRoles.Join(db.Roles, ur => ur.RoleId, r => r.Id, (ur, r) => new { ur.UserId, r.Name })
                     .ToListAsync(ct))
                 .ToLookup(x => x.UserId, x => x.Name);
@@ -36,10 +37,11 @@ public class UsersModule : ICarterModule
                 .ToDictionary(r => subjectOf[r.Id]);
 
             return accounts.Select(a => new AccountItem(a.Id, a.Email ?? "", a.FullName, Ordered(roles[a.Id]),
-                recordBySubject.GetValueOrDefault(a.Id.ToString()), a.LockoutEnd != DateTimeOffset.MaxValue)).ToList();
+                recordBySubject.GetValueOrDefault(a.Id.ToString()), a.LockoutEnd != DateTimeOffset.MaxValue, a.HasPassword)).ToList();
         });
 
         g.MapPost("/{id:guid}/password", SetPassword);
+        g.MapPost("/{id:guid}/invitation", SendInvitation);
         g.MapPut("/{id:guid}/roles", SetRoles);
         g.MapPost("/{id:guid}/deactivate", (Guid id, HttpContext http, UserManager<AppUser> users) => SetEnabled(id, false, http, users));
         g.MapPost("/{id:guid}/activate", (Guid id, HttpContext http, UserManager<AppUser> users) => SetEnabled(id, true, http, users));
@@ -55,7 +57,8 @@ public class UsersModule : ICarterModule
             await using var tx = await db.Database.BeginTransactionAsync(ct);
 
             var user = new AppUser { UserName = rq.Email, Email = rq.Email, EmailConfirmed = true, FullName = rq.FullName };
-            var created = await users.CreateAsync(user, rq.Password);
+            // Пароль необязателен (этап 8, A6): без него войти нельзя, пока человек не задаст его по приглашению.
+            var created = string.IsNullOrEmpty(rq.Password) ? await users.CreateAsync(user) : await users.CreateAsync(user, rq.Password);
             if (!created.Succeeded)
                 return ValidationProblem(created);
 
@@ -121,8 +124,28 @@ public class UsersModule : ICarterModule
         return Results.Ok(wanted);
     }
 
-    // Учётная запись отключена администратором — бессрочная блокировка Identity (этап 5.2, FR-ADM-01).
-    public static bool IsDisabled(AppUser user) => user.LockoutEnd == DateTimeOffset.MaxValue;
+    /// <summary>
+    /// «Отправить приглашение» (этап 8, A6): письмо «Задайте пароль» ведёт на страницу «Новый пароль». Ссылка одноразовая,
+    /// действует трое суток; повторная отправка допустима. Отключённой записи письма нет.
+    /// </summary>
+    private static async Task<IResult> SendInvitation(Guid id, UserManager<AppUser> users, PasswordLinks links, CancellationToken ct)
+    {
+        var user = await users.FindByIdAsync(id.ToString());
+        if (user is null) return AccountNotFound();
+        return await links.InviteAsync(user, ct) switch
+        {
+            LetterResult.Sent => Results.NoContent(),
+            LetterResult.AccountDisabled => Results.Problem(statusCode: StatusCodes.Status409Conflict,
+                title: "Учётная запись отключена", detail: "Отключённой учётной записи приглашение не отправляется: сначала верните её."),
+            LetterResult.NoPublicUrl => Results.Problem(statusCode: StatusCodes.Status409Conflict,
+                title: "Не задан адрес системы",
+                detail: "В настройках сервера не задан Mail:PublicUrl — письму не из чего собрать ссылку. Сообщите системному программисту."),
+            LetterResult.Rejected => Results.Problem(statusCode: StatusCodes.Status422UnprocessableEntity,
+                title: "Почтовый сервер не принял письмо", detail: $"Проверьте адрес {user.Email}: сервер отказал в доставке."),
+            _ => Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable,
+                title: "Почтовый сервер недоступен", detail: "Письмо не отправлено. Повторите позже или задайте временный пароль.")
+        };
+    }
 
     /// <summary>
     /// Новый временный пароль (этап 5.2): потерянную учётную запись иначе не вернуть. Требования к паролю — как при
@@ -137,7 +160,7 @@ public class UsersModule : ICarterModule
         if (!reset.Succeeded) return ValidationProblem(reset);
         await users.ResetAccessFailedCountAsync(user);
         // Временная блокировка за неудачные попытки снимается; отключённая администратором — остаётся.
-        if (!IsDisabled(user)) await users.SetLockoutEndDateAsync(user, null);
+        if (!user.IsDisabled) await users.SetLockoutEndDateAsync(user, null);
         return Results.NoContent();
     }
 
@@ -172,14 +195,16 @@ public class UsersModule : ICarterModule
 /// <paramref name="DirectoryUserId"/> — необязательный: привязать учётную запись к существующей записи
 /// справочника сотрудников (например, загруженной из файла должностей) вместо создания новой.
 /// </summary>
-public record CreateUserRequest(string Email, string FullName, string Password, string[]? Roles, Guid? DirectoryUserId = null);
+public record CreateUserRequest(string Email, string FullName, string? Password, string[]? Roles, Guid? DirectoryUserId = null);
 
 public record UserItem(Guid Id, string Email, string FullName, IReadOnlyList<string> Roles, Guid DirectoryUserId);
 
 /// <summary>Учётная запись: роли и связанная запись справочника сотрудников (null — не связана).</summary>
 /// <param name="IsActive">Учётная запись не отключена администратором (этап 5.2).</param>
+/// <param name="HasPassword">Пароль задан: у созданной без пароля записи он появится после приглашения (этап 8, A6).</param>
 public record AccountItem(
-    Guid Id, string Email, string FullName, IReadOnlyList<string> Roles, DirectoryRecordItem? Directory, bool IsActive = true);
+    Guid Id, string Email, string FullName, IReadOnlyList<string> Roles, DirectoryRecordItem? Directory, bool IsActive = true,
+    bool HasPassword = true);
 
 /// <summary>Новый набор ролей учётной записи.</summary>
 public record RolesRequest(string[]? Roles);

@@ -1,0 +1,21 @@
+@* Общий макет страниц входа и пароля: они открываются до входа и вне клиента Blazor. *@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="referrer" content="no-referrer" />
+    <title>@ViewData["Title"] — АС создания РПД и ФОС</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 360px; margin: 80px auto; padding: 0 16px; }
+        label { display: block; margin-top: 12px; }
+        input { width: 100%; padding: 8px; box-sizing: border-box; }
+        button { margin-top: 16px; padding: 8px 16px; }
+        .err { color: #b00020; }
+        .ok { color: #1b5e20; }
+    </style>
+</head>
+<body>
+    @RenderBody()
+</body>
+</html>
