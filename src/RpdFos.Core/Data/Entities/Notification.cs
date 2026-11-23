@@ -130,6 +130,12 @@ public static class NotificationEvents
     /// </summary>
     public const string SignatoryReplaced = "approval.signatory_replaced";
 
+    /// <summary>
+    /// Согласующему, чья отметка ждала: круг прерван — администратор принудительно сменил статус документа или другой согласующий
+    /// вернул документ с согласования (этап 8, A1; UC-09). Без ссылки на документ, если он согласующему больше не открыт.
+    /// </summary>
+    public const string ApprovalInterrupted = "approval.interrupted";
+
     /// <summary>Тому, кто запустил формирование: печатная форма готова — со ссылкой на документ (этап 7, A3).</summary>
     public const string PrintReady = "document.print_ready";
 
@@ -172,6 +178,7 @@ public static class NotificationEvents
         new(ApprovalStarted, "Согласование начато", MailMode.Off),
         new(AwaitingMark, "Документ ждёт вашего согласования", MailMode.Immediately),
         new(SignatoryReplaced, "Согласующий заменён", MailMode.Off),
+        new(ApprovalInterrupted, "Круг согласования прерван", MailMode.Off),
         new(ReturnedFromApproval, "Документ возвращён с согласования", MailMode.Immediately),
         new(Approved, "Документ согласован", MailMode.Off),
         new(ReturnedForCorrection, "Согласованный документ возвращён на исправление", MailMode.Off),

@@ -55,6 +55,13 @@ public class DocumentReopeningApiTests(DatabaseFixture app)
         Assert.Equal((c.MethodistRecord.ShortName, Reason), (corrected.By, corrected.Comment));
         Assert.Null(forMethodist.Approval.Returned);
         Assert.Equal(corrected, (await DetailsAsync(c.Admin, c.Created)).Approval!.Corrected);
+        // Круг, который согласовал документ, отменён: строки прежнего круга серые, а не «согласовано» (этап 8, A1).
+        Assert.Equal(corrected, forMethodist.Approval.Cancelled);
+        Assert.All(forMethodist.Approval.Seats, s => Assert.Equal((SignatureStatuses.Cancelled, "отметка отменена"), (s.Status, s.StatusTitle)));
+        Assert.Equal(corrected, (await DetailsAsync(c.Admin, c.Created)).Approval!.Cancelled);
+        // Согласованный круг никого не ждал: о прерванном круге никому не сообщается.
+        foreach (var client in new[] { c.Author, c.Methodist, c.Other, c.Admin, c.Head, c.Umu })
+            Assert.Empty(await FeedAsync(client, c.Created, NotificationEvents.ApprovalInterrupted));
         Assert.Null((await DetailsAsync(c.Author, c.Created)).Approval);
         Assert.Null((await DetailsAsync(c.Head, c.Created)).Approval);
 
@@ -119,6 +126,7 @@ public class DocumentReopeningApiTests(DatabaseFixture app)
         await ExpectAsync(c.Methodist.PostAsJsonAsync(Url(c.Created, "accept"), new DocumentVersionRequest(version)), S.Approval);
         var round = (await DetailsAsync(c.Methodist, c.Created)).Approval!;
         Assert.Null(round.Corrected);
+        Assert.Null(round.Cancelled);
         Assert.Null(round.Returned);
         Assert.All(round.Seats, s => Assert.Equal((SignatureStatuses.Pending, null, null), (s.Status, s.MarkedAt, s.Comment)));
         foreach (var approver in new[] { c.Head, c.Umu })
@@ -341,6 +349,22 @@ public class DocumentReopeningApiTests(DatabaseFixture app)
         }
         foreach (var client in new[] { c.Head, c.Umu, c.Admin })
             Assert.Empty(await FeedAsync(client, c.Created, NotificationEvents.StatusForced));
+
+        // Круг прерван: согласующему, чья отметка ждала (Umu), — «Круг согласования прерван» со ссылкой; уже согласовавшему (Head),
+        // совершившему смену и остальным — нет. Ждавшее «ждёт вашего согласования» прочитанным не остаётся.
+        var interrupted = Assert.Single(await FeedAsync(c.Umu, c.Created, NotificationEvents.ApprovalInterrupted));
+        Assert.StartsWith($"Круг согласования прерван: {c.Created.Document.Title}. Администратор: {c.AdminRecord.ShortName}", interrupted.Text);
+        Assert.EndsWith("Комментарий: Согласующий в отпуске.", interrupted.Text);
+        Assert.All(await FeedAsync(c.Umu, c.Created, NotificationEvents.AwaitingMark), n => Assert.NotNull(n.ReadAt));
+        foreach (var client in new[] { c.Head, c.Admin, c.Author, c.Methodist, c.Other })
+            Assert.Empty(await FeedAsync(client, c.Created, NotificationEvents.ApprovalInterrupted));
+
+        // Панель: строки отменены («согласовано» Head — отметка отменена, не успевший Umu — прерван), над ними — кто и почему.
+        var cancelled = (await DetailsAsync(c.Methodist, c.Created)).Approval!;
+        Assert.Equal([SignatureStatuses.Cancelled, SignatureStatuses.Interrupted], cancelled.Seats.Select(s => s.Status));
+        Assert.Equal((c.AdminRecord.ShortName, "Согласующий в отпуске"), (cancelled.Cancelled!.By, cancelled.Cancelled.Comment));
+        Assert.Equal(cancelled.Cancelled, (await DetailsAsync(c.Admin, c.Created)).Approval!.Cancelled);
+        Assert.Null((await DetailsAsync(c.Author, c.Created)).Approval);
         var payload = await PayloadAsync(Assert.Single(await FeedAsync(c.Author, c.Created, NotificationEvents.StatusForced)));
         Assert.Equal((c.AdminRecord.ShortName, S.Approval, S.UnderReview, "Согласующий в отпуске"),
             (payload.GetProperty("by").GetString(), payload.GetProperty("from").GetString(), payload.GetProperty("to").GetString(),
@@ -364,6 +388,32 @@ public class DocumentReopeningApiTests(DatabaseFixture app)
             Assert.Contains(await QueueAsync(approver), q => q.Id == c.Created.Document.Id);
         await ExpectAsync(c.Umu.PostAsync(Url(c.Created, "approval/approve"), null), S.Approval);
         await ExpectAsync(c.Head.PostAsync(Url(c.Created, "approval/approve"), null), S.Approved);
+    }
+
+    /// <summary>
+    /// Этап 8, A1: ссылка в «Круг согласования прерван» — только тому, кому документ ещё открыт. Назначенный в место согласующим
+    /// без роли «Утверждающий» строку в документе имеет, но открыть его не может (403): ему событие приходит без ссылки.
+    /// </summary>
+    [Fact]
+    public async Task Interrupted_round_event_has_no_link_for_a_seat_holder_who_cannot_open_the_document()
+    {
+        var c = await UnderReviewAsync("Б1.О.13");
+        var (teacher, teacherRecord) = await AccountAsync(AppRoles.Teacher);
+        await ExpectAsync(c.Methodist.PostAsJsonAsync(Url(c.Created, "accept"), new DocumentVersionRequest(c.Version)), S.Approval);
+        Assert.Equal(HttpStatusCode.OK, (await c.Methodist.PostAsJsonAsync(
+            Url(c.Created, $"approval/seats/{SignatoryRoles.UmuHead}/assign"), new AssignRequest(teacherRecord.Id))).StatusCode);
+        var version = (await DetailsAsync(c.Admin, c.Created)).Document.Version;
+
+        await ExpectAsync(c.Admin.PostAsJsonAsync(Url(c.Created, "force-status"), new ForceStatusRequest(version, S.Returned, "Пересоздаём круг")),
+            S.Returned);
+
+        var feed = (await teacher.GetFromJsonAsync<List<NotificationItem>>($"/api/notifications?limit={NotificationsModule.MaxLimit}"))!
+            .Where(n => n.EventType == NotificationEvents.ApprovalInterrupted).ToList();
+        var item = Assert.Single(feed);
+        Assert.Null(item.DocumentId);
+        Assert.StartsWith($"Круг согласования прерван: {c.Created.Document.Title}.", item.Text);
+        // Заведующий кафедрой открыть документ может: его событие — со ссылкой.
+        Assert.Single(await FeedAsync(c.Head, c.Created, NotificationEvents.ApprovalInterrupted));
     }
 
     private sealed record Circle(

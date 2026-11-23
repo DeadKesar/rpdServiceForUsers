@@ -71,6 +71,12 @@ public static class SignatureStatuses
     /// </summary>
     public const string Interrupted = "interrupted";
 
+    /// <summary>
+    /// Только для показа: отметка «согласовано» круга, который закончился, не став согласованием, — возвратом с согласования
+    /// другим согласующим, на исправление или принудительной сменой статуса (этап 8, A1). Согласия у документа больше нет.
+    /// </summary>
+    public const string Cancelled = "cancelled";
+
     public static readonly string[] All = [Pending, Approved, Rejected];
 
     public static string Title(string status) => status switch
@@ -79,6 +85,7 @@ public static class SignatureStatuses
         Approved => "согласовано",
         Rejected => "возвращено",
         Interrupted => "прерван",
+        Cancelled => "отметка отменена",
         _ => status
     };
 }

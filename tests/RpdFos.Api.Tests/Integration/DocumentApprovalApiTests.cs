@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using RpdFos.Api.Features.Approvals;
 using RpdFos.Api.Features.Documents;
+using RpdFos.Api.Features.Notifications;
 using RpdFos.Core.Data.Entities;
 using RpdFos.Core.Documents;
 using Xunit;
@@ -226,7 +227,9 @@ public class DocumentApprovalApiTests(DatabaseFixture app)
         Assert.Equal((true, true), (returned.Editable, returned.Actions.Review));
         var back = returned.Approval!.Returned!;
         Assert.Equal((umuRecord.ShortName, "Не указана литература по разделу 2"), (back.By, back.Comment));
-        Assert.Equal([SignatureStatuses.Approved, SignatureStatuses.Rejected], returned.Approval.Seats.Select(s => s.Status));
+        // Согласие, поставленное в отменённом круге, зелёным «согласовано» не остаётся: документ уже не на согласовании (этап 8, A1).
+        Assert.Equal([SignatureStatuses.Cancelled, SignatureStatuses.Rejected], returned.Approval.Seats.Select(s => s.Status));
+        Assert.Null(returned.Approval.Cancelled);
         Assert.Equal(("Не указана литература по разделу 2", back.At), (returned.Approval.Seats[1].Comment, returned.Approval.Seats[1].MarkedAt!.Value));
         Assert.Equal((false, false), (returned.Approval.CanAssign, returned.Approval.CanStart));
 
@@ -237,6 +240,9 @@ public class DocumentApprovalApiTests(DatabaseFixture app)
             Section(version, JsonNode.Parse(forAuthor.Payload.GetProperty("title_page").GetRawText())!));
         Assert.Equal(HttpStatusCode.Conflict, stale.StatusCode);
         Assert.Equal("Действие недоступно в этом статусе", (await stale.Content.ReadFromJsonAsync<ProblemDetails>())!.Title);
+
+        // Заведующий кафедрой уже согласовал — ждать ему было нечего, и о прерванном круге ему не сообщается.
+        Assert.Empty(await InterruptedAsync(head, created));
 
         // Круг окончен: у согласующих документ из очереди ушёл, отметить его нельзя.
         Assert.DoesNotContain(await QueueAsync(head), q => q.Id == created.Document.Id);
@@ -302,6 +308,70 @@ public class DocumentApprovalApiTests(DatabaseFixture app)
         Assert.All((await DetailsAsync(methodist, created)).Approval!.Seats,
             s => Assert.Equal((SignatureStatuses.Pending, "ожидает"), (s.Status, s.StatusTitle)));
     }
+
+    /// <summary>
+    /// Этап 8, A1 (идея этапа 7, A12): согласующему, чья отметка ждала, при возврате другим согласующим приходит «Круг согласования
+    /// прерван» — кто и комментарий, со ссылкой на документ, который ему ещё открыт. Вернувшему и уже согласовавшему — нет;
+    /// ждавшее «ждёт вашего согласования» отмечается прочитанным, а после нового приёма приходит новое.
+    /// </summary>
+    [Fact]
+    public async Task Return_from_approval_tells_the_other_waiting_approvers_that_the_round_is_interrupted()
+    {
+        var (_, methodist, created, version) = await UnderReviewAsync("Б1.О.13");
+        var (head, _) = await DocumentData.SignatoryAsync(app, created.Document.DisciplineId, SignatoryRoles.DepartmentHead);
+        var (umu, umuRecord) = await DocumentData.SignatoryAsync(app, created.Document.DisciplineId, SignatoryRoles.UmuHead);
+        await ExpectAsync(methodist.PostAsJsonAsync(Url(created, "accept"), new DocumentVersionRequest(version)), DocumentStatuses.Approval);
+        Assert.Single(await FeedAsync(head, created, NotificationEvents.AwaitingMark), n => n.ReadAt is null);
+
+        version = await ExpectAsync(umu.PostAsJsonAsync(Url(created, "approval/reject"), new RejectRequest("Нет литературы")),
+            DocumentStatuses.UnderReview);
+
+        var interrupted = Assert.Single(await InterruptedAsync(head, created));
+        Assert.StartsWith($"Круг согласования прерван: {created.Document.Title}. Согласующий: {umuRecord.ShortName}", interrupted.Text);
+        Assert.EndsWith("Комментарий: Нет литературы.", interrupted.Text);
+        Assert.Equal(created.Document.Id, interrupted.DocumentId);
+        Assert.All(await FeedAsync(head, created, NotificationEvents.AwaitingMark), n => Assert.NotNull(n.ReadAt));
+        // Вернувшему о его же действии не сообщается; методисту говорит «возвращён с согласования».
+        Assert.Empty(await InterruptedAsync(umu, created));
+        Assert.Empty(await InterruptedAsync(methodist, created));
+
+        // Новый круг: ждавший снова получает «ждёт вашего согласования», уже непрочитанное.
+        await ExpectAsync(methodist.PostAsJsonAsync(Url(created, "accept"), new DocumentVersionRequest(version)), DocumentStatuses.Approval);
+        Assert.Single(await FeedAsync(head, created, NotificationEvents.AwaitingMark), n => n.ReadAt is null);
+    }
+
+    /// <summary>
+    /// Подтверждение «Принять» строится по подписантам, которых приём найдёт (этап 8, A1): панель отдаёт места без подписанта
+    /// методисту на проверке; у остальных и после приёма списка нет.
+    /// </summary>
+    [Fact]
+    public async Task Review_details_name_the_seats_that_acceptance_would_leave_without_a_signatory()
+    {
+        var (author, methodist, created, version) = await UnderReviewAsync("Б1.О.13", DocumentData.SeatsWithMissingSignatory);
+        await DocumentData.SignatoryAsync(app, created.Document.DisciplineId, SignatoryRoles.DepartmentHead);
+        await DocumentData.SignatoryAsync(app, created.Document.DisciplineId, SignatoryRoles.UmuHead);
+
+        Assert.Equal(["Председатель учебно-методической комиссии по направлению подготовки"],
+            (await DetailsAsync(methodist, created)).AcceptUnassigned);
+        Assert.Null((await DetailsAsync(author, created)).AcceptUnassigned);
+
+        // Принят без председателя УМК — списка больше нет: приём состоялся.
+        await ExpectAsync(methodist.PostAsJsonAsync(Url(created, "accept"), new DocumentVersionRequest(version)), DocumentStatuses.Accepted);
+        Assert.Null((await DetailsAsync(methodist, created)).AcceptUnassigned);
+
+        // Подписанты найдены у всех мест — список пуст, и подтверждение обещает согласование.
+        var (_, methodist2, all, _) = await UnderReviewAsync("Б1.О.12");
+        await DocumentData.SignatoryAsync(app, all.Document.DisciplineId, SignatoryRoles.DepartmentHead);
+        await DocumentData.SignatoryAsync(app, all.Document.DisciplineId, SignatoryRoles.UmuHead);
+        Assert.Empty((await DetailsAsync(methodist2, all)).AcceptUnassigned!);
+    }
+
+    private static async Task<List<NotificationItem>> InterruptedAsync(HttpClient client, DocumentDetails document) =>
+        await FeedAsync(client, document, NotificationEvents.ApprovalInterrupted);
+
+    private static async Task<List<NotificationItem>> FeedAsync(HttpClient client, DocumentDetails document, string eventType) =>
+        (await client.GetFromJsonAsync<List<NotificationItem>>($"/api/notifications?limit={NotificationsModule.MaxLimit}"))!
+            .Where(n => n.EventType == eventType && n.DocumentId == document.Document.Id).ToList();
 
     [Fact]
     public async Task Document_accepted_before_approval_existed_is_started_from_the_panel()

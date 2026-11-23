@@ -9,6 +9,13 @@
 <div class="card mb-3">
     <div class="card-body py-2">
         <div class="fw-semibold mb-1">Согласование</div>
+        @* Круг отменён возвратом на исправление или принудительной сменой статуса (этап 8, A1): строки ниже — прежнего круга. *@
+        @if (State.Cancelled is { } cancelled)
+        {
+            <div class="small text-muted mb-1">
+                Круг отменён@(string.IsNullOrWhiteSpace(cancelled.Comment) ? "" : $": {cancelled.Comment.Trim().TrimEnd('.')}"), @cancelled.At.ToLocalTime().ToString("dd.MM.yyyy HH:mm").
+            </div>
+        }
         @if (State.Seats.Count == 0)
         {
             <div class="small text-muted">
@@ -27,7 +34,7 @@
                 <tbody>
                     @foreach (var s in State.Seats)
                     {
-                        <tr>
+                        <tr class="@(IsDimmed(s.Status) ? "text-muted" : null)">
                             <td>@s.Title</td>
                             <td>
                                 @if (s.SignatoryName is null)
@@ -106,7 +113,7 @@
         else if (Status == "accepted" && State.Seats.Any(s => s.SignatoryId is null))
         {
             <div class="small text-danger">
-                Согласование не запущено: не у всех мест найден подписант.
+                Согласование не запущено: подписант не найден у мест — @string.Join("; ", State.Seats.Where(s => s.SignatoryId is null).Select(s => s.Title)).
                 @(State.CanAssign ? "Назначьте согласующих — затем методист запускает согласование." : "Их назначает методист или администратор.")
             </div>
         }
@@ -190,6 +197,9 @@
 
     private static string Describe(DirectoryPerson p) =>
         string.Join(", ", new[] { p.ShortName, p.Position, p.Department }.Where(s => !string.IsNullOrEmpty(s)));
+
+    // Строки закончившегося круга серые: отметка отменена или не поставлена — и уже не будет (этап 8, A1).
+    private static bool IsDimmed(string status) => status is "cancelled" or "interrupted";
 
     private static string Badge(string status) => status switch
     {

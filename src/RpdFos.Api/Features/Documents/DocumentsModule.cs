@@ -937,7 +937,9 @@ public class DocumentsModule : ICarterModule
                 // Кнопка — когда обновлять есть что: данные РПД изменились, а сама РПД на месте.
                 RefreshFromRpd: linkedRpd is { Changed: true } && DocumentTransitions.CanRefreshFromRpd(status, isAuthor, isReviewer)),
             template.DefaultPayload is { } defaults ? JsonDocument.Parse(defaults).RootElement : null,
-            corrections, viewer.Id, panel, await BasisAsync(document, viewer, db, assignments, ct), linkedRpd, linkedFos);
+            corrections, viewer.Id, panel, await BasisAsync(document, viewer, db, assignments, ct), linkedRpd, linkedFos,
+            // Подтверждение «Принять» называет места, которых приём не заполнит (этап 8, A1): считается тем, кто может принять.
+            isReviewer && DocumentTransitions.CanReview(status) ? await approval.UnassignedOnAcceptAsync(document, ct) : null);
     }
 
     /// <summary>
@@ -1050,7 +1052,7 @@ public class DocumentsModule : ICarterModule
             or DocumentStatuses.Archived;
         if (!active && !viewer.IsCorrector) return null;
         var state = await approval.StateAsync(document, ct);
-        if (!active && state.Returned is null && state.Corrected is null) return null;
+        if (!active && state.Returned is null && state.Corrected is null && state.Cancelled is null) return null;
 
         return new ApprovalPanel(
             state.Seats.Select(s => new ApprovalSeatItem(s.Role, s.Title, s.SignatoryId, s.SignatoryName, s.Position, s.Status,
@@ -1059,7 +1061,8 @@ public class DocumentsModule : ICarterModule
             // Строк нет — документ принят до появления согласования: запуск сам определит подписантов.
             CanStart: viewer.IsReviewer && DocumentTransitions.CanStartApproval(status) && state.Seats.All(s => s.SignatoryId is not null),
             Returned: viewer.IsCorrector ? state.Returned : null,
-            Corrected: viewer.IsCorrector ? state.Corrected : null);
+            Corrected: viewer.IsCorrector ? state.Corrected : null,
+            Cancelled: viewer.IsCorrector ? state.Cancelled : null);
     }
 
     // Исправления полей из плана — из журнала аудита: кто, когда, было, стало.
@@ -1230,8 +1233,13 @@ public record StatusOption(string Status, string Title);
 /// </summary>
 /// <param name="Returned">Прежний круг закончился возвратом: кто, когда, с каким комментарием — методисту и администратору.</param>
 /// <param name="Corrected">Согласованный документ вернули на исправление: кто, когда, причина — методисту и администратору (этап 7, A8).</param>
+/// <param name="Cancelled">
+/// Круг отменён возвратом на исправление или принудительной сменой статуса: кто, когда, причина — методисту и администратору;
+/// строки круга при этом показываются отменёнными (этап 8, A1).
+/// </param>
 public record ApprovalPanel(
-    IReadOnlyList<ApprovalSeatItem> Seats, bool CanAssign, bool CanStart, ApprovalReturn? Returned, ApprovalReturn? Corrected = null);
+    IReadOnlyList<ApprovalSeatItem> Seats, bool CanAssign, bool CanStart, ApprovalReturn? Returned, ApprovalReturn? Corrected = null,
+    ApprovalReturn? Cancelled = null);
 
 /// <summary>Место согласования: назначенный, его отметка и время, комментарий возврата.</summary>
 /// <param name="CanSign">У назначенного есть действующая учётная запись с ролью «Утверждающий».</param>
@@ -1258,11 +1266,15 @@ public record PlanCorrection(string Path, JsonElement? Before, JsonElement? Afte
 /// <param name="BasedOn">Документ создан на основе другого (этап 7, A11): основа и список неперенесённого; иначе null.</param>
 /// <param name="LinkedRpd">У ФОС (этап 7, B3): связанная РПД, снимок и пометка «РПД изменилась»; у остальных null.</param>
 /// <param name="LinkedFos">У РПД (B3): созданные по ней ФОС, новейшие первыми; у остальных null.</param>
+/// <param name="AcceptUnassigned">
+/// Места листа согласования, подписанты которых приём не найдёт (этап 8, A1) — методисту на проверке, для подтверждения «Принять»;
+/// пусто — приём запустит согласование сразу, null — приём зрителю недоступен.
+/// </param>
 public record DocumentDetails(
     DocumentItem Document, JsonElement Payload, JsonElement Schema, DocumentMetadata Metadata, bool Editable, DocumentActions Actions,
     JsonElement? TemplateDefaults = null, IReadOnlyList<PlanCorrection>? PlanCorrections = null, Guid? ViewerId = null,
     ApprovalPanel? Approval = null, DocumentBasis? BasedOn = null, LinkedRpdItem? LinkedRpd = null,
-    IReadOnlyList<LinkedFosItem>? LinkedFos = null);
+    IReadOnlyList<LinkedFosItem>? LinkedFos = null, IReadOnlyList<string>? AcceptUnassigned = null);
 
 /// <summary>
 /// Связанная РПД ФОС (этап 7, B3): название и статус сейчас (у удалённой — <paramref name="Deleted"/>), открывается ли она

@@ -811,7 +811,7 @@ else
     private static string ReadOnlyReason(string status) => status switch
     {
         "under_review" => "Документ на проверке у методиста — изменить его можно после возврата на доработку.",
-        "accepted" => "Документ принят методистом. Согласование начнётся, когда будут назначены все согласующие.",
+        "accepted" => "Документ принят методистом: правки закрыты.",
         "approval" => "Документ на согласовании: изменить его нельзя. Согласующий может вернуть документ методисту.",
         "approved" => "Документ согласован: правки закрыты.",
         "archived" => "Документ в архиве: он открыт только для чтения.",
@@ -833,9 +833,8 @@ else
         // Приём запускает согласование (UC-07): отзыва нет, поэтому — подтверждение (этап 6, A3).
         // У ФОС в окне — число предупреждений сквозной проверки (этап 7, B8): приём они не блокируют.
         var cross = details!.LinkedRpd is null ? 0 : CrossCheckIssues().Count(i => i.IsWarning);
-        var question = cross > 0
-            ? $"Сквозная проверка РПД ↔ ФОС: расхождений {cross}. Приём они не блокируют. Вы отправляете документ на согласование. Уверены?"
-            : "Вы отправляете документ на согласование. Уверены?";
+        // Текст — по тому, найдены ли подписанты всех мест (этап 8, A1).
+        var question = AcceptConfirmation.Question(details.AcceptUnassigned, cross);
         if (!await confirm.AskAsync(question, "Принять документ")) return;
         if (!await SaveSectionAsync()) return;
         await ChangeStatusAsync("accept", new { version }, "Документ принят.", r => ApprovalStartText(r, "Документ принят. "));
@@ -850,12 +849,13 @@ else
         await ChangeStatusAsync("approval/start", new { version }, "Документ отправлен на согласование.", r => ApprovalStartText(r, ""));
     }
 
-    // Приём сам запускает согласование (UC-07); не нашлись подписанты — документ остаётся «Принят».
+    // Приём сам запускает согласование (UC-07); не нашлись подписанты — документ остаётся «Принят». Тогда сообщения нет:
+    // об этом, с названными местами, говорит панель «Согласование», а плашка статуса — только о закрытых правках (этап 8, A1).
     private static string ApprovalStartText(DocumentReviewed r, string prefix) => r.Status switch
     {
         "approval" => $"{prefix}Документ отправлен на согласование.",
         "approved" => $"{prefix}Документ согласован: электронных согласующих в шаблоне нет.",
-        _ => $"{prefix}Согласование не запущено: не у всех мест найден подписант — назначьте согласующих в панели «Согласование»."
+        _ => ""
     };
 
     // «Согласовать» (UC-08): отметку не отозвать — с подтверждением. Отметили все — документ «Согласован». Свои
@@ -1052,7 +1052,8 @@ else
             if (response.IsSuccessStatusCode && await response.Content.ReadFromJsonAsync<DocumentReviewed>() is { } reviewed)
             {
                 await LoadAsync();
-                (messageIsError, message) = (false, doneBy?.Invoke(reviewed) ?? done);
+                var text = doneBy?.Invoke(reviewed) ?? done;
+                (messageIsError, message) = (false, text.Length > 0 ? text : null);
                 return reviewed;
             }
 

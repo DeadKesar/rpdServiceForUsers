@@ -36,7 +36,7 @@ public sealed record ReopeningResult(ReopeningProblem? Problem, Guid? OtherId = 
 /// </para>
 /// </summary>
 public sealed class DocumentReopening(
-    AppDbContext db, DocumentHistory history, DocumentNotifications notifications, TimeProvider clock)
+    AppDbContext db, DocumentHistory history, DocumentNotifications notifications, DocumentApproval approval, TimeProvider clock)
 {
     private static readonly JsonSerializerOptions Json = new() { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
 
@@ -83,6 +83,8 @@ public sealed class DocumentReopening(
         if (from == DocumentStatuses.Approval) payload["approval_interrupted"] = true;
         db.AuditLog.Add(Audit(document, adminId, AuditEvents.StatusForced, at, payload));
         await notifications.StatusForcedAsync(document, adminId, from, text, at, ct);
+        // Автору и методистам сказало «статус изменён»; согласующим, чьи отметки ждали, — что круг прерван (этап 8, A1).
+        if (from == DocumentStatuses.Approval) await approval.InterruptedAsync(document, adminId, "Администратор", text, at, ct);
         return new(null);
     }
 

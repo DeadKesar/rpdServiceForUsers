@@ -4,6 +4,7 @@ using System.Text.Json.Nodes;
 using Microsoft.EntityFrameworkCore;
 using RpdFos.Core.Data;
 using RpdFos.Core.Data.Entities;
+using RpdFos.Core.Directory;
 using RpdFos.Core.DocumentTypes;
 
 namespace RpdFos.Core.Documents;
@@ -53,8 +54,11 @@ public sealed record ApprovalReturn(string? By, DateTimeOffset At, string? Comme
 /// <summary>
 /// Круг согласования документа; <see cref="Returned"/> — круг закончился возвратом с согласования,
 /// <see cref="Corrected"/> — согласованный документ вернули на исправление (этап 7, A8): кто, когда, причина.
+/// <see cref="Cancelled"/> — круг отменён не возвратом с согласования, а возвратом на исправление или принудительной
+/// сменой статуса (этап 8, A1): кто, когда, причина; строки круга до нового приёма показываются отменёнными.
 /// </summary>
-public sealed record ApprovalState(IReadOnlyList<ApprovalSeatState> Seats, ApprovalReturn? Returned, ApprovalReturn? Corrected = null);
+public sealed record ApprovalState(
+    IReadOnlyList<ApprovalSeatState> Seats, ApprovalReturn? Returned, ApprovalReturn? Corrected = null, ApprovalReturn? Cancelled = null);
 
 /// <summary>
 /// Параллельное электронное согласование (UC-07 – UC-09, FR-REV-04…06, FR-REV-13). Приём запускает круг: подписанты
@@ -69,9 +73,42 @@ public sealed record ApprovalState(IReadOnlyList<ApprovalSeatState> Seats, Appro
 /// </summary>
 public sealed class DocumentApproval(
     AppDbContext db, SignatoryResolution signatories, DocumentHistory history, DocumentNotifications notifications, LinkedDocuments links,
-    TimeProvider clock)
+    DirectoryAccounts directory, DisciplineAssignments assignments, TimeProvider clock)
 {
     private static readonly JsonSerializerOptions Json = new() { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
+
+    /// <summary>
+    /// Места, подписанты которых приём не найдёт (этап 8, A1), — для подтверждения «Принять»: приём определяет подписантов
+    /// правилами листа согласования заново, как <see cref="BeginAsync"/>, но ничего не меняет. Пусто — приём запустит
+    /// согласование сразу (и если электронных мест в листе нет вовсе — документ станет «Согласован»).
+    /// </summary>
+    public async Task<IReadOnlyList<string>> UnassignedOnAcceptAsync(Document document, CancellationToken ct = default)
+    {
+        var seats = await SeatsAsync(document, ct);
+        var report = await signatories.ResolveAsync(seats, document.DisciplineId, ct);
+        return seats.Where(s => report.Seat(s.Id)?.EmployeeId is null).Select(s => s.Title).ToList();
+    }
+
+    /// <summary>
+    /// Согласующим, чья отметка ждала, — «Круг согласования прерван» (этап 8, A1; UC-09): после возврата с согласования —
+    /// остальным ждавшим, после принудительной смены статуса из «На согласовании» — всем ждавшим. Строки читаются из
+    /// контекста: отметка вернувшего уже поставлена и в ждавших не входит. Ссылка — тем, кому документ ещё открыт.
+    /// </summary>
+    /// <param name="byTitle">«Согласующий» или «Администратор»: в тексте названо, кто прервал круг.</param>
+    public async Task InterruptedAsync(
+        Document document, Guid by, string byTitle, string comment, DateTimeOffset at, CancellationToken ct = default)
+    {
+        var waiting = (await RowsAsync(document, ct)).Where(r => r.Status == SignatureStatuses.Pending && r.ResolvedUserId is not null)
+            .Select(r => r.ResolvedUserId!.Value).Where(id => id != by).Distinct().ToList();
+        List<Guid> linked = [], unlinked = [];
+        foreach (var id in waiting)
+        {
+            // Без действующей учётной записи войти и прочесть некому — как у напоминаний о доработке (этап 7, A6).
+            if (await directory.RolesOfActiveAsync(id, ct) is not { } roles) continue;
+            (await DocumentVisibility.CanOpenAsync(this, assignments, document, id, roles, ct, links) ? linked : unlinked).Add(id);
+        }
+        await notifications.ApprovalInterruptedAsync(document, by, byTitle, comment, linked, unlinked, at, ct);
+    }
 
     /// <summary>
     /// Новый круг для только что принятого документа (UC-07, шаг 3): все подписанты найдены — документ сразу
@@ -204,6 +241,7 @@ public sealed class DocumentApproval(
         var returnedAt = history.StatusChanged(document, document.ReturnFromApproval(), signatoryId, text);
         await history.SnapshotAsync(document, signatoryId, VersionTriggers.StatusChange, ct);
         await notifications.ReturnedFromApprovalAsync(document, signatoryId, text, remarks, returnedAt, ct);
+        await InterruptedAsync(document, signatoryId, "Согласующий", text, returnedAt, ct);
         return null;
     }
 
@@ -237,10 +275,15 @@ public sealed class DocumentApproval(
         var ids = rows.Select(r => r.ResolvedUserId).OfType<Guid>().Distinct().ToList();
         var people = await db.Employees.AsNoTracking().Where(e => ids.Contains(e.Id)).ToDictionaryAsync(e => e.Id, ct);
         var able = await ApproversAsync(people.Values, ct);
-        // Возврат закончил круг. Его строки остаются в таблице до нового приёма, и не успевшая отметиться осталась бы
-        // «ожидает» — как живая; в панели её подписывают явно (замечание автора после C2).
+        // Круг закончен, когда документ вышел из приёма, согласования, согласованного и архивного. Строки остаются в таблице
+        // до нового приёма: не успевшая отметиться осталась бы «ожидает», а отметившая — «согласовано», как у живого круга.
+        // В панели их подписывают явно (замечание автора после C2; этап 8, A1).
+        var finished = !IsRoundOn(document.Status);
+        // Возврат с согласования — тоже конец круга, но о нём говорит своя плашка; о возврате на исправление и принудительной
+        // смене — строка «Круг отменён».
         var ended = rows.Any(r => r.Status == SignatureStatuses.Rejected);
         var returned = ended ? await LastReturnAsync(document.Id, ct) : null;
+        var cancelled = finished && !ended ? await LastCancellationAsync(document.Id, ct) : null;
 
         var order = new Dictionary<string, int>();
         foreach (var seat in seats) order.TryAdd(seat.Role, order.Count);
@@ -249,11 +292,23 @@ public sealed class DocumentApproval(
             var person = r.ResolvedUserId is Guid id ? people.GetValueOrDefault(id) : null;
             return new ApprovalSeatState(r.Role, seats.FirstOrDefault(s => s.Role == r.Role)?.Title ?? SignatoryRoles.Title(r.Role),
                 person?.Id, person?.ShortName, person?.Position,
-                ended && r.Status == SignatureStatuses.Pending ? SignatureStatuses.Interrupted : r.Status,
+                finished ? FinishedStatus(r.Status) : r.Status,
                 r.Status == SignatureStatuses.Rejected ? returned?.At : r.ApprovedAt, r.Comment,
                 person is not null && able.Contains(person.Id));
-        }).ToList(), returned, corrected);
+        }).ToList(), returned, corrected, cancelled);
     }
+
+    // Круг идёт или его итог действует: приём (круг ещё не начат), согласование, согласован, архивный (круг, который его согласовал).
+    private static bool IsRoundOn(string status) =>
+        status is DocumentStatuses.Accepted or DocumentStatuses.Approval or DocumentStatuses.Approved or DocumentStatuses.Archived;
+
+    // Строка закончившегося круга: возврат остаётся возвратом, а ждавшая и поставленная отметки — уже не действуют.
+    private static string FinishedStatus(string status) => status switch
+    {
+        SignatureStatuses.Pending => SignatureStatuses.Interrupted,
+        SignatureStatuses.Approved => SignatureStatuses.Cancelled,
+        _ => status
+    };
 
     // Электронные места листа согласования — из снимка в шаблоне документа.
     private async Task<IReadOnlyList<SignatureSeat>> SeatsAsync(Document document, CancellationToken ct) =>
@@ -383,6 +438,25 @@ public sealed class DocumentApproval(
         var restarted = await db.DocumentStatusHistory.AnyAsync(
             h => h.DocumentId == documentId && h.ToStatus == DocumentStatuses.Accepted && h.ChangedAt > correction.At, ct);
         return restarted ? null : correction;
+    }
+
+    // Что отменило круг (этап 8, A1): последний выход из согласования, согласованного или архива не в них же — возврат на
+    // исправление или принудительная смена. Если после него приём начал новый круг, прежний уже не показывается.
+    private async Task<ApprovalReturn?> LastCancellationAsync(Guid documentId, CancellationToken ct)
+    {
+        string[] leaving = [DocumentStatuses.Approval, DocumentStatuses.Approved, DocumentStatuses.Archived];
+        string[] roundStatuses = [DocumentStatuses.Accepted, DocumentStatuses.Approval, DocumentStatuses.Approved, DocumentStatuses.Archived];
+        var cancellation = await (
+                from h in db.DocumentStatusHistory
+                where h.DocumentId == documentId && h.FromStatus != null && leaving.Contains(h.FromStatus) && !roundStatuses.Contains(h.ToStatus)
+                join e in db.Employees on h.ChangedBy equals e.Id
+                orderby h.ChangedAt descending
+                select new ApprovalReturn(e.ShortName, h.ChangedAt, h.Comment))
+            .FirstOrDefaultAsync(ct);
+        if (cancellation is null) return null;
+        var restarted = await db.DocumentStatusHistory.AnyAsync(
+            h => h.DocumentId == documentId && h.ToStatus == DocumentStatuses.Accepted && h.ChangedAt > cancellation.At, ct);
+        return restarted ? null : cancellation;
     }
 
     // Документ согласован — основа той же дисциплины, на которой он создан, устарела (этап 7, A11; расширение FR-DOC-12). Статус

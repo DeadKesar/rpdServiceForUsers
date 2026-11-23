@@ -139,7 +139,8 @@ public sealed class DocumentNotifications(AppDbContext db, DirectoryAccounts dir
 
     /// <summary>
     /// Автору и методистам: администратор принудительно сменил статус документа (этап 7, A8; FR-ADM-04) — было, стало,
-    /// комментарий. Согласующим не идёт: решать им нечего, круг прерван без их участия.
+    /// комментарий. Согласующим не идёт: решать им нечего, а ждавшим отметки о прерванном круге говорит свое событие
+    /// (<see cref="ApprovalInterruptedAsync"/>, этап 8, A1).
     /// </summary>
     public async Task StatusForcedAsync(
         Document document, Guid by, string from, string comment, DateTimeOffset at, CancellationToken ct = default)
@@ -331,6 +332,32 @@ public sealed class DocumentNotifications(AppDbContext db, DirectoryAccounts dir
             Text($"Согласующий заменён: {document.Title}", $"Место в листе согласования: {seat}", $"Новый согласующий: {next}"),
             new JsonObject { ["by"] = await NameAsync(by, ct), ["seats"] = new JsonArray(seat), ["signatory"] = next }, ct,
             linked: keepsAccess);
+    }
+
+    /// <summary>
+    /// Согласующим, чья отметка ждала, когда круг прервался (этап 8, A1; UC-09): администратор принудительно сменил статус
+    /// документа или другой согласующий вернул его с согласования. В тексте — кто и комментарий; когда — время самого
+    /// уведомления. Документ ушёл из очереди, и ждавшее «ждёт вашего согласования» теряет смысл: непрочитанные такие по
+    /// этому документу отмечаются прочитанными, иначе второй круг показал бы в колокольчике два одинаковых. Ссылку получают
+    /// те, кому документ ещё открыт (<paramref name="linked"/>): остальным переход по ней дал бы 403 (правило A3).
+    /// </summary>
+    /// <param name="byTitle">Кем совершено действие: «Администратор» или «Согласующий».</param>
+    public async Task ApprovalInterruptedAsync(
+        Document document, Guid by, string byTitle, string comment, IReadOnlyList<Guid> linked, IReadOnlyList<Guid> unlinked,
+        DateTimeOffset at, CancellationToken ct = default)
+    {
+        var all = linked.Concat(unlinked).ToList();
+        if (all.Count == 0) return;
+        foreach (var waiting in await db.Notifications.Where(n => all.Contains(n.RecipientId) && n.DocumentId == document.Id &&
+                         n.EventType == NotificationEvents.AwaitingMark && n.ReadAt == null).ToListAsync(ct))
+            waiting.ReadAt = at;
+
+        var who = await NameAsync(by, ct);
+        var phrase = Text($"Круг согласования прерван: {document.Title}", $"{byTitle}: {who}", $"Комментарий: {comment}");
+        var parameters = new JsonObject { ["by"] = who, ["comment"] = comment };
+        if (linked.Count > 0) await AddAsync(NotificationEvents.ApprovalInterrupted, document, linked, at, phrase, parameters, ct);
+        if (unlinked.Count > 0)
+            await AddAsync(NotificationEvents.ApprovalInterrupted, document, unlinked, at, phrase, parameters, ct, linked: false);
     }
 
     /// <summary>

@@ -54,10 +54,12 @@ public sealed record StatusOption(string Status, string Title);
 /// Согласование документа (этап 6, B2–B3): места электронного согласования и что может зритель — назначить или
 /// заменить подписанта, запустить согласование принятого документа. <paramref name="Returned"/> — прежний круг
 /// закончился возвратом: кто, когда, с каким комментарием (методисту и администратору). <paramref name="Corrected"/> —
-/// согласованный документ вернули на исправление: кто, когда, причина (этап 7, A8).
+/// согласованный документ вернули на исправление: кто, когда, причина (этап 7, A8). <paramref name="Cancelled"/> — круг отменён
+/// возвратом на исправление или принудительной сменой статуса (этап 8, A1): строки круга показываются отменёнными.
 /// </summary>
 public sealed record ApprovalState(
-    List<ApprovalSeatItem> Seats, bool CanAssign, bool CanStart, ApprovalReturn? Returned, ApprovalReturn? Corrected = null);
+    List<ApprovalSeatItem> Seats, bool CanAssign, bool CanStart, ApprovalReturn? Returned, ApprovalReturn? Corrected = null,
+    ApprovalReturn? Cancelled = null);
 
 /// <summary>Место согласования: назначенный, его отметка и время, комментарий возврата.</summary>
 /// <param name="CanSign">У назначенного есть действующая учётная запись с ролью «Утверждающий».</param>
@@ -84,10 +86,11 @@ public sealed record PlanCorrection(string Path, JsonElement? Before, JsonElemen
 /// <param name="BasedOn">Документ создан на основе другого (этап 7, A11): основа и список неперенесённого; иначе null.</param>
 /// <param name="LinkedRpd">У ФОС (этап 7, B3): связанная РПД, снимок и пометка «РПД изменилась»; у остальных null.</param>
 /// <param name="LinkedFos">У РПД (B3): созданные по ней ФОС, новейшие первыми; у остальных null.</param>
+/// <param name="AcceptUnassigned">Места, подписанты которых приём не найдёт (этап 8, A1) — для подтверждения «Принять»; null — приём недоступен.</param>
 public sealed record DocumentDetails(DocumentItem Document, JsonElement Payload, JsonElement Schema, DocumentMetadata Metadata,
     bool Editable, DocumentActions Actions, JsonElement? TemplateDefaults = null, List<PlanCorrection>? PlanCorrections = null,
     Guid? ViewerId = null, ApprovalState? Approval = null, DocumentBasis? BasedOn = null, LinkedRpdItem? LinkedRpd = null,
-    List<LinkedFosItem>? LinkedFos = null);
+    List<LinkedFosItem>? LinkedFos = null, List<string>? AcceptUnassigned = null);
 
 /// <summary>
 /// Связанная РПД ФОС (этап 7, B3): название и статус сейчас, открывается ли зрителю, версия и время снимка. <paramref name="Changed"/> —
