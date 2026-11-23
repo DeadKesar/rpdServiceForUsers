@@ -1,8 +1,10 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.RegularExpressions;
+using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using RpdFos.Api.Features.Profile;
@@ -114,6 +116,70 @@ public partial class EmailChangeTests(DatabaseFixture app)
         var profile = (await (await client.GetAsync("/api/profile")).Content.ReadFromJsonAsync<ProfileItem>())!;
         Assert.Equal(newEmail, profile.Email);
         Assert.Null(profile.EmailChange);
+    }
+
+    private static readonly object Gate = new();
+    private static WebApplicationFactory<Program>? _realCookies;
+
+    // Второй хост на той же базе: cookie входа настоящий (в основном хосте тестов он подменён и войти нельзя).
+    private WebApplicationFactory<Program> RealCookies()
+    {
+        lock (Gate)
+            return _realCookies ??= app.WithWebHostBuilder(b =>
+            {
+                b.UseSetting("Jobs:Enabled", "false");
+                b.ConfigureTestServices(services => services.PostConfigure<CookieAuthenticationOptions>(
+                    IdentityConstants.ApplicationScheme, o => o.ForwardDefault = null));
+            });
+    }
+
+    // Страница входа, как её проходит браузер: форма с защитным токеном, переходы вручную. Успех — 302 и cookie входа.
+    private async Task<(bool SignedIn, string Html)> SignInPageAsync(string email, string password)
+    {
+        var browser = RealCookies().CreateClient(new WebApplicationFactoryClientOptions
+        {
+            BaseAddress = new Uri("https://localhost"), AllowAutoRedirect = false
+        });
+        var form = await browser.GetStringAsync("/Account/Login");
+        var response = await browser.PostAsync("/Account/Login", new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["__RequestVerificationToken"] = AntiforgeryField().Match(form).Groups[1].Value,
+            ["Email"] = email, ["Password"] = password
+        }));
+        var cookie = response.Headers.TryGetValues("Set-Cookie", out var cookies)
+                     && cookies.Any(c => c.StartsWith(".AspNetCore.Identity.Application="));
+        return (response.StatusCode == HttpStatusCode.Redirect && cookie, WebHtml(await response.Content.ReadAsStringAsync()));
+    }
+
+    // Тест подтверждения выше проверяет пароль через менеджер пользователей; здесь — страница входа, которую проходит человек
+    // (находка точки проверки A9: вход по новому адресу с прежним паролем не прошёл).
+    [Fact]
+    public async Task Sign_in_page_accepts_new_address_with_the_same_password_and_refuses_the_old_one()
+    {
+        var (client, _, oldEmail, accountId) = await NewAccountAsync();
+        // Пароль, заданный администратором, временный (A7): вход ведёт на страницу смены. Здесь нужен обычный вход.
+        await WithUsersAsync(async users =>
+        {
+            var account = (await users.FindByIdAsync(accountId.ToString()))!;
+            account.MustChangePassword = false;
+            return await users.UpdateAsync(account);
+        });
+        var newEmail = NewAddress();
+        Assert.True((await SignInPageAsync(oldEmail, Password)).SignedIn, "До смены вход по прежнему адресу должен проходить.");
+        await RequestAsync(client, newEmail);
+        var (oldToken, newToken) = Links(oldEmail, newEmail);
+        await ConfirmAsync(oldToken);
+
+        Assert.True((await SignInPageAsync(oldEmail, Password)).SignedIn, "С одним подтверждением вход — по прежнему адресу.");
+        Assert.False((await SignInPageAsync(newEmail, Password)).SignedIn);
+
+        await ConfirmAsync(newToken);
+
+        var byNew = await SignInPageAsync(newEmail, Password);
+        Assert.True(byNew.SignedIn, byNew.Html);
+        var byOld = await SignInPageAsync(oldEmail, Password);
+        Assert.False(byOld.SignedIn);
+        Assert.Contains("Неверный email или пароль", byOld.Html);
     }
 
     [Fact]
