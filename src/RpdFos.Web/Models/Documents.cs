@@ -132,7 +132,11 @@ public sealed record CompetenceCandidate(Guid Id, string Code, string Formulatio
 public sealed record IndicatorCandidate(Guid Id, string Code, string Text, string? Type);
 
 /// <summary>Раздел проверен без сохранения (этап 5.2): состояние всех разделов и ошибки черновика.</summary>
-public sealed record SectionChecked(List<SectionState> Sections, List<string> HiddenPaths, List<FieldError> Errors);
+public sealed record SectionChecked(List<SectionState> Sections, List<string> HiddenPaths, List<FieldError> Errors,
+    List<CommentMove>? Comments = null);
+
+/// <summary>Где окажется замечание после сохранения раздела (этап 8, A14): путь своей записи или «запись удалена».</summary>
+public sealed record CommentMove(Guid Id, string Path, bool IsRecordDeleted);
 
 /// <summary>Раздел сохранён; с ним — состояние всех разделов и история исправлений полей из плана (если исправлял).</summary>
 public sealed record SectionSaved(int Version, string Status, string StatusTitle, SectionState Section, DateTimeOffset SavedAt,
@@ -178,7 +182,7 @@ public sealed record DocumentReviewed(int Version, string Status, string StatusT
 /// согласующим (этап 7, A2).
 /// </summary>
 public sealed record CommentItem(Guid Id, string FieldPath, string Text, Guid AuthorId, string AuthorName, DateTimeOffset CreatedAt,
-    bool IsResolved, string? ResolvedByName, DateTimeOffset? ResolvedAt, bool FromApproval = false);
+    bool IsResolved, string? ResolvedByName, DateTimeOffset? ResolvedAt, bool FromApproval = false, bool IsRecordDeleted = false);
 
 /// <summary>Задача формирования печатной формы: статус, файл (если сформирован) и отчёт.</summary>
 public sealed record GenerationItem(Guid TaskId, string Format, string Status, string? ErrorMessage, DateTimeOffset CreatedAt,

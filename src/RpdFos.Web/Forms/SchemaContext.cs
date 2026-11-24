@@ -78,9 +78,13 @@ public sealed class SchemaContext(JsonElement root, JsonObject payload, Document
     /// </summary>
     public Func<string[], Task<MeansSuggestionResult?>>? SuggestMeans { get; set; }
 
-    /// <summary>Замечания к самому месту, а для <paramref name="subtree"/> — и к вложенным в него полям.</summary>
+    /// <summary>
+    /// Замечания к самому месту, а для <paramref name="subtree"/> — и к вложенным в него полям. Замечания к удалённым записям
+    /// у полей не показываются: их номер мог занять другая запись — они в списке замечаний документа (этап 8, A14).
+    /// </summary>
     public IEnumerable<CommentItem> CommentsAt(string path, bool subtree) =>
-        Comments.Where(c => c.FieldPath == path || subtree && c.FieldPath.StartsWith(path + "/", StringComparison.Ordinal));
+        Comments.Where(c => !c.IsRecordDeleted &&
+            (c.FieldPath == path || subtree && c.FieldPath.StartsWith(path + "/", StringComparison.Ordinal)));
 
     /// <summary>id элемента поля на странице — для перехода к полю из списка замечаний и ошибок.</summary>
     public static string Anchor(string path) => "field" + path.Replace('/', '-');

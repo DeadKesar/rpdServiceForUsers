@@ -519,12 +519,21 @@ else
                     @foreach (var c in comments)
                     {
                         <li class="@(c.IsResolved ? "text-muted" : "")">
-                            <a href="" @onclick="() => GoToAsync(c.FieldPath)" @onclick:preventDefault>@PlaceTitle(c.FieldPath)</a>:
+                            <a href="" @onclick="() => GoToAsync(c.IsRecordDeleted ? ListPathOf(c.FieldPath) : c.FieldPath)" @onclick:preventDefault>@PlaceTitle(c.FieldPath)</a>:
                             @c.Text
                             <span class="text-muted">— @c.AuthorName@(c.FromApproval ? ", согласующий" : "")</span>
+                            @if (c.IsRecordDeleted)
+                            {
+                                <span class="badge text-bg-secondary ms-1">запись удалена</span>
+                            }
                             @if (c.IsResolved)
                             {
                                 <span class="badge text-bg-success ms-1">разрешено@(c.ResolvedByName is { } by ? $" — {by}" : "")</span>
+                            }
+                            @* У поля замечание к удалённой записи не показывается — снять его можно только здесь. *@
+                            @if (c.IsRecordDeleted && context!.CanResolveComment(c) && context.ResolveComment is { } resolve)
+                            {
+                                <button type="button" class="btn btn-sm btn-outline-success py-0 ms-1" @onclick="() => resolve(c)">Разрешено</button>
                             }
                         </li>
                     }
@@ -811,6 +820,14 @@ else
         return path.Trim('/').Contains('/') ? $"{title} → {context!.FieldTitle(path)}" : title;
     }
 
+    // Путь списка, в котором была запись: до первого номера («/literature/main/2/citation» → «/literature/main»).
+    private static string ListPathOf(string path)
+    {
+        var segments = path.TrimStart('/').Split('/');
+        var at = Array.FindIndex(segments, s => int.TryParse(s, out _));
+        return at > 0 ? "/" + string.Join('/', segments[..at]) : path;
+    }
+
     private static JsonNode? Node(JsonElement? value) => value is { } v ? JsonNode.Parse(v.GetRawText()) : null;
 
     private static string ReadOnlyReason(string status) => status switch
@@ -1086,6 +1103,8 @@ else
 
     private async Task<bool> AddCommentAsync(string path, string text)
     {
+        // Место замечания — в сохранённом содержимом: после перестановки записей без сохранения номер был бы чужим.
+        if (dirty && !await SaveSectionAsync()) return false;
         try
         {
             var response = await Http.PostAsJsonAsync($"api/documents/{Id}/comments", new { fieldPath = path, text });
@@ -1205,6 +1224,12 @@ else
                 }
                 // Введённое во время запроса в сохранённое значение не попало — признак остаётся.
                 (dirty, message, fieldErrors) = (edits != at, null, []);
+                // Сервер переписал места замечаний вслед за своими записями (этап 8, A14) — берём их как сохранены.
+                if (comments.Count > 0 && await Http.GetFromJsonAsync<List<CommentItem>>($"api/documents/{Id}/comments") is { } fresh)
+                {
+                    comments.Clear();
+                    comments.AddRange(fresh);
+                }
                 return true;
             }
 
@@ -1257,6 +1282,10 @@ else
             if (seq != checks || at != edits || section != current) return;
             sections = result.Sections;
             context!.Metadata = context.Metadata with { Sections = sections, HiddenPaths = result.HiddenPaths };
+            // Замечания идут за своими записями сразу, не дожидаясь сохранения: места — по присланному содержимому.
+            foreach (var move in result.Comments ?? [])
+                if (comments.FindIndex(c => c.Id == move.Id) is >= 0 and var at2)
+                    comments[at2] = comments[at2] with { FieldPath = move.Path, IsRecordDeleted = move.IsRecordDeleted };
             StateHasChanged();
         }
         catch (AccessTokenNotAvailableException e)

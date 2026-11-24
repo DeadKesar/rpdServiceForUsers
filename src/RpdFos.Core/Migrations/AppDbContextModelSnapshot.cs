@@ -1235,6 +1235,10 @@ namespace RpdFos.Core.Migrations
                         .HasColumnType("character varying(500)")
                         .HasColumnName("field_path");
 
+                    b.Property<bool>("IsRecordDeleted")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_record_deleted");
+
                     b.Property<bool>("IsResolved")
                         .HasColumnType("boolean")
                         .HasColumnName("is_resolved");

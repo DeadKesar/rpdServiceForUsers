@@ -16,7 +16,11 @@ public enum SectionUpdateProblem { UnknownSection, HiddenSection, ReadOnlyChange
 /// разделов и скрытые места (этап 5.2).
 /// </summary>
 public sealed record SectionUpdateResult(SectionUpdateProblem? Problem, IReadOnlyList<DocumentValidationError> Errors, SectionState? Section,
-    IReadOnlyList<SectionState>? Sections = null, IReadOnlyList<string>? HiddenPaths = null, JsonElement? Payload = null);
+    IReadOnlyList<SectionState>? Sections = null, IReadOnlyList<string>? HiddenPaths = null, JsonElement? Payload = null,
+    IReadOnlyList<CommentMove>? CommentMoves = null);
+
+/// <summary>Где окажется замечание после сохранения раздела (этап 8, A14): новый путь и признак «запись удалена».</summary>
+public sealed record CommentMove(Guid Id, string Path, bool IsRecordDeleted);
 
 /// <summary>
 /// Изменение и сохранение документа. Раздел проверяется в режиме черновика, форматированный текст санитизируется,
@@ -118,7 +122,8 @@ public sealed class DocumentEditing(
             // Состояние разделов — по присланному, как если бы его сохранили: рамки и индикаторы без сохранения.
             var check = DocumentMetadata.Build(schemaJson, element, document.Status, facts, validator, rules, registry.FindSchema);
             return new(wrong.Count > 0 ? SectionUpdateProblem.Invalid : null, wrong, check.Sections.Single(s => s.Key == section),
-                check.Sections, check.HiddenPaths);
+                check.Sections, check.HiddenPaths, CommentMoves: (await RemapCommentsAsync(document.Id, section, payload[section],
+                    updated[section], apply: false, ct)).Select(m => new CommentMove(m.Comment.Id, m.Place.Path, m.Place.RecordDeleted)).ToList());
         }
         if (wrong.Count > 0) return new(SectionUpdateProblem.Invalid, wrong, null);
 
@@ -130,6 +135,7 @@ public sealed class DocumentEditing(
         if (broken.Count > 0 && !confirmReturn) return new(SectionUpdateProblem.ReturnNotConfirmed, broken, null);
 
         await images.LinkAsync(document.Id, imagesToLink, ct);
+        await RemapCommentsAsync(document.Id, section, payload[section], updated[section], apply: true, ct);
         if (scope == DocumentEditScope.PlanOnly) document.CorrectPlanFields(updatedJson);
         else if (document.Edit(updatedJson) is { } previous) history.StatusChanged(document, previous, editorId);
         var now = clock.GetUtcNow();
@@ -146,6 +152,23 @@ public sealed class DocumentEditing(
         var metadata = DocumentMetadata.Build(schemaJson, element, document.Status, facts, validator, rules, registry.FindSchema);
         return new(null, [], metadata.Sections.Single(s => s.Key == section), metadata.Sections, metadata.HiddenPaths,
             followed.Count > 0 ? element : null);
+    }
+
+    // Замечания к записям списков следуют за своей записью (этап 8, A14); удалена запись — замечание остаётся, с признаком.
+    // Сохраняет вызывающий, вместе с содержимым. Без apply (проверка без сохранения) замечания не меняются — только места.
+    private async Task<List<(DocumentComment Comment, CommentPlaces.Place Place)>> RemapCommentsAsync(
+        Guid documentId, string section, JsonNode? before, JsonNode? after, bool apply, CancellationToken ct)
+    {
+        var prefix = $"/{section}/";
+        var comments = await db.DocumentComments
+            .Where(c => c.DocumentId == documentId && !c.IsRecordDeleted && c.FieldPath.StartsWith(prefix)).ToListAsync(ct);
+        var same = JsonNode.DeepEquals(before, after);
+        var moves = comments.Select(c => (Comment: c, Place: same ? new CommentPlaces.Place(c.FieldPath, false)
+            : CommentPlaces.Remap(before, after, c.FieldPath))).ToList();
+        if (apply)
+            foreach (var (comment, place) in moves)
+                (comment.FieldPath, comment.IsRecordDeleted) = (place.Path, place.RecordDeleted);
+        return moves;
     }
 
     // «Принят → На доработке»: замечание от исправившего к месту первой ошибки раздела — по одному на раздел, текст —

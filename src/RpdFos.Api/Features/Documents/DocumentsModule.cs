@@ -323,7 +323,7 @@ public class DocumentsModule : ICarterModule
 
         var result = await editing.UpdateSectionAsync(document!, section, rq.Value, editorId, ct, scope, checkOnly: true);
         return result.Sections is { } sections
-            ? Results.Ok(new SectionChecked(sections, result.HiddenPaths ?? [], result.Errors))
+            ? Results.Ok(new SectionChecked(sections, result.HiddenPaths ?? [], result.Errors, result.CommentMoves))
             : SectionProblem(section, result);
     }
 
@@ -1146,8 +1146,9 @@ public record TransferRequest(int Version, Guid EmployeeId, string? Reason);
 public record CommentRequest(string? FieldPath, string? Text);
 
 /// <summary>Раздел проверен без сохранения: состояние всех разделов по присланному и ошибки черновика.</summary>
+/// <param name="Comments">Места замечаний раздела по присланному содержимому — чтобы замечание сразу показывалось у своей записи (этап 8, A14).</param>
 public record SectionChecked(IReadOnlyList<SectionState> Sections, IReadOnlyList<string> HiddenPaths,
-    IReadOnlyList<DocumentValidationError> Errors);
+    IReadOnlyList<DocumentValidationError> Errors, IReadOnlyList<CommentMove>? Comments = null);
 
 /// <summary>Раздел сохранён: новая версия, статус (после «Сохранить» правка возвращает черновик) и заполненность раздела.</summary>
 public record SectionSaved(int Version, string Status, string StatusTitle, SectionState Section, DateTimeOffset SavedAt,
@@ -1306,9 +1307,10 @@ public record DocumentBasis(
 
 /// <summary>Замечание к полю: кто и когда оставил, разрешено ли и кем.</summary>
 /// <param name="FromApproval">Замечание оставлено на согласовании — согласующим (этап 7, A2).</param>
+/// <param name="IsRecordDeleted">Запись списка, к которой относилось замечание, удалена (этап 8, A14).</param>
 public record CommentItem(
     Guid Id, string FieldPath, string Text, Guid AuthorId, string AuthorName, DateTimeOffset CreatedAt, bool IsResolved,
-    string? ResolvedByName, DateTimeOffset? ResolvedAt, bool FromApproval = false)
+    string? ResolvedByName, DateTimeOffset? ResolvedAt, bool FromApproval = false, bool IsRecordDeleted = false)
 {
     public static IQueryable<CommentItem> Query(AppDbContext db, IQueryable<DocumentComment> comments)
     {
@@ -1318,6 +1320,6 @@ public record CommentItem(
             orderby c.CreatedAt
             select new CommentItem(c.Id, c.FieldPath, c.Text, c.AuthorId, a.ShortName, c.CreatedAt, c.IsResolved,
                 db.Employees.Where(e => e.Id == c.ResolvedBy).Select(e => e.ShortName).FirstOrDefault(), c.ResolvedAt,
-                fromApproval.Contains(c.Id));
+                fromApproval.Contains(c.Id), c.IsRecordDeleted);
     }
 }

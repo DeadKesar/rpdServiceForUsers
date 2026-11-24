@@ -438,6 +438,12 @@ public class DocumentComment
 
     public DateTimeOffset? ResolvedAt { get; set; }
 
+    /// <summary>
+    /// Запись списка, к которой относилось замечание, удалена (этап 8, A14). <see cref="FieldPath"/> остаётся местом записи
+    /// на момент удаления — по нему замечание подписывается, но у полей оно не показывается: номер мог занять другая запись.
+    /// </summary>
+    public bool IsRecordDeleted { get; set; }
+
     /// <summary>Отметить разрешённым; false — уже разрешено.</summary>
     public bool Resolve(Guid by, DateTimeOffset at)
     {
