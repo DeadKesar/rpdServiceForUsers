@@ -64,6 +64,8 @@ public static class ValidationRules
         "guideline_text_or_url",
         // Этап 7.1: у необязательного раздела с текстом должен быть заголовок.
         "section_title_for_text",
+        // Этап 8 (A12): у тем одного раздела одно наименование раздела.
+        "section_title_same_in_section",
         // Этап 7 (B8): пороги Положения о ФОС (П 01-04, 2022) — вопросов, тестов, билетов, критериев; в проекте правила нет.
         "fos_regulation_thresholds"
     };

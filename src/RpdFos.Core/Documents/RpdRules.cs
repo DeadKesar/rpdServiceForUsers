@@ -325,3 +325,32 @@ public sealed class SectionTitleForText : IValidationRule
         section.ValueKind == JsonValueKind.Object && section.TryGetProperty("text", out var text) && text.ValueKind == JsonValueKind.String &&
         RichTextBlocks.Parse(text.GetString() ?? "", () => 0).Count > 0;
 }
+
+/// <summary>
+/// <c>section_title_same_in_section</c> (этап 8, A12): у тем одного раздела (одинаковый номер) одно наименование раздела.
+/// Наименование вводится у каждой темы, а в таблицах 3.1 и 3.2 и в паспорте ФОС раздел назван один раз: расхождение
+/// напечаталось бы выбором «первого попавшегося». Ошибка стоит у поля темы, чьё наименование отличается от наименования
+/// первой темы раздела. Пустое наименование — ошибка схемы (поле обязательно), здесь не повторяется.
+/// </summary>
+public sealed class SectionTitleSameInSection : IValidationRule
+{
+    public string Name => "section_title_same_in_section";
+    public string Level => IssueLevels.Error;
+
+    public IEnumerable<DocumentValidationError> Check(RuleContext context)
+    {
+        if (context.Value.ValueKind != JsonValueKind.Array) yield break;
+        var first = new Dictionary<int, (string Title, int Index)>();
+        var index = -1;
+        foreach (var topic in context.Value.EnumerateArray())
+        {
+            index++;
+            if (topic.ValueKind != JsonValueKind.Object || !topic.TryGetProperty("section_number", out var number) || !number.TryGetInt32(out var n)) continue;
+            var title = topic.TryGetProperty("section_title", out var t) && t.ValueKind == JsonValueKind.String ? t.GetString()?.Trim() : null;
+            if (string.IsNullOrEmpty(title)) continue;
+            if (!first.TryGetValue(n, out var known)) first[n] = (title, index);
+            else if (!string.Equals(known.Title, title, StringComparison.Ordinal))
+                yield return new($"{context.Path}/{index}/section_title", $"У раздела {n} уже указано наименование «{known.Title}»: у всех его тем оно должно быть одинаковым");
+        }
+    }
+}

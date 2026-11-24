@@ -210,6 +210,7 @@ internal static class DocxTables
         var topics = Items(context.At("/thematic_plan"));
         if (topics.Count == 0) unfilled.Add($"{bookmark} — тематический план не заполнен");
         var semesters = context.Semesters;
+        var sectioned = HasSectionTitles(topics);
         int? SemesterOf(JsonElement topic) =>
             TopicHoursMatchTotal.Semester(topic) ?? (semesters.Count == 1 ? semesters[0].Semester : null);
 
@@ -226,15 +227,17 @@ internal static class DocxTables
         {
             var number = semester?.Semester.ToString() ?? "";
             var first = true;
-            foreach (var topic in group)
+            // Строка таблицы — тема; у плана с наименованиями разделов (этап 8, A12) — раздел: темы одного номера в семестре сливаются.
+            foreach (var row in sectioned ? BySection(group) : group.Select(t => (IReadOnlyList<JsonElement>)[t]))
             {
-                var hours = Property(topic, "hours");
+                var lead = row[0];
                 // Неделя семестра есть у тем новых шаблонов (этап 7.1); нет — пустая ячейка, как раньше.
-                Add(false, Merge(), Number(topic, "section_number"), Text(topic, "topic_title") ?? "", number, Text(topic, "week")?.Trim() ?? "",
-                    Hour(hours, "lectures", semester?.Lectures), Hour(hours, "lab_hours", semester?.LabHours),
-                    Hour(hours, "practice", semester?.Practice), Number(hours, "self_study"),
-                    string.Join(", ", Items(Property(topic, "competence_indicators")).Select(i => i.GetString())),
-                    string.Join(", ", Items(Property(topic, "current_control_forms")).Select(i => i.GetString())));
+                Add(false, Merge(), Number(lead, "section_number"), sectioned ? SectionName(row) : Text(lead, "topic_title") ?? "", number,
+                    string.Join(", ", row.Select(t => Text(t, "week")?.Trim()).Where(w => !string.IsNullOrEmpty(w)).Distinct()),
+                    Hour(row, "lectures", semester?.Lectures), Hour(row, "lab_hours", semester?.LabHours),
+                    Hour(row, "practice", semester?.Practice), Hour(row, "self_study", null),
+                    string.Join(", ", row.SelectMany(t => Items(Property(t, "competence_indicators"))).Select(i => i.GetString()).Distinct()),
+                    string.Join(", ", row.SelectMany(t => Items(Property(t, "current_control_forms"))).Select(i => i.GetString()).Distinct()));
             }
             Add(true, Merge(), "", "Промежуточная аттестация", number, "",
                 Total(group, "lectures", semester?.Lectures), Total(group, "lab_hours", semester?.LabHours),
@@ -255,9 +258,13 @@ internal static class DocxTables
             Total(topics, "lab_hours", semesters.Sum(s => s.LabHours)), Total(topics, "practice", semesters.Sum(s => s.Practice)),
             $"{Sum(topics, "self_study")}/{semesters.Sum(s => s.Control)}", "", "");
 
-        // Часы темы; вида занятий нет в семестре по распределению — «-».
-        static string Hour(JsonElement? hours, string key, int? planned) =>
-            planned == 0 ? "-" : Number(hours, key);
+        // Часы темы (у раздела — сумма по его темам); вида занятий нет в семестре по распределению — «-».
+        static string Hour(IReadOnlyList<JsonElement> row, string key, int? planned)
+        {
+            if (planned == 0) return "-";
+            var values = row.Select(t => Number(Property(t, "hours"), key)).Where(v => v.Length > 0).ToList();
+            return values.Count <= 1 ? values.FirstOrDefault() ?? "" : values.Sum(v => int.TryParse(v, out var n) ? n : 0).ToString();
+        }
 
         static string Total(List<JsonElement> group, string key, int? planned) =>
             planned == 0 ? "-" : Sum(group, key).ToString();
@@ -287,6 +294,26 @@ internal static class DocxTables
 
         var topics = Items(context.At("/thematic_plan"));
         if (topics.Count == 0) unfilled.Add($"{bookmark} — тематический план не заполнен");
+        if (HasSectionTitles(topics))
+        {
+            // Этап 8, A12: строка — раздел с наименованием (табл. 3.2 Положения), содержание — по абзацу на тему раздела.
+            foreach (var section in BySection(topics).OrderBy(s => int.TryParse(Number(s[0], "section_number"), out var n) ? n : int.MaxValue))
+            {
+                var row = DataRow(prototype);
+                var cells = row.Elements<TableCell>().ToList();
+                var name = SectionName(section);
+                // Раздел из одной темы с тем же названием: тема не повторяется, остаётся её содержание.
+                var content = section.Select(t => (Title: Text(t, "topic_title")?.Trim() ?? "", Description: Text(t, "topic_description")?.Trim() ?? ""))
+                    .Select(t => section.Count == 1 && string.Equals(t.Title, name, StringComparison.OrdinalIgnoreCase) ? t.Description
+                        : t.Description.Length == 0 ? t.Title : $"{t.Title}: {t.Description}")
+                    .Where(t => t.Length > 0).ToList();
+                if (cells.Count > 0) SetCell(cells[0], [Number(section[0], "section_number")], bold: false, JustificationValues.Center);
+                if (cells.Count > 1) SetCell(cells[1], [name], bold: false, JustificationValues.Left);
+                if (cells.Count > 2) SetCell(cells[2], content, bold: false, JustificationValues.Left);
+                table.AppendChild(row);
+            }
+            return;
+        }
         foreach (var topic in topics)
         {
             var row = DataRow(prototype);
@@ -297,6 +324,19 @@ internal static class DocxTables
             table.AppendChild(row);
         }
     }
+
+    // У плана с наименованиями разделов (поле схемы новых шаблонов, этап 8, A12) таблицы 3.1 и 3.2 строятся по разделам.
+    private static bool HasSectionTitles(List<JsonElement> topics) =>
+        topics.Any(t => Text(t, "section_title") is { Length: > 0 } title && !string.IsNullOrWhiteSpace(title));
+
+    // Темы одного раздела подряд: по номеру раздела, порядок тем в разделе и порядок разделов — по первому появлению.
+    private static IEnumerable<IReadOnlyList<JsonElement>> BySection(IEnumerable<JsonElement> topics) =>
+        topics.GroupBy(t => Number(t, "section_number")).Select(g => (IReadOnlyList<JsonElement>)g.ToList());
+
+    // Наименование раздела — первое непустое у его тем; нет — темы раздела через запятую, как в паспорте ФОС прежних документов.
+    private static string SectionName(IReadOnlyList<JsonElement> section) =>
+        section.Select(t => Text(t, "section_title")?.Trim()).FirstOrDefault(t => !string.IsNullOrEmpty(t))
+        ?? string.Join(", ", section.Select(t => Text(t, "topic_title")?.Trim()).Where(t => !string.IsNullOrEmpty(t)).Distinct());
 
     // Лабораторные работы и практические занятия: № | № раздела | тема | часы | форма контроля; затем «Итого».
     private static void Classes(Table table, string section, PrintContext context, List<string> unfilled, string bookmark, string? ownStub)

@@ -107,6 +107,15 @@
                     }
                 </div>
             </div>
+            @if (HasSectionTitle)
+            {
+                <div class="mt-2">
+                    <label class="form-label small">Наименование раздела</label>
+                    <ScalarInput Context="Context" Schema="SectionTitle" Parent="topic" Key="section_title"
+                                 Path="@($"{Path}/{index}/section_title")" Compact="true"
+                                 Placeholder="Одинаковое у всех тем раздела" />
+                </div>
+            }
             <div class="mt-2">
                 <label class="form-label small">Содержание</label>
                 <textarea class="form-control form-control-sm" rows="2" readonly="@ReadOnly"
@@ -184,11 +193,15 @@
 
     private JsonElement SectionNumber => Property("section_number");
     private JsonElement TopicTitle => Property("topic_title");
+    private JsonElement SectionTitle => Property("section_title");
     private JsonElement ControlForms => Property("current_control_forms");
     private JsonElement Week => Property("week");
 
     // Неделя семестра есть в схеме нового шаблона (этап 7.1); у прежних шаблонов поля нет.
     private bool HasWeek => Week.ValueKind == JsonValueKind.Object;
+
+    // Наименование раздела есть в схеме нового шаблона (этап 8, A12); у прежних шаблонов поля нет.
+    private bool HasSectionTitle => SectionTitle.ValueKind == JsonValueKind.Object;
 
     // Ширина поля темы — остаток строки из 12 колонок после раздела, семестра (если их несколько) и недели.
     private string TitleColumns =>

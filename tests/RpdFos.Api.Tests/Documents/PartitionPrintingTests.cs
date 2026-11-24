@@ -121,14 +121,14 @@ public class PartitionPrintingTests
     public void Semesters_in_caption_are_ranges_or_lists(int[] semesters, string expected) =>
         Assert.Equal(expected, PlanTitles.Semesters(semesters));
 
-    private static DisciplineSemesterDetails Semester(int n, int lectures, int practice, int labs, int selfStudy, int control, string type) =>
+    internal static DisciplineSemesterDetails Semester(int n, int lectures, int practice, int labs, int selfStudy, int control, string type) =>
         new()
         {
             Semester = n, Lectures = lectures, Practice = practice, LabHours = labs, SelfStudy = selfStudy, Control = control,
             ContactHours = lectures + practice + labs, ControlTypes = [type]
         };
 
-    private static Table Partition(DisciplineSemesterDetails first, DisciplineSemesterDetails? second, string topics, out string caption)
+    internal static Table Partition(DisciplineSemesterDetails first, DisciplineSemesterDetails? second, string topics, out string caption)
     {
         var body = Print(first, second, topics);
         caption = body.Elements<Paragraph>().First(p => p.InnerText.StartsWith("Разделы дисциплины, изучаемые")).InnerText;
@@ -151,7 +151,7 @@ public class PartitionPrintingTests
         Assert.Equal(["- самостоятельное изучение разделов", "- подготовка к текущему контролю 1"], rows);
     }
 
-    private static Body Print(DisciplineSemesterDetails first, DisciplineSemesterDetails? second, string topics, Discipline? discipline = null,
+    internal static Body Print(DisciplineSemesterDetails first, DisciplineSemesterDetails? second, string topics, Discipline? discipline = null,
         string kinds = "[]")
     {
         var semesters = second is null ? new[] { first } : [first, second];
@@ -195,7 +195,7 @@ public class PartitionPrintingTests
     }
 
     // Строки данных — после трёх строк шапки (заголовки и нумерация столбцов).
-    private static List<List<string>> Rows(Table table) =>
+    internal static List<List<string>> Rows(Table table) =>
         table.Elements<TableRow>().Skip(3).Select(r => r.Elements<TableCell>().Select(c => c.InnerText).ToList()).ToList();
 
     private static List<string> Merges(Table table) =>

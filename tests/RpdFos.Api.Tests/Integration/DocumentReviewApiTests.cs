@@ -42,7 +42,7 @@ public class DocumentReviewApiTests(DatabaseFixture app)
         // Лекций по темам на 2 часа меньше плана — ошибка правила, отправка не проходит.
         var topic = new JsonObject
         {
-            ["section_number"] = 1, ["semester"] = 1, ["topic_title"] = "Основы моделирования систем",
+            ["section_number"] = 1, ["section_title"] = "Основы моделирования", ["semester"] = 1, ["topic_title"] = "Основы моделирования систем",
             ["hours"] = new JsonObject
             {
                 ["lectures"] = plan.Lectures - 2, ["practice"] = plan.Practice, ["lab_hours"] = plan.Labs, ["self_study"] = plan.SelfStudy

@@ -61,7 +61,8 @@ public class FosCreationApiTests(DatabaseFixture fixture) : AssignmentTestBase(f
         var sections = link["sections"]!.AsArray();
         Assert.Equal(topics.Count, sections.Count);
         var first = sections[0]!;
-        Assert.Equal((1, "Основы моделирования систем, часть 1"), ((int)first["number"]!, (string)first["title"]!));
+        // Название раздела в снимке — наименование раздела РПД (этап 8, A12), а не его темы.
+        Assert.Equal((1, "Раздел 1. Основы моделирования"), ((int)first["number"]!, (string)first["title"]!));
         Assert.Equal(new[] { (string)topics[0]!["competence_indicators"]![0]! }, Strings(first["indicator_codes"]));
         Assert.Equal(new[] { (string)chosen[0]!["code"]! }, Strings(first["competence_codes"]));
         Assert.Equal(new[] { "Контрольная работа" }, Strings(first["current_control_forms"]));
@@ -320,7 +321,7 @@ public class FosCreationApiTests(DatabaseFixture fixture) : AssignmentTestBase(f
 
         // Тема переименована в РПД, пока она черновик: данные изменились.
         var topics = JsonNode.Parse(rpd.Payload.GetProperty("thematic_plan").GetRawText())!.AsArray();
-        topics[0]!["topic_title"] = "Переименованная тема раздела";
+        topics[0]!["section_title"] = "Переименованный раздел";
         await DocumentData.PatchAsync(author, rpd.Document.Id, "thematic_plan", rpd.Document.Version, topics);
         Assert.True((await DetailsAsync(author, fos.Document.Id)).LinkedRpd!.Changed);
 
@@ -338,7 +339,7 @@ public class FosCreationApiTests(DatabaseFixture fixture) : AssignmentTestBase(f
         Assert.False((await DetailsAsync(methodist, fos.Document.Id)).LinkedRpd!.Changed);
 
         // После приёма снимок закрыт и для методиста: даже когда РПД снова изменилась.
-        topics[0]!["topic_title"] = "Ещё одно название темы";
+        topics[0]!["section_title"] = "Ещё одно наименование раздела";
         await DocumentData.PatchAsync(author, rpd.Document.Id, "thematic_plan", (await DetailsAsync(author, rpd.Document.Id)).Document.Version, topics);
         await SetStatusAsync(App, fos.Document.Id, S.Accepted);
         var accepted = await DetailsAsync(methodist, fos.Document.Id);

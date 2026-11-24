@@ -30,6 +30,8 @@ public class DocumentBasingTests
         Assert.Equal(["Задача 1", "Задача 2"], Lines(p, "goals_and_objectives", "objectives"));
         Assert.Equal("<p>Знать</p>", Text(p, "learning_outcomes", "knows"));
         Assert.Equal("Основы моделирования", Text(p["thematic_plan"]![0]!, "topic_title"));
+        // Наименование раздела (этап 8, A12) переносится вместе с темами.
+        Assert.Equal("Введение", Text(p["thematic_plan"]![0]!, "section_title"));
         Assert.Equal(["Лекции"], Lines(p, "education_technologies"));
         Assert.Equal("Отчёт", Text(p, "practical_classes", "0", "control_form"));
         Assert.Equal(["Модель системы"], Lines(p, "course_work", "topics"));
@@ -343,7 +345,7 @@ public class DocumentBasingTests
                 { "code": "ОПК-1.2", "text": "Такого индикатора в новой матрице нет" } ] },
             { "code": "ПК-3", "formulation": "ПК-3 в матрице цели нет", "indicators": [ { "code": "ПК-3.1", "text": "Текст" } ] }
           ],
-          "thematic_plan": [ { "section_number": 1, "semester": 3, "topic_title": "Основы моделирования", "hours": { "lectures": 16 } } ],
+          "thematic_plan": [ { "section_number": 1, "section_title": "Введение", "semester": 3, "topic_title": "Основы моделирования", "hours": { "lectures": 16 } } ],
           "practical_classes": [ { "number": "1", "title": "Построение модели", "hours": 16, "control_form": "Отчёт" } ],
           "lab_works": [ { "number": "1", "title": "Исследование модели", "hours": 16 } ],
           "course_work": { "kind": "course_project", "topics": ["Модель системы"] },

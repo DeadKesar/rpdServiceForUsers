@@ -117,7 +117,7 @@ public static class DocumentData
             ["thematic_plan"] = new JsonArray(created.Payload.GetProperty("hours_distribution").GetProperty("semesters").EnumerateArray()
                 .Select((s, i) => (JsonNode)new JsonObject
                 {
-                    ["section_number"] = i + 1, ["semester"] = s.GetProperty("semester").GetInt32(),
+                    ["section_number"] = i + 1, ["section_title"] = $"Раздел {i + 1}. Основы моделирования", ["semester"] = s.GetProperty("semester").GetInt32(),
                     ["topic_title"] = $"Основы моделирования систем, часть {i + 1}",
                     ["hours"] = new JsonObject
                     {

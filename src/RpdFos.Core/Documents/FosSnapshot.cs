@@ -169,7 +169,7 @@ public static partial class FosSnapshot
         return (result, owners);
     }
 
-    // Разделы по номеру из тем тематического плана; название раздела — темы через запятую, как в паспорте ФОС.
+    // Разделы по номеру из тем тематического плана; название раздела — его наименование из РПД, а у РПД без него — темы через запятую, как в паспорте ФОС.
     private static JsonArray Sections(JsonNode? plan, IReadOnlyDictionary<string, string> owners)
     {
         var sections = new SortedDictionary<int, SectionDraft>();
@@ -180,6 +180,8 @@ public static partial class FosSnapshot
                 if (!sections.TryGetValue(number, out var section)) sections[number] = section = new SectionDraft();
 
                 if (Text(topic["topic_title"])?.Trim() is { } title && !section.Titles.Contains(title)) section.Titles.Add(title);
+                // Наименование раздела (этап 8, A12): первое непустое у его тем; у документов без него — темы через запятую.
+                if (section.Name is null && Text(topic["section_title"])?.Trim() is { } name) section.Name = name;
                 if (Int(topic["semester"]) is int semester && semester is >= 1 and <= 12) section.Semesters.Add(semester);
                 foreach (var code in Strings(topic["competence_indicators"]).Where(c => IndicatorCode().IsMatch(c)))
                     section.Indicators.Add(code);
@@ -196,7 +198,8 @@ public static partial class FosSnapshot
         {
             var indicators = section.Indicators.OrderBy(CodeKey, StringComparer.Ordinal).ToList();
             var item = new JsonObject { ["number"] = number };
-            if (section.Titles.Count > 0) item["title"] = string.Join(", ", section.Titles);
+            if (section.Name is not null) item["title"] = section.Name;
+            else if (section.Titles.Count > 0) item["title"] = string.Join(", ", section.Titles);
             item["semesters"] = new JsonArray(section.Semesters.Select(s => (JsonNode)s).ToArray());
             // Компетенция раздела — по самой РПД; индикатор, которого в её компетенциях нет, называет её своим кодом.
             item["competence_codes"] = new JsonArray(indicators.Select(i => owners.GetValueOrDefault(i) ?? i[..i.IndexOf('.')])
@@ -258,6 +261,7 @@ public static partial class FosSnapshot
     private sealed class SectionDraft
     {
         public List<string> Titles { get; } = [];
+        public string? Name { get; set; }
         public SortedSet<int> Semesters { get; } = [];
         public HashSet<string> Indicators { get; } = new(StringComparer.Ordinal);
         public List<string> Forms { get; } = [];
