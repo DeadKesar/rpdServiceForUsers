@@ -26,6 +26,10 @@
     "note": "Фраза раздела «3.5 Курсовой проект (курсовая работа)»: «По дисциплине … AutofillKurs» — «предусмотрен курсовой проект» или «предусмотрена курсовая работа» и содержание раздела; без курсового по плану — своя формулировка вхождения, чтобы фраза читалась целиком.",
     "occurrences": { "AutofillKurs1": { "stub": "курсовое проектирование учебным планом не предусмотрено." } }
   },
+  "AutofillToc": {
+    "kind": "toc", "target": "1-2",
+    "note": "Оглавление (этап 8, A13, файл оформления v5): строки — по заголовкам уровней 1 и 2, которые напечатаны. Внутри закладки — образцы строк: первый абзац — уровень 1, второй — уровень 2."
+  },
   "AutofillGoals": { "kind": "field", "target": "/goals_and_objectives/goals" },
   "AutofillObjectives": { "kind": "field", "target": "/goals_and_objectives/objectives" },
   "AutofillPriorKnow": { "kind": "field", "target": "/place_in_structure/prior_outcomes/knows" },

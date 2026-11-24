@@ -8,7 +8,7 @@ namespace RpdFos.Core.DocumentTypes;
 
 /// <summary>
 /// Цель закладки DOCX-шаблона: <see cref="Kind"/> — вид, <see cref="Target"/> — путь источника, JSON Pointer
-/// поля, место подписанта, имя построителя таблицы или текст с подстановками; <see cref="Part"/> — для места
+/// поля, место подписанта, имя построителя таблицы, уровни оглавления или текст с подстановками; <see cref="Part"/> — для места
 /// подписанта: должность, ФИО или формулировка для документа; <see cref="Note"/> — пояснение к цели;
 /// <see cref="Occurrences"/> — переопределения для отдельных вхождений по полному имени закладки; <see cref="Stub"/> —
 /// своя формулировка, когда место не предусмотрено планом, вместо общей заглушки раздела (<c>x-stub-text</c>);
@@ -39,9 +39,21 @@ public static class BlockModes
     public static readonly IReadOnlySet<string> All = new HashSet<string> { Repeat, Present };
 }
 
+/// <summary>
+/// Уровни заголовков, по которым строится оглавление (<see cref="BookmarkTargetKinds.Toc"/>): «1-2» — как у ключа \o поля TOC Word.
+/// </summary>
+public static partial class TocLevels
+{
+    /// <summary>Сколько уровней, считая с первого; запись неверна — null.</summary>
+    public static int? Depth(string levels) => Levels().Match(levels) is { Success: true } match ? int.Parse(match.Groups["depth"].Value) : null;
+
+    [GeneratedRegex("^1-(?<depth>[1-9])$")]
+    private static partial Regex Levels();
+}
+
 public static class BookmarkTargetKinds
 {
-    public const string Source = "source", Field = "field", Signature = "signature", Table = "table", Text = "text", Block = "block";
+    public const string Source = "source", Field = "field", Signature = "signature", Table = "table", Text = "text", Block = "block", Toc = "toc";
 }
 
 /// <summary>
@@ -156,13 +168,14 @@ public static partial class PrintMappingValidator
             BookmarkTargetKinds.Table when !TableBuilders.All.ContainsKey(value) => $"неизвестный построитель таблицы {value}",
             BookmarkTargetKinds.Block when !fieldExists(value) => $"поля {value} нет в схеме",
             BookmarkTargetKinds.Block when part is null || !BlockModes.All.Contains(part) => $"неизвестный способ печати блока «{part}»",
+            BookmarkTargetKinds.Toc when TocLevels.Depth(value) is null => $"неверные уровни оглавления «{value}»",
             BookmarkTargetKinds.Text when string.IsNullOrWhiteSpace(value) => "пустой текст",
             BookmarkTargetKinds.Text => Placeholder().Matches(value)
                 .Select(m => m.Groups["source"].Value).FirstOrDefault(s => !DocumentSources.IsKnown(s)) is { } unknown
                 ? $"неизвестный источник {unknown} в тексте"
                 : null,
             BookmarkTargetKinds.Source or BookmarkTargetKinds.Field or BookmarkTargetKinds.Signature
-                or BookmarkTargetKinds.Table or BookmarkTargetKinds.Block => null,
+                or BookmarkTargetKinds.Table or BookmarkTargetKinds.Block or BookmarkTargetKinds.Toc => null,
             _ => $"неизвестный вид цели «{kind}»"
         };
     }

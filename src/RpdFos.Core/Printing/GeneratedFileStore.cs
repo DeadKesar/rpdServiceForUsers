@@ -10,6 +10,11 @@ public sealed class GenerationSettings
 
     /// <summary>Срок хранения сформированного файла, дней (FR-GEN-06).</summary>
     public int RetentionDays { get; set; } = 30;
+
+    /// <summary>
+    /// Сколько секунд DOCX ждёт конвертер PDF ради номеров страниц оглавления (этап 8, A13): не дождался — файл выдаётся без номеров.
+    /// </summary>
+    public int NumberingTimeoutSeconds { get; set; } = 30;
 }
 
 /// <summary>

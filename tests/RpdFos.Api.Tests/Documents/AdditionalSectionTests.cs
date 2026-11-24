@@ -15,7 +15,7 @@ namespace RpdFos.Api.Tests.Documents;
 /// <summary>
 /// Необязательный раздел после материально-технического обеспечения (этап 7.1, шаг 4): заголовок и форматированный текст
 /// автора. Проверка — текст без заголовка ошибка поля «Заголовок», пустой раздел не мешает; печать — раздел 6 после МТО
-/// с заголовком автора, без текста раздела нет совсем. Без базы: настоящая схема, сопоставление и файл оформления v4.
+/// с заголовком автора, без текста раздела нет совсем. Без базы: настоящая схема, сопоставление и действующий файл оформления.
 /// </summary>
 public class AdditionalSectionTests
 {
@@ -146,6 +146,10 @@ public class AdditionalSectionTests
 
     private static List<string> NonEmpty(Body body) => Texts(body).Where(t => t.Trim().Length > 0).ToList();
 
+    // Заголовок раздела 6, а не строка оглавления с тем же началом: у заголовка есть уровень структуры.
+    private static Paragraph Heading6(Body body) => body.Elements<Paragraph>()
+        .Single(p => p.InnerText.StartsWith("6.", StringComparison.Ordinal) && p.ParagraphProperties?.OutlineLevel is not null);
+
     private const string Support = "\"material_support\": [\"Лаборатория моделирования\"]";
 
     [Fact]
@@ -164,7 +168,7 @@ public class AdditionalSectionTests
         Assert.DoesNotContain(report.Warnings, w => w.Contains("AutofillAdditional"));
         // Заголовок оформлен как заголовок раздела 5: тот же стиль, уровень структуры и выравнивание.
         var h5 = body.Elements<Paragraph>().Last(p => p.InnerText.StartsWith("5.", StringComparison.Ordinal));
-        var h6 = body.Elements<Paragraph>().Single(p => p.InnerText.StartsWith("6.", StringComparison.Ordinal));
+        var h6 = Heading6(body);
         Assert.Equal(h5.ParagraphProperties!.ParagraphStyleId!.Val, h6.ParagraphProperties!.ParagraphStyleId!.Val);
         Assert.Equal(h5.ParagraphProperties.OutlineLevel!.Val, h6.ParagraphProperties.OutlineLevel!.Val);
         Assert.Equal(h5.ParagraphProperties.Justification!.Val, h6.ParagraphProperties.Justification!.Val);
@@ -183,10 +187,10 @@ public class AdditionalSectionTests
         Assert.Equal([["Показатель", "Значение"], ["Часы", "72"]],
             table.Elements<TableRow>().Select(r => r.Elements<TableCell>().Select(c => c.InnerText).ToList()));
         var texts = Texts(body);
-        Assert.True(texts.IndexOf("Первый пункт") > texts.FindIndex(t => t.StartsWith("6.", StringComparison.Ordinal)));
+        Assert.True(texts.IndexOf("Первый пункт") > texts.FindLastIndex(t => t.StartsWith("6.", StringComparison.Ordinal)));
         Assert.Equal(2, body.Elements<Paragraph>().Count(p => p.ParagraphProperties?.NumberingProperties is not null && p.InnerText.EndsWith("пункт")));
         // Таблица стоит после заголовка раздела, а не где-то ещё.
-        Assert.True(body.Elements().ToList().IndexOf(table) > body.Elements().ToList().IndexOf(body.Elements<Paragraph>().Single(p => p.InnerText.StartsWith("6."))));
+        Assert.True(body.Elements().ToList().IndexOf(table) > body.Elements().ToList().IndexOf(Heading6(body)));
     }
 
     [Theory]
@@ -199,10 +203,14 @@ public class AdditionalSectionTests
         var (body, report) = Print(payload);
         var (former, _) = Print(payload, DocxBookmarksTests.RpdV3);
 
-        // Ни заголовка, ни заглушки «не предусмотрено», ни лишних пустых абзацев: печать совпадает с печатью по прежнему файлу.
+        // Ни заголовка, ни строки оглавления, ни заглушки «не предусмотрено», ни лишних пустых абзацев: от раздела 5 до конца печать
+        // совпадает с печатью по файлу, в котором раздела ещё не было (v3). По v4 с ним совпадает вся печать.
         Assert.DoesNotContain(NonEmpty(body), t => t.StartsWith("6.", StringComparison.Ordinal) || t.Contains("Только заголовок") || t.Contains("Заголовок без текста"));
-        Assert.Equal(Texts(former), Texts(body));
+        Assert.Equal(FromSection5(former), FromSection5(body));
+        Assert.Equal(Texts(former), Texts(Print(payload, DocxBookmarksTests.RpdV4).Body));
         Assert.DoesNotContain(report.Unfilled, u => u.StartsWith("AutofillAdditional"));
+
+        static List<string> FromSection5(Body b) => Texts(b)[Texts(b).FindLastIndex(t => t.StartsWith("5.", StringComparison.Ordinal))..];
     }
 
     [Fact]

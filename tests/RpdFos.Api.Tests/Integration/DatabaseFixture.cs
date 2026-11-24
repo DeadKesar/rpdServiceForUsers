@@ -46,6 +46,8 @@ public class DatabaseFixture : WebApplicationFactory<Program>, IAsyncLifetime
         builder.UseSetting("Jobs:QueuePollSeconds", "1");
         // Сформированные файлы — во временный каталог: тесты не пишут в каталог приложения.
         builder.UseSetting("Generation:StoragePath", GeneratedFiles);
+        // Зависший конвертер (FakePdfConverter.HangNext) DOCX ждёт секунду, а не полминуты.
+        builder.UseSetting("Generation:NumberingTimeoutSeconds", "1");
         // Почта: письма отправляют сами тесты — вызовом задачи, а не расписанием раз в минуту: иначе фоновый запуск
         // перехватывал бы письма и проверки «ушло один раз» зависели бы от времени. Адрес для ссылок — свой, не из appsettings.
         builder.UseSetting("Mail:Enabled", "false");

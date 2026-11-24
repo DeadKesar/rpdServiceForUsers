@@ -34,13 +34,13 @@ public class MethodicalSupportPrintingTests
     private const string Link = "https://e.lanbook.com/book/123456";
     private const string LabSentence = "Методические указания к лабораторным занятиям по данной дисциплине";
 
-    private static (Body Body, MainDocumentPart Main) Print(string payloadJson)
+    private static (Body Body, MainDocumentPart Main) Print(string payloadJson, string template = DocxBookmarksTests.Rpd)
     {
         var rpd = Registry.Get(DocumentTypeRegistry.Rpd);
         var payload = JsonDocument.Parse(payloadJson).RootElement;
         var context = new PrintContext(payload, rpd.Schema, Registry.FindSchema, Facts, new SignatoryReport([], []), 2026,
             DocumentMetadata.Hidden(rpd.Schema, DocumentSemesters.Of(payload, Facts), Registry.FindSchema));
-        var result = DocxGenerator.Generate(DocxBookmarksTests.Template(DocxBookmarksTests.Rpd), rpd.PrintMapping, context);
+        var result = DocxGenerator.Generate(DocxBookmarksTests.Template(template), rpd.PrintMapping, context);
 
         var document = WordprocessingDocument.Open(new MemoryStream(result.Content), false);
         Assert.Empty(new OpenXmlValidator(FileFormatVersions.Office2019).Validate(document).Select(e => $"{e.Path?.XPath}: {e.Description}"));
@@ -161,9 +161,9 @@ public class MethodicalSupportPrintingTests
     [Fact]
     public void Dropping_the_phrase_keeps_bookmarks_and_table_of_contents_anchors_whole()
     {
-        // В абзаце фразы шаблона стоят и метки оглавления (_Toc…): они переезжают, оглавление не теряет якорей.
-        var before = Marks(Print("""{ "literature": { "guidelines": { "lab_works": { "url": "https://edu.example.org/labs" } } } }""").Body);
-        var after = Marks(Print("""{ "literature": { "guidelines": { "lab_works": { "text": "Практикум" } } } }""").Body);
+        // В файле v4 в абзаце фразы шаблона стоят и метки статического оглавления (_Toc…): они переезжают, оглавление не теряет якорей.
+        var before = Marks(Print("""{ "literature": { "guidelines": { "lab_works": { "url": "https://edu.example.org/labs" } } } }""", DocxBookmarksTests.RpdV4).Body);
+        var after = Marks(Print("""{ "literature": { "guidelines": { "lab_works": { "text": "Практикум" } } } }""", DocxBookmarksTests.RpdV4).Body);
 
         Assert.Contains("_Toc453665076", after.Names);
         Assert.Equal(before.Names.Order(), after.Names.Order());

@@ -11,14 +11,18 @@ using RpdFos.Core.DocumentTypes;
 
 namespace RpdFos.Core.Printing;
 
-public sealed record DocxResult(byte[] Content, PrintReport Report);
+/// <summary>
+/// Сформированный DOCX; <paramref name="Toc"/> — оглавление, построенное генератором: номера страниц в нём вычисляет конвертер PDF,
+/// в DOCX для скачивания их вписывает <see cref="DocxToc.ForWord"/>. У шаблонов без закладки оглавления — null.
+/// </summary>
+public sealed record DocxResult(byte[] Content, PrintReport Report, DocumentToc? Toc = null);
 
 /// <summary>
 /// Заполнение DOCX-шаблона оформления по сопоставлению закладок шаблона документа (<c>print_mapping</c>).
 /// Каждая закладка <c>Autofill&lt;Поле&gt;&lt;N&gt;</c> получает значение своей цели — одно значение во все одноимённые
 /// закладки (fan-out), суффикс любой длины. Текст-заглушка закладки (её имя) заменяется значением с сохранением
 /// оформления; несколько абзацев и списки заменяют абзац закладки целиком; цель вида <c>table</c> заполняет таблицу
-/// внутри закладки построителем.
+/// внутри закладки построителем, цель вида <c>toc</c> — оглавление (<see cref="DocxToc"/>).
 /// </summary>
 public static partial class DocxGenerator
 {
@@ -28,9 +32,10 @@ public static partial class DocxGenerator
         stream.Write(template);
         var warnings = new List<string>(context.Signatories.Warnings);
         var unfilled = new List<string>();
+        DocumentToc? toc;
         using (var document = WordprocessingDocument.Open(stream, true))
-            new Filler(document, mapping, context, warnings, unfilled).Run();
-        return new DocxResult(stream.ToArray(), new PrintReport(warnings, unfilled));
+            toc = new Filler(document, mapping, context, warnings, unfilled).Run();
+        return new DocxResult(stream.ToArray(), new PrintReport(warnings, unfilled), toc);
     }
 
     // Подстановка {источник} в цели вида text.
@@ -51,7 +56,10 @@ public static partial class DocxGenerator
         private readonly Dictionary<(PrintListKind, int), int> _numbering = [];
         private readonly Dictionary<PrintListKind, int> _abstractNumbering = [];
 
-        public void Run()
+        // Оглавление строится после остальных закладок: заголовки ещё заполняются, а блоки — убираются.
+        private (BookmarkStart Bookmark, string Name, string Levels)? _toc;
+
+        public DocumentToc? Run()
         {
             if (_main.Document?.Body is { } main) ExpandBlocks(main);
             var roots = new List<OpenXmlElement?> { _main.Document?.Body };
@@ -62,6 +70,7 @@ public static partial class DocxGenerator
                              .Where(b => b.Name?.Value?.StartsWith(DocxBookmarks.Prefix, StringComparison.Ordinal) == true).ToList())
                     Fill(root, bookmark);
             if (_main.Document?.Body is { } body) ZeroCreditLaboriousness(body);
+            return _toc is { Bookmark.Parent: not null } toc ? DocxToc.Build(_main, toc.Bookmark, toc.Name, toc.Levels, warnings) : null;
         }
 
         /// <summary>
@@ -184,6 +193,14 @@ public static partial class DocxGenerator
             if (kind == BookmarkTargetKinds.Block)
             {
                 warnings.Add($"Закладка {name}: блок можно печатать только из тела документа — оставлена как есть.");
+                return;
+            }
+
+            if (kind == BookmarkTargetKinds.Toc)
+            {
+                if (root is not Body || _toc is not null)
+                    warnings.Add($"Закладка {name}: оглавление печатается одно и только в теле документа — оставлена как есть.");
+                else _toc = (bookmark, name, goal);
                 return;
             }
 

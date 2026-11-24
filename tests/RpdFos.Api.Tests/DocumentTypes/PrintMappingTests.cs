@@ -118,6 +118,7 @@ public class PrintMappingTests
             ["AutofillD"] = new(BookmarkTargetKinds.Source, "parser.discipline.no_such_source"),
             ["AutofillE"] = new(BookmarkTargetKinds.Text, "по дисциплине «{parser.discipline.nam}»"),
             ["AutofillF"] = new("picture", "logo"),
+            ["AutofillT"] = new(BookmarkTargetKinds.Toc, "2-3"),
             ["AutofillG"] = new(BookmarkTargetKinds.Source, "document.year", Occurrences: new Dictionary<string, BookmarkOccurrence>
             {
                 ["AutofillG1"] = new(Form: WordForms.Gen),
@@ -131,10 +132,11 @@ public class PrintMappingTests
         var errors = PrintMappingValidator.Validate(Registry, DocumentTypeRegistry.Rpd, mapping, signatures,
             [.. mapping.Keys, "AutofillUnmapped"]);
 
-        Assert.Equal(10, errors.Count);
+        Assert.Equal(11, errors.Count);
         Assert.Contains("Закладка AutofillUnmapped не сопоставлена", errors);
         Assert.Contains(errors, e => e.StartsWith("Закладка AutofillA:") && e.Contains("нет в схеме"));
         Assert.Contains(errors, e => e.StartsWith("Закладка AutofillB:") && e.Contains("нет в листе согласования"));
+        Assert.Contains("Закладка AutofillT: неверные уровни оглавления «2-3»", errors);
         Assert.Contains(errors, e => e.StartsWith("Закладка AutofillG, вхождение AutofillH2:") && e.Contains("другой закладке"));
         Assert.Contains(errors, e => e.StartsWith("Закладка AutofillG, вхождение AutofillG3:") && e.Contains("форма"));
         Assert.Contains(errors, e => e.StartsWith("Закладка AutofillG, вхождение AutofillG4:") && e.Contains("нет в схеме"));

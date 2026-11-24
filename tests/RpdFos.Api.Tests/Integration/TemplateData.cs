@@ -56,12 +56,14 @@ public static class TemplateData
     /// <c>umk_chair</c> подписант не находится (такой категории в файле должностей нет), и принятый документ
     /// остаётся «Принят».
     /// </param>
+    /// <param name="printTemplate">Файл оформления вместо действующего — шаблон, опубликованный по прежней версии.</param>
     public static async Task<DocumentTemplate> AddPublishedAsync(
-        AppDbContext db, Guid planId, string type = DocumentTypeRegistry.Rpd, IReadOnlyCollection<string>? electronicSeats = null)
+        AppDbContext db, Guid planId, string type = DocumentTypeRegistry.Rpd, IReadOnlyCollection<string>? electronicSeats = null,
+        string? printTemplate = null)
     {
         var methodist = await ImportFiles.AddMethodistAsync(db);
         var file = await AddPrintTemplateAsync(db, methodist.Id,
-            type == DocumentTypeRegistry.Rpd ? DocxBookmarksTests.Rpd : DocxBookmarksTests.Fos);
+            printTemplate ?? (type == DocumentTypeRegistry.Rpd ? DocxBookmarksTests.Rpd : DocxBookmarksTests.Fos));
         var definition = Registry.Get(type);
         var template = DocumentTemplate.Create(definition, $"Шаблон {Guid.NewGuid()}", planId, methodist.Id);
         template.AttachPrintTemplate(file.Id, TemplateCheck.DefaultMapping(definition, DocxBookmarks.Read(file.Content!)));

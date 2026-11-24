@@ -9,6 +9,8 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using RpdFos.Api.Features.Documents;
 using RpdFos.Api.Features.Printing;
+using RpdFos.Api.Tests.Documents;
+using RpdFos.Api.Tests.DocumentTypes;
 using RpdFos.Core.Data.Entities;
 using RpdFos.Core.Documents;
 using RpdFos.Core.Printing;
@@ -329,6 +331,69 @@ public class DocxGenerationTests(DatabaseFixture app)
 
         Assert.Contains("Конвертер PDF недоступен", item.ErrorMessage);
         Assert.Null(item.FileId);
+    }
+
+    [Fact]
+    public async Task Docx_contents_carry_the_page_numbers_of_the_pdf_layout()
+    {
+        var (client, _) = await DocumentData.UserAsync(app);
+        var created = await DocumentData.CreateAsync(app, client, (await DocumentData.PublishedTemplateAsync(app)).Id, "Б1.О.11");
+        var before = FakePdfConverter.Conversions;
+
+        var item = await PrintAsync(client, created);
+        using var docx = await DownloadAsync(client, created, item);
+        var body = docx.MainDocumentPart!.Document!.Body!;
+
+        // Заглушка конвертера отвечает закладками со страницы 3 по порядку: номер каждой строки — номер её закладки.
+        Assert.Equal(TocSample.Expected(section6: false).Select((line, i) => $"{line}\t{i + 3}"), TocSample.Lines(body).Select(TocSample.Plain));
+        Assert.Contains(body.Descendants<FieldCode>(), f => f.Text == """ TOC \o "1-2" \h \z \u """);
+        Assert.Null(docx.MainDocumentPart.DocumentSettingsPart!.Settings!.GetFirstChild<UpdateFieldsOnOpen>());
+        Assert.DoesNotContain(item.Warnings, w => w.Contains("оглавлени"));
+        Assert.Equal(before + 1, FakePdfConverter.Conversions);
+        // Конвертеру ушёл файл без поля TOC: внутри него LibreOffice не вычисляет номера страниц.
+        using var sent = WordprocessingDocument.Open(new MemoryStream(FakePdfConverter.LastDocx!), false);
+        Assert.DoesNotContain(sent.MainDocumentPart!.Document!.Body!.Descendants<FieldCode>(), f => f.Text.Contains("TOC"));
+        Assert.Empty(new OpenXmlValidator(FileFormatVersions.Office2019).Validate(docx));
+    }
+
+    [Theory]
+    [InlineData(true, "Конвертер PDF недоступен (тест)")]
+    [InlineData(false, "Конвертер PDF не ответил вовремя")]
+    public async Task Docx_is_printed_even_when_the_converter_is_unavailable(bool fails, string reason)
+    {
+        var (client, _) = await DocumentData.UserAsync(app);
+        var created = await DocumentData.CreateAsync(app, client, (await DocumentData.PublishedTemplateAsync(app)).Id, "Б1.О.12");
+        FakePdfConverter.FailNext = fails;
+        FakePdfConverter.HangNext = !fails;
+
+        var item = await PrintAsync(client, created);
+        using var docx = await DownloadAsync(client, created, item);
+
+        // Номера подставит Word: при открытии он предложит обновить поля; в отчёте — почему их нет.
+        Assert.Contains($"Номера страниц в оглавлении не проставлены ({reason}). Word предложит обновить поля, когда файл откроют, — ответьте «Да».", item.Warnings);
+        Assert.True(docx.MainDocumentPart!.DocumentSettingsPart!.Settings!.GetFirstChild<UpdateFieldsOnOpen>()!.Val!.Value);
+        Assert.Equal(TocSample.Expected(section6: false).Select(line => line + "\t"), TocSample.Lines(docx.MainDocumentPart.Document!.Body!).Select(TocSample.Plain));
+        Assert.Empty(new OpenXmlValidator(FileFormatVersions.Office2019).Validate(docx));
+    }
+
+    [Fact]
+    public async Task Docx_by_a_former_template_is_printed_as_before_without_the_converter()
+    {
+        var (client, _) = await DocumentData.UserAsync(app);
+        var planId = await app.RealPlanIdAsync();
+        DocumentTemplate? template = null;
+        await app.WithDbAsync(async db => template = await TemplateData.AddPublishedAsync(db, planId, printTemplate: DocxBookmarksTests.RpdV4));
+        var created = await DocumentData.CreateAsync(app, client, template!.Id, "Б1.О.13");
+        var before = FakePdfConverter.Conversions;
+
+        var item = await PrintAsync(client, created);
+        using var docx = await DownloadAsync(client, created, item);
+        var lines = docx.MainDocumentPart!.Document!.Body!.Elements<Paragraph>().Where(p => p.Elements<Hyperlink>().Any(l => l.Anchor is not null)).ToList();
+
+        Assert.Equal(19, lines.Count);
+        Assert.Equal("3.3. Лабораторные работы\t9", TocSample.Plain(lines.Single(p => p.InnerText.StartsWith("3.3."))));
+        Assert.Equal(before, FakePdfConverter.Conversions);
+        Assert.DoesNotContain(item.Warnings, w => w.Contains("оглавлени"));
     }
 
     [Fact]

@@ -87,6 +87,12 @@ public sealed partial class DocumentPrinting(
                 Fail(task, e.Message);
                 return;
             }
+        else if (result.Toc is { Lines.Count: > 0 } toc)
+        {
+            (bytes, var warning) = await NumberPagesAsync(result.Content, toc, ct);
+            if (warning is not null)
+                task.Report = JsonSerializer.Serialize(result.Report with { Warnings = [.. result.Report.Warnings, warning] }, Json);
+        }
 
         var now = clock.GetUtcNow();
         var file = new GeneratedFile
@@ -99,6 +105,34 @@ public sealed partial class DocumentPrinting(
         db.GeneratedFiles.Add(file);
         task.Status = GenerationStatuses.Succeeded;
         task.CompletedAt = clock.GetUtcNow();
+    }
+
+    /// <summary>
+    /// Номера страниц оглавления в DOCX — по вёрстке PDF (этап 8, A13): Word сам PAGEREF при открытии не вычисляет. Конвертер
+    /// недоступен или не ответил — DOCX выдаётся всё равно, с предупреждением: номера подставит Word.
+    /// </summary>
+    private async Task<(byte[] Content, string? Warning)> NumberPagesAsync(byte[] docx, DocumentToc toc, CancellationToken ct)
+    {
+        IReadOnlyList<int?> pages = new int?[toc.Lines.Count];
+        string? reason = null;
+        using var limit = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        limit.CancelAfter(TimeSpan.FromSeconds(settings.Value.NumberingTimeoutSeconds));
+        try
+        {
+            pages = DocxToc.Pages(toc, await converter.HeadingsAsync(await converter.ConvertAsync(docx, limit.Token), limit.Token));
+        }
+        catch (PdfConversionException e)
+        {
+            reason = e.Message;
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            reason = "Конвертер PDF не ответил вовремя";
+        }
+        var state = pages.All(p => p is null) ? "не проставлены" : "проставлены не все";
+        var warning = !pages.Contains(null) ? null
+            : $"Номера страниц в оглавлении {state} ({reason ?? "у части заголовков нет закладок в PDF"}). Word предложит обновить поля, когда файл откроют, — ответьте «Да».";
+        return (DocxToc.ForWord(docx, toc, pages), warning);
     }
 
     public static PrintReport ReadReport(string? json) =>

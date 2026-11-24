@@ -12,6 +12,9 @@
     <!-- JavaScript без браузера: логику таблиц редактора (wwwroot/js/rpdfos-table-logic.js) проверяют чистые функции
          в интерпретаторе, а не Node. BSD-2-Clause; Acornima — BSD-3-Clause. -->
     <PackageReference Include="Jint" Version="4.18.0" />
+    <!-- Текст PDF печатной формы: номера страниц оглавления сверяются с фактическими (этап 8, A13). Apache-2.0, та же версия, что в
+         tools/RpdFos.Corpus; в поставку не входит. -->
+    <PackageReference Include="PdfPig" Version="0.1.16" />
     <PackageReference Include="Testcontainers.PostgreSql" Version="4.16.0" />
     <PackageReference Include="xunit" Version="2.9.3" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" PrivateAssets="all" />

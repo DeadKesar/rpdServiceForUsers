@@ -11,19 +11,21 @@ public class DocxBookmarksTests
 {
     public static byte[] Template(string name) => File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "fixtures", name));
 
-    // Действующий шаблон РПД — четвёртая версия файла оформления (этап 7.1, шаг 4): после МТО — необязательный раздел автора.
-    // Третья версия (этап 5.1): постоянные пункты списков вуза — значения
-    // по умолчанию шаблона. Исходный и вторая версия остаются для истории и проверки каталога.
+    // Действующий шаблон РПД — пятая версия файла оформления (этап 8, A13): оглавление строит генератор.
+    // Четвёртая (этап 7.1, шаг 4): после МТО — необязательный раздел автора. Третья версия (этап 5.1): постоянные пункты списков
+    // вуза — значения по умолчанию шаблона. Исходный и вторая версия остаются для истории и проверки каталога.
     // Действующий шаблон ФОС — вторая версия (этап 7): образцы Положения убраны, добавлены закладки содержимого.
     // Исходный остаётся для истории и проверки каталога.
-    public const string Rpd = "DWP_TemplateBookmarks_v4.docx", RpdV3 = "DWP_TemplateBookmarks_v3.docx", RpdV2 = "DWP_TemplateBookmarks_v2.docx",
-        RpdOriginal = "DWP_TemplateBookmarks.docx", Fos = "FOS_TemplateBookmarks_v2.docx", FosOriginal = "FOS_TemplateBookmarks.docx";
+    public const string Rpd = "DWP_TemplateBookmarks_v5.docx", RpdV4 = "DWP_TemplateBookmarks_v4.docx", RpdV3 = "DWP_TemplateBookmarks_v3.docx",
+        RpdV2 = "DWP_TemplateBookmarks_v2.docx", RpdOriginal = "DWP_TemplateBookmarks.docx", Fos = "FOS_TemplateBookmarks_v2.docx",
+        FosOriginal = "FOS_TemplateBookmarks.docx";
 
     [Theory]
     [InlineData(RpdOriginal, 52, 35)]
     [InlineData(RpdV2, 76, 57)] // вторая версия: +24 вхождения, +22 закладки — методическое содержимое, бланки протокола и составителей
     [InlineData(RpdV3, 76, 57)]  // третья: закладки те же, убраны только постоянные пункты списков
-    [InlineData(Rpd, 79, 60)]    // четвёртая (этап 7.1): +3 — блок дополнительного раздела после МТО, его заголовок и текст
+    [InlineData(RpdV4, 79, 60)]  // четвёртая (этап 7.1): +3 — блок дополнительного раздела после МТО, его заголовок и текст
+    [InlineData(Rpd, 80, 61)]    // пятая (этап 8): +1 — оглавление
     [InlineData(FosOriginal, 46, 24)]
     [InlineData(Fos, 52, 36)]   // вторая: −9 вхождений образцов и трёх приложений, +14 — содержимое, учебный год, подпись билета, председатель УМК и составитель
     public void Real_templates_match_bookmark_catalog(string file, int bookmarks, int baseNames)

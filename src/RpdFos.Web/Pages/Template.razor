@@ -574,10 +574,13 @@ else
             context.PreventNavigation();
     }
 
-    // Цель закладки: для подписи — место и часть, для остальных — путь, поле, построитель или текст.
-    private string TargetText(string kind, string target, string? part) => kind == "signature"
-        ? $"{details?.Signatures.FirstOrDefault(s => s.Id == target)?.Title ?? target} · {TemplateTitles.Part(part)}"
-        : target;
+    // Цель закладки: для подписи — место и часть, для оглавления — уровни заголовков, для остальных — путь, поле, построитель или текст.
+    private string TargetText(string kind, string target, string? part) => kind switch
+    {
+        "signature" => $"{details?.Signatures.FirstOrDefault(s => s.Id == target)?.Title ?? target} · {TemplateTitles.Part(part)}",
+        "toc" => $"заголовки уровней {target}",
+        _ => target
+    };
 
     // «вхождение 2: дательный падеж», «вхождение 2: своя цель — …»; номер — суффикс полного имени закладки.
     private string OccurrenceText(string baseName, string name, BookmarkTarget target, BookmarkOccurrence o)

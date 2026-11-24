@@ -54,6 +54,7 @@ public static class TemplateTitles
         "table" => "Таблица",
         "text" => "Текст",
         "block" => "Блок",
+        "toc" => "Оглавление",
         _ => kind
     };
 
