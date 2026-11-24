@@ -79,6 +79,29 @@ public static partial class FosSnapshot
     }
 
     /// <summary>
+    /// Названия разделов в паспорте вслед за снимком: виджет паспорта копирует название раздела в строку, и без этого после
+    /// переименования раздела в РПД (и в ФОС «на основе») паспорт печатал бы прежнее. Меняется только нетронутая копия — название,
+    /// которое ввёл автор ФОС, остаётся (этап 8, A15).
+    /// </summary>
+    /// <param name="fos">Содержимое ФОС с новым снимком.</param>
+    /// <param name="previous">Раздел <c>linked_rpd</c>, с которого строки паспорта копировали названия.</param>
+    public static void RenamePassportSections(JsonObject fos, JsonNode? previous)
+    {
+        var (was, now) = (SectionTitles(previous), SectionTitles(Get(fos, LinkSection)));
+        if (Get(Get(fos, "passport"), "sections") is not JsonArray rows) return;
+        foreach (var row in rows.OfType<JsonObject>())
+            if (Int(Get(row, "section_number")) is { } number && Text(Get(row, "section_title")) is { } title &&
+                was.GetValueOrDefault(number) is { } copied && copied == title && now.GetValueOrDefault(number) is { } fresh)
+                row["section_title"] = fresh;
+    }
+
+    private static Dictionary<int, string> SectionTitles(JsonNode? link) =>
+        (Get(link, "sections") as JsonArray ?? [])
+            .Select(s => (Number: Int(Get(s, "number")), Title: Text(Get(s, "title"))))
+            .Where(s => s is { Number: not null, Title.Length: > 0 })
+            .GroupBy(s => s.Number!.Value).ToDictionary(g => g.Key, g => g.First().Title!);
+
+    /// <summary>
     /// Индикаторы всех компетенций снимка одним списком — <c>competence_indicators</c> ФОС: код и формулировка, в порядке РПД.
     /// </summary>
     public static JsonArray Indicators(JsonNode? snapshot)

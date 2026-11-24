@@ -64,7 +64,7 @@ else
             {
                 <span>«@basis.Title»</span>
             }
-            <span class="text-muted">(@(basis.StatusTitle?.ToLowerInvariant() ?? "удалён"))</span>.
+            <span class="text-muted ms-1">(@(basis.StatusTitle?.ToLowerInvariant() ?? "удалён"))</span>.
             @if (basis.NotTransferred.Count == 0)
             {
                 <div class="small">Всё, что вводил автор основы, перенесено.</div>
@@ -98,7 +98,7 @@ else
             {
                 <span>«@(rpd.Title ?? "РПД")»</span>
             }
-            <span class="text-muted">(@rpd.StatusTitle.ToLowerInvariant())</span>.
+            <span class="text-muted ms-1">(@rpd.StatusTitle.ToLowerInvariant())</span>.
             @if (rpd.Deleted)
             {
                 <div class="small">РПД удалена: в ФОС остались данные последнего снимка, обновлять их не из чего.</div>
@@ -179,7 +179,7 @@ else
                     {
                         <span>«@fos.Title»</span>
                     }
-                    <span class="text-muted">· @fos.StatusTitle.ToLowerInvariant() · @fos.AuthorName</span>
+                    <span class="text-muted ms-1">· @fos.StatusTitle.ToLowerInvariant() · @fos.AuthorName</span>
                     @if (fos.Discrepancies is { } discrepancies)
                     {
                         <span class="badge @(discrepancies > 0 ? "text-bg-warning" : "text-bg-light border") ms-1"

@@ -110,4 +110,21 @@ public class FosBasingTests
         var fos = Fos("{}");
         Assert.Empty(FosBasing.Adapt(fos));
     }
+
+    [Fact]
+    public void Passport_names_copied_from_the_basis_rpd_become_those_of_the_target()
+    {
+        var fos = Fos("""
+            { "passport": { "sections": [ { "section_number": 1, "section_title": "Тема А, Тема Б", "competence_codes": [], "tasks": [] },
+                                          { "section_number": 2, "section_title": "Своё название", "competence_codes": [], "tasks": [] } ] } }
+            """);
+        foreach (var section in fos["linked_rpd"]!["sections"]!.AsArray())
+            section!["title"] = (int)section["number"]! == 1 ? "Основы" : "Модели";
+
+        Assert.Empty(FosBasing.Adapt(fos, JsonNode.Parse("""
+            { "sections": [ { "number": 1, "title": "Тема А, Тема Б" }, { "number": 2, "title": "Тема В" } ] }
+            """)));
+        Assert.Equal(new[] { "Основы", "Своё название" },
+            fos["passport"]!["sections"]!.AsArray().Select(r => (string?)r!["section_title"]));
+    }
 }

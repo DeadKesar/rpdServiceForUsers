@@ -52,6 +52,7 @@ public sealed class FosRefresh(AppDbContext db, LinkedDocuments links, DocumentH
         var (was, _) = FosSnapshot.Taken(stored);
         var at = history.NextMoment();
         FosSnapshot.Apply(payload, rpd.Id, rpd.Version, at, fresh);
+        FosSnapshot.RenamePassportSections(payload, stored);
 
         if (fos.Edit(payload.ToJsonString(Json)) is { } previous) history.StatusChanged(fos, previous, by);
         await history.SnapshotAsync(fos, by, VersionTriggers.AutoSave, ct);

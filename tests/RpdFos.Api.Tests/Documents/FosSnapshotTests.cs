@@ -159,6 +159,28 @@ public class FosSnapshotTests
     }
 
     [Fact]
+    public void Passport_names_follow_the_rpd_until_the_author_changes_them()
+    {
+        var fos = new JsonObject();
+        FosSnapshot.Apply(fos, Guid.NewGuid(), 1, DateTimeOffset.UtcNow, Take());
+        fos["passport"] = JsonNode.Parse("""
+            { "sections": [ { "section_number": 1, "section_title": "Введение, Основные понятия" },
+                            { "section_number": 2, "section_title": "Моделирование (сокращённо)" },
+                            { "section_number": 9, "section_title": "Моделирование" } ] }
+            """);
+        var previous = fos["linked_rpd"]!.DeepClone();
+        FosSnapshot.Apply(fos, Guid.NewGuid(), 2, DateTimeOffset.UtcNow, Take(Rpd
+            .Replace("\"topic_title\": \"Введение\"", "\"section_title\": \"Основы\", \"topic_title\": \"Введение\"")
+            .Replace("Моделирование", "Имитационное моделирование")));
+
+        FosSnapshot.RenamePassportSections(fos, previous);
+
+        // Копия из снимка переименована, название автора и строка раздела, которого нет в РПД, — прежние.
+        Assert.Equal(new[] { "Основы", "Моделирование (сокращённо)", "Моделирование" },
+            fos["passport"]!["sections"]!.AsArray().Select(r => (string?)r!["section_title"]));
+    }
+
+    [Fact]
     public void Changes_name_added_and_removed_indicators_and_sections()
     {
         var fos = new JsonObject();

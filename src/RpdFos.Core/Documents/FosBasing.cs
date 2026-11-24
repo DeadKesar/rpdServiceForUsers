@@ -13,10 +13,12 @@ namespace RpdFos.Core.Documents;
 public static class FosBasing
 {
     /// <param name="payload">Содержимое нового ФОС: снимок РПД цели уже записан, ввод автора основы перенесён.</param>
+    /// <param name="basisLink">Раздел <c>linked_rpd</c> основы: по нему узнаются названия разделов паспорта, которых автор не менял.</param>
     /// <returns>Что убрано из перенесённого, — строками для списка неперенесённого.</returns>
-    public static IReadOnlyList<string> Adapt(JsonObject payload)
+    public static IReadOnlyList<string> Adapt(JsonObject payload, JsonNode? basisLink = null)
     {
         var notes = new List<string>();
+        FosSnapshot.RenamePassportSections(payload, basisLink);
         var link = payload[FosSnapshot.LinkSection];
         var indicators = Strings(payload[FosSnapshot.IndicatorsSection], "code").ToHashSet(StringComparer.Ordinal);
         var competences = Strings(link?["competences"], "code").ToHashSet(StringComparer.Ordinal);

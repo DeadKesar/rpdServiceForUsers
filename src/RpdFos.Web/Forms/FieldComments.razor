@@ -1,7 +1,9 @@
+@using System.Text.Json.Nodes
 @using RpdFos.Web.Models
 
 @* Замечания у поля. Методист на проверке и согласующий до своей отметки добавляют замечание и снимают своё (этап 7, A2),
-   методист на проверке снимает и замечания согласующих, автор на доработке отмечает разрешённым любое. *@
+   методист на проверке снимает и замечания согласующих, автор на доработке отмечает разрешённым любое.
+   У виджета замечание относится ко всему списку или к выбранной записи (этап 8, A15). *@
 @foreach (var c in Context.CommentsAt(Path, Subtree))
 {
     <div class="alert @(c.IsResolved ? "alert-light text-muted" : "alert-warning") py-1 px-2 small mb-1 d-flex justify-content-between align-items-start gap-2">
@@ -16,7 +18,7 @@
         </span>
         @if (Context.CanResolveComment(c) && Context.ResolveComment is { } resolve)
         {
-            <button type="button" class="btn btn-sm btn-outline-success text-nowrap" @onclick="() => resolve(c)">Разрешено</button>
+            <button type="button" class="btn btn-sm btn-outline-success text-nowrap flex-shrink-0" @onclick="() => resolve(c)">Разрешено</button>
         }
     </div>
 }
@@ -25,12 +27,23 @@
     @if (open)
     {
         <div class="mb-2">
+            @if (Targets is { Count: > 0 } targets)
+            {
+                <select class="form-select form-select-sm mb-1" aria-label="К чему замечание"
+                        @onchange="e => target = int.TryParse(e.Value as string, out var i) ? Targets[i].Node : null">
+                    <option value="" selected="@(Chosen is null)">к полю целиком</option>
+                    @for (var i = 0; i < targets.Count; i++)
+                    {
+                        <option value="@i" selected="@(targets[i].Node == target)">@targets[i].Title</option>
+                    }
+                </select>
+            }
             <textarea class="form-control form-control-sm" rows="2" placeholder="Что нужно исправить" @bind="text" @bind:event="oninput"></textarea>
             <div class="mt-1 d-flex gap-2">
                 <button type="button" class="btn btn-sm btn-warning" disabled="@string.IsNullOrWhiteSpace(text)" @onclick="AddAsync">
                     Добавить замечание
                 </button>
-                <button type="button" class="btn btn-sm btn-link" @onclick="() => open = false">Отмена</button>
+                <button type="button" class="btn btn-sm btn-link" @onclick="() => (open, target) = (false, null)">Отмена</button>
             </div>
         </div>
     }
@@ -49,9 +62,15 @@
 
     private bool open;
     private string text = "";
+    private JsonNode? target;
+
+    private IReadOnlyList<CommentTargets.Target> Targets => Subtree ? CommentTargets.Records(Context.Payload, Path) : [];
+
+    // Место берётся по самой записи в момент отправки: список могли переставить, пока форма открыта.
+    private CommentTargets.Target? Chosen => target is null ? null : Targets.FirstOrDefault(t => t.Node == target);
 
     private async Task AddAsync()
     {
-        if (await Context.AddComment!(Path, text)) (open, text) = (false, "");
+        if (await Context.AddComment!(Chosen?.Path ?? Path, text)) (open, text, target) = (false, "", null);
     }
 }

@@ -222,11 +222,12 @@ public sealed class DocumentCreation(
         {
             var source = await db.DocumentTemplates.IgnoreQueryFilters().Where(t => t.Id == basis.TemplateId)
                 .Select(t => new { t.Schema, t.DefaultPayload }).SingleAsync(ct);
+            var basisPayload = JsonNode.Parse(basis.Payload) as JsonObject ?? [];
             notTransferred = DocumentBasing.Transfer(payload, schema, JsonDocument.Parse(source.Schema).RootElement,
                 source.DefaultPayload is { } defaults ? JsonNode.Parse(defaults) : null,
-                JsonNode.Parse(basis.Payload) as JsonObject ?? [], facts, author.Id, hidden, registry.FindSchema).NotTransferred;
+                basisPayload, facts, author.Id, hidden, registry.FindSchema).NotTransferred;
             // ФОС: ссылки переносимого — на индикаторы и разделы РПД цели; чего в ней нет, убирается (B10).
-            if (isFos) notTransferred = [.. notTransferred, .. FosBasing.Adapt(payload)];
+            if (isFos) notTransferred = [.. notTransferred, .. FosBasing.Adapt(payload, basisPayload[FosSnapshot.LinkSection])];
         }
 
         var document = new Document
