@@ -49,11 +49,12 @@ internal static class TocSample
         return lines;
     }
 
+    /// <param name="lastLines">Сколько строк добавить в конец раздела 6: от них зависит, где на странице он кончается.</param>
     public static DocxResult Print(bool labs, bool practice, bool courseProject, bool section6, byte[]? template = null,
-        IReadOnlyDictionary<string, BookmarkTarget>? mapping = null)
+        IReadOnlyDictionary<string, BookmarkTarget>? mapping = null, int lastLines = 0)
     {
         var rpd = Registry.Get(DocumentTypeRegistry.Rpd);
-        var payload = JsonDocument.Parse(Payload(labs, practice, courseProject, section6).ToJsonString()).RootElement;
+        var payload = JsonDocument.Parse(Payload(labs, practice, courseProject, section6, lastLines).ToJsonString()).RootElement;
         var facts = new DisciplineFacts(
             new Discipline
             {
@@ -74,7 +75,7 @@ internal static class TocSample
         return DocxGenerator.Generate(template ?? DocxBookmarksTests.Template(DocxBookmarksTests.Rpd), mapping ?? rpd.PrintMapping, context);
     }
 
-    private static JsonObject Payload(bool labs, bool practice, bool courseProject, bool section6)
+    private static JsonObject Payload(bool labs, bool practice, bool courseProject, bool section6, int lastLines)
     {
         var payload = new JsonObject
         {
@@ -107,7 +108,9 @@ internal static class TocSample
         if (section6)
             payload["additional_section"] = new JsonObject
             {
-                ["title"] = Section6, ["text"] = $"<p><strong>7. Не раздел</strong></p><ol><li>{Filler(2)}</li><li>{Filler(1)}</li></ol><p>{Filler(6)}</p>"
+                ["title"] = Section6,
+                ["text"] = $"<p><strong>7. Не раздел</strong></p><ol><li>{Filler(2)}</li><li>{Filler(1)}</li></ol><p>{Filler(6)}</p>" +
+                    string.Concat(Enumerable.Range(1, lastLines).Select(i => $"<p>Строка {i}.</p>"))
             };
         return payload;
 

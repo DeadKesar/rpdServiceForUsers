@@ -45,6 +45,27 @@ public class TocPdfTests(ConverterFixture app) : IClassFixture<ConverterFixture>
         Assert.Equal(printed.Select(e => (int?)e.Page), DocxToc.Pages(result.Toc, headings));
     }
 
+    [Theory]
+    [InlineData(0)]
+    [InlineData(10)]
+    [InlineData(20)]
+    [InlineData(30)]
+    [InlineData(40)]
+    public async Task Approval_sheet_follows_the_last_section_without_a_blank_page(int lastLines)
+    {
+        // Последний раздел кончается в разных местах страницы: раньше в нижней её трети пустые абзацы перед листом согласования
+        // переходили на новую, и она оставалась пустой. На странице, кроме титула, всегда есть номер: пустая — где больше ничего нет.
+        var result = TocSample.Print(false, false, false, section6: true, lastLines: lastLines);
+
+        using var pdf = PdfDocument.Open(await app.Converter.ConvertAsync(result.Content));
+        var pages = pdf.GetPages().Select(Lines).ToList();
+
+        Assert.All(pages, lines => Assert.True(lines.Count > 1));
+        // Лист согласования — с верха последней страницы, перед ним — страница с концом раздела 6.
+        Assert.Equal(["ЛИСТ", "согласования рабочей программы"], pages[^1].Take(2));
+        Assert.EndsWith(lastLines > 0 ? $"Строка {lastLines}." : "дисциплины.", pages[^2][^2]);
+    }
+
     [Fact]
     public async Task Word_variant_is_laid_out_the_same_way()
     {

@@ -203,14 +203,18 @@ public class AdditionalSectionTests
         var (body, report) = Print(payload);
         var (former, _) = Print(payload, DocxBookmarksTests.RpdV3);
 
-        // Ни заголовка, ни строки оглавления, ни заглушки «не предусмотрено», ни лишних пустых абзацев: от раздела 5 до конца печать
-        // совпадает с печатью по файлу, в котором раздела ещё не было (v3). По v4 с ним совпадает вся печать.
+        // Ни заголовка, ни строки оглавления, ни заглушки «не предусмотрено», ни лишних пустых абзацев: от раздела 5 до листа согласования
+        // и дальше печать совпадает с печатью по файлу, в котором раздела ещё не было (v3). Пустых абзацев перед листом согласования в
+        // действующем файле нет, в v3 и v4 они есть — по v4 с v3 совпадает вся печать.
         Assert.DoesNotContain(NonEmpty(body), t => t.StartsWith("6.", StringComparison.Ordinal) || t.Contains("Только заголовок") || t.Contains("Заголовок без текста"));
-        Assert.Equal(FromSection5(former), FromSection5(body));
+        Assert.Equal(Section5(former).SkipLast(17), Section5(body));
+        Assert.Equal(FromSheet(former), FromSheet(body));
         Assert.Equal(Texts(former), Texts(Print(payload, DocxBookmarksTests.RpdV4).Body));
         Assert.DoesNotContain(report.Unfilled, u => u.StartsWith("AutofillAdditional"));
 
-        static List<string> FromSection5(Body b) => Texts(b)[Texts(b).FindLastIndex(t => t.StartsWith("5.", StringComparison.Ordinal))..];
+        static List<string> Section5(Body b) => Texts(b)[Texts(b).FindLastIndex(t => t.StartsWith("5.", StringComparison.Ordinal))..Texts(b).IndexOf("ЛИСТ")];
+
+        static List<string> FromSheet(Body b) => Texts(b)[Texts(b).IndexOf("ЛИСТ")..];
     }
 
     [Fact]

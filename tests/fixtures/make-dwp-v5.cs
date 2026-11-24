@@ -7,6 +7,8 @@
 // — «4.1Литература» — «4.1 Литература»: между номером и названием пробел, в 4.1–4.7 его не было;
 // — закладки прежнего оглавления (_Toc…) убраны: часть стояла не у своих заголовков, свои генератор ставит сам;
 // — «Содержание» и раздел 1 начинаются с новой страницы сами, а не двадцатью пустыми абзацами: строк оглавления теперь разное число.
+// Так же начинается «ЛИСТ согласования»: шестнадцать пустых абзацев перед ним переходили на новую страницу, когда последний раздел
+// кончался внизу, и перед листом согласования печаталась пустая страница.
 // Стили «toc 1» и «toc 2» — с оформлением строк: после «Обновить поле» в Word вид не меняется.
 // Запуск: dotnet run tests/fixtures/make-dwp-v5.cs -- tests/fixtures/DWP_TemplateBookmarks_v4.docx tests/fixtures/DWP_TemplateBookmarks_v5.docx
 using System.Text.RegularExpressions;
@@ -53,11 +55,10 @@ lines[0].InsertBeforeSelf(level1);
 lines[0].InsertBeforeSelf(level2);
 foreach (var line in lines) line.Remove();
 
-// --- «Содержание» и раздел 1 — с новой страницы, пустые абзацы до них не нужны ---
+// --- «Содержание», раздел 1 и лист согласования — с новой страницы, пустые абзацы (и разрыв страницы в них) до них не нужны ---
 void StartPage(Paragraph paragraph)
 {
-    for (var gap = paragraph.PreviousSibling<Paragraph>(); gap is not null && gap == paragraph.PreviousSibling() && gap.InnerText.Length == 0 &&
-                                                           !gap.Descendants<BookmarkStart>().Any(); gap = paragraph.PreviousSibling<Paragraph>())
+    while (paragraph.PreviousSibling() is Paragraph { InnerText.Length: 0 } gap && !gap.Descendants().Any(e => e is BookmarkStart or BookmarkEnd))
         gap.Remove();
     paragraph.ParagraphProperties!.PageBreakBefore = new PageBreakBefore();
 }
@@ -66,6 +67,7 @@ var heading1 = Paragraphs().Single(p => p.InnerText == "Цели и задачи
 StartPage(heading1);
 // Отступ перед заголовком у верхнего края страницы раньше не печатался, а после явного разрыва печатается.
 heading1.ParagraphProperties!.SpacingBetweenLines!.Before = "0";
+StartPage(Paragraphs().Single(p => p.InnerText == "ЛИСТ"));
 
 // --- заголовки ---
 var spaced = 0;

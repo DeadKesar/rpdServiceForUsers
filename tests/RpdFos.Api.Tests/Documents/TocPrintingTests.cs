@@ -139,8 +139,10 @@ public class TocPrintingTests
         // Закладки и поля прежнего оглавления убраны, страницы начинаются разрывом, а не пустыми абзацами.
         Assert.DoesNotContain(body.Descendants<BookmarkStart>(), b => b.Name!.Value!.StartsWith("_Toc"));
         Assert.Empty(body.Descendants<FieldChar>());
-        Assert.Equal(["Содержание", "Цели и задачи освоения дисциплины"],
-            body.Elements<Paragraph>().Where(p => p.ParagraphProperties?.PageBreakBefore is not null).Select(p => p.InnerText));
+        var starts = body.Elements<Paragraph>().Where(p => p.ParagraphProperties?.PageBreakBefore is not null).ToList();
+        Assert.Equal(["Содержание", "Цели и задачи освоения дисциплины", "ЛИСТ"], starts.Select(p => p.InnerText));
+        Assert.All(starts, p => Assert.NotEqual("", p.PreviousSibling<Paragraph>()!.InnerText));
+        Assert.DoesNotContain(body.Descendants<Break>(), b => b.Type?.Value == BreakValues.Page);
         Assert.Equal("AutofillToc", body.Elements<Paragraph>().Single(p => p.InnerText == "Содержание").NextSibling<Paragraph>()!.InnerText);
     }
 
