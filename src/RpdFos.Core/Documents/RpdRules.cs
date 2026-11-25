@@ -251,6 +251,130 @@ public sealed class LiteratureMainRecent(IOptions<ValidationRuleSettings> settin
 }
 
 /// <summary>
+/// <c>literature_main_count</c> (FR-VAL-02, этап 8, B1): в основной литературе меньше записей, чем требует настройка
+/// <see cref="ValidationRuleSettings.LiteratureMainMin"/> (3 — Положение о РП 2022, п. 4.1). Предупреждение: у новой дисциплины
+/// литературы бывает мало, и решать, достаточно ли, — методисту, а не автоматике; в проекте это ошибка (отступление, решение 8).
+/// Место — список целиком: недостающей записи нет, указывать не на что.
+/// </summary>
+public sealed class LiteratureMainCount(IOptions<ValidationRuleSettings> settings) : IValidationRule
+{
+    public string Name => "literature_main_count";
+    public string Level => IssueLevels.Warning;
+
+    public IEnumerable<DocumentValidationError> Check(RuleContext context)
+    {
+        if (context.Value.ValueKind != JsonValueKind.Array) yield break;
+        var min = settings.Value.LiteratureMainMin;
+        var count = context.Value.GetArrayLength();
+        if (count < min)
+            yield return new(context.Path, $"В основной литературе {count} {Entries(count)}, а по Положению о рабочих программах нужно не меньше {min}",
+                IssueLevels.Warning);
+    }
+
+    // «1 запись», «2 записи», «0 записей».
+    private static string Entries(int n) => n % 10 == 1 && n % 100 != 11 ? "запись"
+        : n % 10 is >= 2 and <= 4 && n % 100 is not (>= 12 and <= 14) ? "записи" : "записей";
+}
+
+/// <summary>
+/// <c>unique_competence_codes</c> (FR-VAL-02, этап 8, B1): один код компетенции не встречается в списке дважды. Правило
+/// «любого документа» — висит на списке компетенций РПД, а у ФОС на разделах, где коды перечислены (снимок РПД, паспорт):
+/// список целиком или объект, внутри которого ищутся списки <c>competences</c> (записи с <c>code</c>) и <c>competence_codes</c>
+/// (строки). Повтор в разных строках паспорта — не ошибка, поэтому списки сверяются каждый сам с собой. Ошибка стоит у
+/// повторной записи.
+/// </summary>
+public sealed class UniqueCompetenceCodes : IValidationRule
+{
+    public string Name => "unique_competence_codes";
+    public string Level => IssueLevels.Error;
+
+    public IEnumerable<DocumentValidationError> Check(RuleContext context)
+    {
+        var name = context.Path[(context.Path.LastIndexOf('/') + 1)..];
+        return Scan(context.Value, context.Path, name, 0);
+    }
+
+    private static IEnumerable<DocumentValidationError> Scan(JsonElement node, string path, string name, int depth)
+    {
+        if (depth > 6) yield break;
+        if (node.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var p in node.EnumerateObject())
+                foreach (var e in Scan(p.Value, $"{path}/{p.Name}", p.Name, depth + 1)) yield return e;
+        }
+        else if (node.ValueKind == JsonValueKind.Array)
+        {
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            var i = -1;
+            foreach (var item in node.EnumerateArray())
+            {
+                i++;
+                var code = name switch
+                {
+                    "competences" when item.ValueKind == JsonValueKind.Object && item.TryGetProperty("code", out var c) => Code(c),
+                    "competence_codes" => Code(item),
+                    _ => null
+                };
+                if (code is not null && !seen.Add(code))
+                    yield return new($"{path}/{i}", $"Код компетенции {code} повторяется");
+                // Записи вложенных списков — со своим счётом повторов (разделы паспорта).
+                if (item.ValueKind == JsonValueKind.Object)
+                    foreach (var e in Scan(item, $"{path}/{i}", "", depth + 1)) yield return e;
+            }
+        }
+    }
+
+    private static string? Code(JsonElement value) =>
+        value.ValueKind == JsonValueKind.String && value.GetString()?.Trim() is { Length: > 0 } code ? code : null;
+}
+
+/// <summary>
+/// <c>all_indicators_covered</c> (FR-VAL-02, этап 8, B1): каждый индикатор, закреплённый за дисциплиной, встречается хотя бы
+/// в одной теме тематического плана. Закреплённые — выбранные автором из матрицы в разделе «Компетенции»: индикаторы матрицы,
+/// которых автор не выбрал, дисциплина не формирует. Предупреждение (отступление от проекта, решение 8): тему можно не привязать
+/// сознательно, а блокировать отправку из-за неполной привязки — перебор. Место — тематический план, в тексте — коды.
+/// </summary>
+public sealed class AllIndicatorsCovered : IValidationRule
+{
+    private const int Shown = 8;
+
+    public string Name => "all_indicators_covered";
+    public string Level => IssueLevels.Warning;
+
+    public IEnumerable<DocumentValidationError> Check(RuleContext context)
+    {
+        if (context.Value.ValueKind != JsonValueKind.Array) yield break;
+        var covered = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var topic in context.Value.EnumerateArray())
+            if (topic.ValueKind == JsonValueKind.Object && topic.TryGetProperty("competence_indicators", out var list) &&
+                list.ValueKind == JsonValueKind.Array)
+                foreach (var code in list.EnumerateArray())
+                    if (code.ValueKind == JsonValueKind.String) covered.Add(code.GetString()!.Trim());
+
+        var missing = Chosen(context.Payload).Where(c => !covered.Contains(c)).ToList();
+        if (missing.Count == 0) yield break;
+        var codes = missing.Count <= Shown
+            ? string.Join(", ", missing)
+            : $"{string.Join(", ", missing.Take(Shown))} и ещё {missing.Count - Shown}";
+        yield return new(context.Path, $"Индикаторы, которых нет ни в одной теме тематического плана: {codes}", IssueLevels.Warning);
+    }
+
+    /// <summary>Коды выбранных индикаторов в порядке раздела «Компетенции», без повторов.</summary>
+    private static IEnumerable<string> Chosen(JsonElement payload)
+    {
+        if (payload.ValueKind != JsonValueKind.Object || !payload.TryGetProperty("competences", out var competences) ||
+            competences.ValueKind != JsonValueKind.Array) return [];
+        return competences.EnumerateArray()
+            .Where(c => c.ValueKind == JsonValueKind.Object && c.TryGetProperty("indicators", out var i) && i.ValueKind == JsonValueKind.Array)
+            .SelectMany(c => c.GetProperty("indicators").EnumerateArray())
+            .Select(i => i.ValueKind == JsonValueKind.Object && i.TryGetProperty("code", out var code) && code.ValueKind == JsonValueKind.String
+                ? code.GetString()!.Trim()
+                : null)
+            .OfType<string>().Where(c => c.Length > 0).Distinct(StringComparer.Ordinal);
+    }
+}
+
+/// <summary>
 /// <c>literature_year_not_future</c>: год издания — не позже текущего. JSON Schema «текущий год» не выражает,
 /// поэтому это правило, а не <c>maximum</c> схемы; нижняя граница (1800) — в схеме. Ошибка в данных — проверяется
 /// и при сохранении.

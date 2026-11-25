@@ -19,8 +19,11 @@ public class ValidationRulesTests
     [
         new TopicHoursMatchTotal(), new CompetencesMatchMatrix(),
         new LiteratureMainRecent(Options.Create(new ValidationRuleSettings { LiteratureMaxAgeYears = 10 })),
-        new SelfStudyKindsMatchPlan(), new LiteratureYearNotFuture(), new HoursMatchCurriculum(), new ClassHoursMatchTotal()
+        new SelfStudyKindsMatchPlan(), new LiteratureYearNotFuture(), new HoursMatchCurriculum(), new ClassHoursMatchTotal(),
+        new UniqueCompetenceCodes(), new AllIndicatorsCovered(), Count(3)
     ];
+
+    private static LiteratureMainCount Count(int min) => new(Options.Create(new ValidationRuleSettings { LiteratureMainMin = min }));
 
     // План: два семестра — часы складываются.
     private static readonly DisciplineFacts Facts = new(
@@ -295,6 +298,116 @@ public class ValidationRulesTests
             e => e.Path == "/lab_works");
         Assert.DoesNotContain(rules.Run(JsonDocument.Parse(old).RootElement, payload, Facts, Registry.FindSchema, new HashSet<string>()),
             e => e.Path == "/lab_works");
+    }
+
+    [Fact]
+    public void Repeated_competence_code_is_an_error_at_the_repeat()
+    {
+        var competences = """
+            [ { "code": "УК-1", "indicators": [] }, { "code": "ОПК-2", "indicators": [] }, { "code": "УК-1", "indicators": [] } ]
+            """;
+
+        var rule = new UniqueCompetenceCodes();
+        Assert.Equal(IssueLevels.Error, rule.Level);
+        Assert.Equal([new DocumentValidationError("/competences/2", "Код компетенции УК-1 повторяется")],
+            Run(rule, competences, "/competences"));
+        Assert.Empty(Run(rule, competences.Replace("\"УК-1\", \"indicators\": [] } ]", "\"ПК-3\", \"indicators\": [] } ]"), "/competences"));
+    }
+
+    [Fact]
+    public void Repeated_competence_code_is_blocked_at_submission_and_checked_per_list_in_fos()
+    {
+        // РПД: правило стоит в схеме у списка компетенций — повтор есть среди ошибок полной проверки.
+        var payload = JsonDocument.Parse("""
+            { "competences": [ { "code": "УК-1", "indicators": [ { "code": "УК-1.1" } ] }, { "code": "УК-1", "indicators": [ { "code": "УК-1.2" } ] } ] }
+            """).RootElement;
+        var rules = new ValidationRuleSet(All, TimeProvider.System);
+        var issues = rules.Run(JsonDocument.Parse(Rpd).RootElement, payload, Facts, Registry.FindSchema, new HashSet<string>());
+        Assert.Contains(issues, i => i is { Rule: "unique_competence_codes", Path: "/competences/1", Level: IssueLevels.Error });
+        Assert.True(DocumentSubmission.HasErrors(issues));
+
+        // ФОС: списки снимка и разделов паспорта; один код в разных разделах паспорта — не повтор.
+        var fos = """
+            { "competences": [ { "code": "УК-1" }, { "code": "УК-1" } ],
+              "sections": [ { "number": 1, "competence_codes": [ "УК-1", "ОПК-2", "ОПК-2" ] }, { "number": 2, "competence_codes": [ "УК-1" ] } ] }
+            """;
+        Assert.Equal(["/linked_rpd/competences/1", "/linked_rpd/sections/0/competence_codes/2"],
+            Run(new UniqueCompetenceCodes(), fos, "/linked_rpd").Select(e => e.Path));
+        Assert.Empty(Run(new UniqueCompetenceCodes(),
+            """{ "sections": [ { "competence_codes": [ "УК-1" ] }, { "competence_codes": [ "УК-1" ] } ] }""", "/passport"));
+        Assert.Equal(["/passport/sections/0/competence_codes/1"],
+            Run(new UniqueCompetenceCodes(), """{ "sections": [ { "competence_codes": [ "УК-1", "УК-1" ] } ] }""", "/passport").Select(e => e.Path));
+    }
+
+    [Fact]
+    public void Chosen_indicator_without_a_topic_is_a_warning_listing_codes()
+    {
+        var payload = JsonDocument.Parse("""
+            { "competences": [ { "code": "УК-1", "indicators": [ { "code": "УК-1.1" }, { "code": "УК-1.2" } ] },
+                               { "code": "ОПК-2", "indicators": [ { "code": "ОПК-2.1" } ] } ] }
+            """).RootElement;
+        var plan = """[ { "competence_indicators": [ "УК-1.1" ] }, { "competence_indicators": [] }, { } ]""";
+        var rule = new AllIndicatorsCovered();
+
+        var warning = Assert.Single(rule.Check(new RuleContext("/thematic_plan", JsonDocument.Parse(plan).RootElement, payload, Facts, Now)));
+        Assert.Equal(new DocumentValidationError("/thematic_plan",
+            "Индикаторы, которых нет ни в одной теме тематического плана: УК-1.2, ОПК-2.1", IssueLevels.Warning), warning);
+        Assert.Equal(IssueLevels.Warning, rule.Level);
+    }
+
+    [Fact]
+    public void Covered_indicators_and_empty_choice_give_no_warning()
+    {
+        var chosen = JsonDocument.Parse("""{ "competences": [ { "code": "УК-1", "indicators": [ { "code": "УК-1.1" } ] }, { "code": "ПК-3", "indicators": [] } ] }""").RootElement;
+        var covered = JsonDocument.Parse("""[ { "competence_indicators": [ "УК-1.1", "УК-1.1" ] } ]""").RootElement;
+
+        Assert.Empty(new AllIndicatorsCovered().Check(new RuleContext("/thematic_plan", covered, chosen, Facts, Now)));
+        // Индикаторы не выбраны — покрывать нечего (выбор требует competences_match_matrix).
+        Assert.Empty(new AllIndicatorsCovered().Check(new RuleContext("/thematic_plan", JsonDocument.Parse("[]").RootElement,
+            JsonDocument.Parse("""{ "competences": [ { "code": "УК-1", "indicators": [] } ] }""").RootElement, Facts, Now)));
+    }
+
+    [Fact]
+    public void Main_literature_below_minimum_is_a_warning_and_the_minimum_is_a_setting()
+    {
+        var two = """[ { "citation": "Первый учебник по теме" }, { "citation": "Второй учебник по теме" } ]""";
+
+        var warning = Assert.Single(Run(All[^1], two, "/literature/main"));
+        Assert.Equal(new DocumentValidationError("/literature/main",
+            "В основной литературе 2 записи, а по Положению о рабочих программах нужно не меньше 3", IssueLevels.Warning), warning);
+        Assert.Equal(IssueLevels.Warning, All[^1].Level);
+        Assert.Empty(Run(Count(2), two, "/literature/main"));
+        Assert.Contains("1 запись", Run(Count(3), """[ { "citation": "Единственный учебник" } ]""", "/literature/main").Single().Message);
+        Assert.Contains("0 записей", Run(Count(3), "[]", "/literature/main").Single().Message);
+    }
+
+    [Fact]
+    public void Document_without_violations_has_no_catalog_issues()
+    {
+        var payload = JsonDocument.Parse("""
+            { "competences": [ { "code": "УК-1", "indicators": [ { "code": "УК-1.1" } ] }, { "code": "ОПК-2", "indicators": [ { "code": "ОПК-2.1" } ] } ],
+              "thematic_plan": [ { "competence_indicators": [ "УК-1.1", "ОПК-2.1" ] } ],
+              "literature": { "main": [ { "citation": "Учебник номер один" }, { "citation": "Учебник номер два" }, { "citation": "Учебник номер три" } ] } }
+            """).RootElement;
+        var names = new[] { "unique_competence_codes", "all_indicators_covered", "literature_main_count" };
+
+        var issues = new ValidationRuleSet(All, TimeProvider.System)
+            .Run(JsonDocument.Parse(Rpd).RootElement, payload, Facts, Registry.FindSchema, new HashSet<string>());
+        Assert.DoesNotContain(issues, i => names.Contains(i.Rule));
+    }
+
+    [Fact]
+    public void Catalog_rules_apply_only_where_the_schema_snapshot_names_them()
+    {
+        // Прежний шаблон без имени правила в снимке схемы его не получает; с именем — получает без перевыпуска шаблона.
+        var payload = JsonDocument.Parse("""{ "literature": { "main": [ { "citation": "Единственный учебник" } ] } }""").RootElement;
+        var rules = new ValidationRuleSet(All, TimeProvider.System);
+        var old = Rpd.Replace("\"literature_main_count\", ", "");
+
+        Assert.Contains(rules.Run(JsonDocument.Parse(Rpd).RootElement, payload, Facts, Registry.FindSchema, new HashSet<string>()),
+            i => i.Rule == "literature_main_count");
+        Assert.DoesNotContain(rules.Run(JsonDocument.Parse(old).RootElement, payload, Facts, Registry.FindSchema, new HashSet<string>()),
+            i => i.Rule == "literature_main_count");
     }
 
     [Fact]

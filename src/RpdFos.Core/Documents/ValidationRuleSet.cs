@@ -38,6 +38,9 @@ public sealed class ValidationRuleSettings
 {
     /// <summary>Основная литература старше этого числа лет — предупреждение (<c>literature_main_recent</c>).</summary>
     public int LiteratureMaxAgeYears { get; set; } = 10;
+
+    /// <summary>Записей в основной литературе меньше — предупреждение (<c>literature_main_count</c>); Положение о РП 2022, п. 4.1.</summary>
+    public int LiteratureMainMin { get; set; } = 3;
 }
 
 /// <summary>

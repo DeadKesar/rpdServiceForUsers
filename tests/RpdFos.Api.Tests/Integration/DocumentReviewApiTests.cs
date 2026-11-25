@@ -52,7 +52,8 @@ public class DocumentReviewApiTests(DatabaseFixture app)
         Assert.Equal(SectionFill.Incomplete, saved.Section.Fill);
         var refused = await client.PostAsJsonAsync(Url(created, "submit"), new DocumentVersionRequest(saved.Version));
         Assert.Equal(HttpStatusCode.UnprocessableEntity, refused.StatusCode);
-        var error = Assert.Single(await ErrorsAsync(refused));
+        // В ответе и предупреждения (этап 8, B1: покрытие индикаторов, число записей литературы) — блокирует только ошибка.
+        var error = Assert.Single(await ErrorsAsync(refused), e => e.GetProperty("level").GetString() == IssueLevels.Error);
         Assert.Equal(("/thematic_plan", IssueLevels.Error), (error.GetProperty("path").GetString(), error.GetProperty("level").GetString()));
         Assert.StartsWith("1 семестр: Лекции: по темам", error.GetProperty("message").GetString());
 
@@ -69,7 +70,9 @@ public class DocumentReviewApiTests(DatabaseFixture app)
         Assert.Equal(HttpStatusCode.OK, submitted.StatusCode);
         var reviewed = (await submitted.Content.ReadFromJsonAsync<DocumentReviewed>())!;
         Assert.Equal(DocumentStatuses.UnderReview, reviewed.Status);
-        Assert.Equal(("/literature/main/0", IssueLevels.Warning), (Assert.Single(reviewed.Warnings).Path, reviewed.Warnings[0].Level));
+        Assert.Equal(IssueLevels.Warning, Assert.Single(reviewed.Warnings, w => w.Path == "/literature/main/0").Level);
+        // Одна запись основной литературы из трёх — предупреждение у списка (этап 8, B1); отправку оно не остановило.
+        Assert.Contains(reviewed.Warnings, w => w is { Path: "/literature/main", Rule: "literature_main_count" });
     }
 
     [Fact]

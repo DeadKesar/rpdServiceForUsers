@@ -350,7 +350,7 @@ public class FosRulesTests
     private static IValidationRule[] AllFosRules() =>
     [
         new LinkedRpdMustBeApprovedOrUnderReview(), new AllIndicatorsHaveMeans(), new FosPassportConsistent(),
-        new ScaleMatchesControlType(), new ControlFormsMatch(), new FosRegulationThresholds()
+        new ScaleMatchesControlType(), new ControlFormsMatch(), new FosRegulationThresholds(), new UniqueCompetenceCodes()
     ];
 
     private static IReadOnlyList<DocumentValidationError> RunSet(string fos, DisciplineFacts facts)

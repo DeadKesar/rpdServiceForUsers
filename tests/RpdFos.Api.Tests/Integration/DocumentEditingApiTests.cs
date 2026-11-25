@@ -368,7 +368,7 @@ public class DocumentEditingApiTests(DatabaseFixture app)
         // Старое фундаментальное издание сохраняется и предупреждения о возрасте не даёт.
         Assert.Equal(HttpStatusCode.OK, fundamental.StatusCode);
         var section = (await fundamental.Content.ReadFromJsonAsync<SectionSaved>())!.Section;
-        Assert.DoesNotContain(section.Warnings, w => w.Path.StartsWith("/literature/main"));
+        Assert.DoesNotContain(section.Warnings, w => w.Path.StartsWith("/literature/main/")); // у записей; число записей — предупреждение списка (этап 8, B1)
     }
 
     private static JsonObject GoalsSection(string extra = "Освоить методы имитационного моделирования") => new()

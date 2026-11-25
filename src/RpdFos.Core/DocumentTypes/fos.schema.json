@@ -89,7 +89,7 @@
           }
         }
       },
-      "x-validation-rule": "linked_rpd_must_be_approved_or_under_review"
+      "x-validation-rule": ["linked_rpd_must_be_approved_or_under_review", "unique_competence_codes"]
     },
 
     "competence_indicators": {
@@ -109,7 +109,7 @@
     "passport": {
       "type": "object",
       "title": "Паспорт ФОС",
-      "x-validation-rule": "fos_passport_consistent",
+      "x-validation-rule": ["fos_passport_consistent", "unique_competence_codes"],
       "x-ui-widget": "fos_passport",
       "properties": {
         "sections": {

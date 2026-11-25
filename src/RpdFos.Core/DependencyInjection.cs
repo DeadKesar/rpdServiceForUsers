@@ -49,6 +49,9 @@ public static class DependencyInjection
         services.AddSingleton<IValidationRule, ClassHoursMatchTotal>();
         services.AddSingleton<IValidationRule, CompetencesMatchMatrix>();
         services.AddSingleton<IValidationRule, LiteratureMainRecent>();
+        services.AddSingleton<IValidationRule, LiteratureMainCount>();
+        services.AddSingleton<IValidationRule, UniqueCompetenceCodes>();
+        services.AddSingleton<IValidationRule, AllIndicatorsCovered>();
         services.AddSingleton<IValidationRule, LiteratureYearNotFuture>();
         services.AddSingleton<IValidationRule, GuidelineTextOrUrl>();
         services.AddSingleton<IValidationRule, SectionTitleForText>();
