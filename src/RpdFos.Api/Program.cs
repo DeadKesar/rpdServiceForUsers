@@ -131,8 +131,8 @@ builder.Services.AddOpenApi();
 
 // Фоновые задачи — Hangfire: хранилище в той же PostgreSQL, отдельная схема hangfire.
 // Jobs:Enabled = false (окружение Testing) — без сервера задач и панели: база при старте не нужна.
-var jobs = builder.Configuration.GetSection("Jobs");
-var jobsEnabled = jobs.GetValue("Enabled", true);
+var jobs = JobsSettings.From(builder.Configuration);
+var jobsEnabled = jobs.Enabled;
 builder.Services.AddHangfire(c => c
     .SetDataCompatibilityLevel(CompatibilityLevel.Version_180)
     .UseSimpleAssemblyNameTypeSerializer()
@@ -150,7 +150,7 @@ builder.Services.AddSingleton<JobStorage>(sp =>
     var options = new PostgreSqlStorageOptions
     {
         SchemaName = "hangfire",
-        QueuePollInterval = TimeSpan.FromSeconds(jobs.GetValue("QueuePollSeconds", 15))
+        QueuePollInterval = jobs.QueuePoll
     };
     return new PostgreSqlStorage(new NpgsqlConnectionFactory(connectionString, options), options);
 });
@@ -175,7 +175,7 @@ if (jobsEnabled)
         // Формирование документов — параллельно, но не больше, чем выдержит конвертер.
         o.ServerName = $"{Environment.MachineName}:{JobQueues.Generation}";
         o.Queues = [JobQueues.Generation];
-        o.WorkerCount = jobs.GetValue("GenerationWorkers", 2);
+        o.WorkerCount = jobs.GenerationWorkers;
     });
     if (mailEnabled)
         builder.Services.AddHangfireServer(o =>

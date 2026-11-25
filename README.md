@@ -251,6 +251,16 @@ dotnet test                             # нужен запущенный Docker
 (Testcontainers) и применяют к ней миграции; база разработки не используется. Аутентификация в них —
 тестовая схема (роль из заголовка `X-Test-Role`), политики доступа — рабочие.
 
+Замер скорости печати (`tests/RpdFos.Api.Tests/Bench`, этап 8) в обычный прогон не входит. Нужен конвертер из
+`docker-compose.yml` (`docker compose up -d converter`):
+
+```
+$env:RPDFOS_BENCH = "1"; $env:BENCH_ROUNDS = "3"; dotnet test tests/RpdFos.Api.Tests --filter "Category=Bench"
+```
+
+Переменные: `BENCH_POLL`, `BENCH_WORKERS` (настройки `Jobs:*` на время замера), `BENCH_CONVERTER` (адрес конвертера),
+`BENCH_LABEL`, `BENCH_IDLE_SECONDS` (окно измерения нагрузки опроса). Таблицы — в `out/bench/`.
+
 ## Миграции
 
 Миграции живут в ядре (`-p`), конфигурацию берут из хоста (`-s`):
@@ -272,8 +282,8 @@ dotnet ef migrations add <Имя> -p src/RpdFos.Core -s src/RpdFos.Api
 | `Auth:PublicUrl` | Публичный адрес хоста. По нему при запуске сверяются адреса возврата клиента OIDC |
 | `Seed:AdminEmail`, `Seed:AdminPassword` | Первый администратор — только в user-secrets |
 | `Jobs:Enabled` | Сервер фоновых задач Hangfire и панель `/hangfire` (выключено в окружении Testing) |
-| `Jobs:QueuePollSeconds` | Как часто сервер задач опрашивает очередь (по умолчанию 15 с) |
-| `Jobs:GenerationWorkers` | Сколько документов формируется одновременно (по умолчанию 2) |
+| `Jobs:QueuePollSeconds` | Как часто сервер задач сам заглядывает в очередь (по умолчанию 5 с, от 0,5 до 300). Печать от него не зависит: задачу ставит тот же процесс, исполнителя будят сразу; опрос — страховка для задач, вернувшихся в очередь без сигнала |
+| `Jobs:GenerationWorkers` | Сколько документов формируется одновременно (по умолчанию 2, от 1 до 20). Конвертер обрабатывает файлы по очереди, больше двух исполнителей время не сокращают |
 | `Converter:Url`, `Converter:TimeoutSeconds` | Адрес конвертера DOCX → PDF (по умолчанию `http://localhost:3000`) и предел ожидания (120 с) |
 | `Generation:StoragePath`, `Generation:RetentionDays` | Каталог сформированных файлов (по умолчанию `storage/generated` у хоста) и срок их хранения (30 дней) |
 | `Mail:Enabled` | Отправка писем о событиях и её расписание (включена). Уведомления в интерфейсе от этого не зависят |
