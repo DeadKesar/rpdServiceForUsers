@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Руководства пользователей (этап 8, B9): проверка ссылок и якорей Markdown из docs/manuals и сборка PDF в out/manuals.
+       PDF печатает Chromium конвертера проекта (Gotenberg из docker-compose.yml) — отдельная программа не нужна. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>RpdFos.Manuals</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Markdown → HTML, BSD-2-Clause. -->
+    <PackageReference Include="Markdig" Version="1.6.0" />
+    <!-- Номера страниц оглавления берутся из закладок собранного PDF; Apache-2.0, та же версия, что в тестах. -->
+    <PackageReference Include="PdfPig" Version="0.1.16" />
+  </ItemGroup>
+
+</Project>

@@ -22,6 +22,7 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\RpdFos.Api\RpdFos.Api.csproj" />
+    <ProjectReference Include="..\..\tools\RpdFos.Manuals\RpdFos.Manuals.csproj" />
   </ItemGroup>
   <ItemGroup>
     <!-- Реальные файлы этапа 2 для тестов импорта, см. tests/fixtures/README.md. -->
