@@ -24,4 +24,10 @@ public class Department
 
     public string Name { get; set; } = "";
     public string ShortName { get; set; } = "";
+
+    /// <summary>
+    /// Название или краткое название исправил администратор (этап 8, B2): импорт плана такую кафедру не переписывает,
+    /// а в отчёте предупреждает, что в плане написание другое.
+    /// </summary>
+    public bool IsEditedManually { get; set; }
 }

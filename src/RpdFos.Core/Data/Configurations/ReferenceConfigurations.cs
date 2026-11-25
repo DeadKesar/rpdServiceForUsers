@@ -30,6 +30,7 @@ internal sealed class DepartmentConfiguration : IEntityTypeConfiguration<Departm
         e.Property(x => x.Code).HasMaxLength(50);
         e.Property(x => x.Name).HasMaxLength(255);
         e.Property(x => x.ShortName).HasMaxLength(50);
+        e.Property(x => x.IsEditedManually).HasDefaultValue(false);
         e.HasIndex(x => x.Code).IsUnique();
         e.HasIndex(x => x.Name).IsUnique();
         e.HasIndex(x => x.ShortName).IsUnique();

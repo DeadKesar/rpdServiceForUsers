@@ -87,11 +87,18 @@ public static class AuditEvents
         EmployeeDeactivated = "employee.deactivated", EmployeeReactivated = "employee.reactivated",
         EmployeeReplaced = "employee.replaced";
 
+    /// <summary>
+    /// Администратор исправил название или краткое название кафедры (этап 8, B2; FR-ADM-06): объект — кафедра, в содержимом
+    /// <c>{ "before": { "name", "short_name" }, "after": { … } }</c>.
+    /// </summary>
+    public const string DepartmentUpdated = "department.updated";
+
     /// <summary>Привязка строки матрицы к дисциплине плана и её отмена (этап 5.2).</summary>
     public const string MatrixRowLinked = "matrix_row.linked", MatrixRowUnlinked = "matrix_row.unlinked";
 }
 
 public static class AuditEntities
 {
-    public const string Document = "document", Employee = "employee", MatrixRow = "matrix_row", Discipline = "discipline";
+    public const string Document = "document", Employee = "employee", MatrixRow = "matrix_row", Discipline = "discipline",
+        Department = "department";
 }

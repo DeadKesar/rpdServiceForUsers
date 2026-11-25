@@ -124,6 +124,10 @@ public sealed class AuditJournal(AppDbContext db)
         foreach (var e in await db.Employees.AsNoTracking().Where(e => employeeIds.Contains(e.Id)).Select(e => new { e.Id, e.ShortName }).ToListAsync(ct))
             result[(AuditEntities.Employee, e.Id)] = e.ShortName;
 
+        var departmentIds = Ids(AuditEntities.Department).Distinct().ToList();
+        foreach (var d in await db.Departments.AsNoTracking().Where(d => departmentIds.Contains(d.Id)).Select(d => new { d.Id, d.Name }).ToListAsync(ct))
+            result[(AuditEntities.Department, d.Id)] = d.Name;
+
         var disciplineIds = Ids(AuditEntities.Discipline).Distinct().ToList();
         foreach (var d in await db.Disciplines.AsNoTracking().Where(d => disciplineIds.Contains(d.Id)).Select(d => new { d.Id, d.Code, d.Name }).ToListAsync(ct))
             result[(AuditEntities.Discipline, d.Id)] = $"{d.Code} {d.Name}";

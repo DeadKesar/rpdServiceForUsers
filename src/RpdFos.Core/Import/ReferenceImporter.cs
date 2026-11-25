@@ -159,6 +159,14 @@ public sealed class ReferenceImporter(AppDbContext db, TimeProvider clock)
                     db.Departments.Add(department);
                     all.Add(department);
                 }
+                else if (department.IsEditedManually)
+                {
+                    // Этап 8, B2: исправленное администратором название импорт не переписывает — даже план более нового года.
+                    if (!string.Equals(department.Name, d.Name, StringComparison.OrdinalIgnoreCase))
+                        Warning(files.Plan, $"Кафедра «{d.Name}»: в плане одно написание, в справочнике исправлено вручную — «{department.Name}»; оставлено исправленное");
+                    _employees.DepartmentsByName[d.Name] = department;
+                    _employees.DepartmentsByName[department.Name] = department;
+                }
                 else if (!string.Equals(department.Name, d.Name, StringComparison.OrdinalIgnoreCase))
                 {
                     // Одна кафедра, разное написание: название — из плана более нового года набора.
@@ -178,7 +186,9 @@ public sealed class ReferenceImporter(AppDbContext db, TimeProvider clock)
                 }
                 if (department.ShortName != shortName)
                 {
-                    if (all.Any(x => x != department && x.ShortName == shortName))
+                    if (department.IsEditedManually)
+                        Warning(files.Plan, $"Кафедра «{d.Name}»: в плане сокращение «{shortName}», в справочнике исправлено вручную — «{department.ShortName}»; оставлено исправленное");
+                    else if (all.Any(x => x != department && x.ShortName == shortName))
                         Warning(files.Plan, $"Кафедра «{d.Name}»: сокращение «{shortName}» в справочнике у другой кафедры — оставлено «{department.ShortName}»");
                     else department.ShortName = shortName;
                 }

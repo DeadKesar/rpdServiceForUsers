@@ -36,6 +36,7 @@ public static class DependencyInjection
         services.AddScoped<DirectoryImportJob>();
         services.AddScoped<MatrixRowBinding>();
         services.AddScoped<EmployeeDirectory>();
+        services.AddScoped<DepartmentDirectory>();
         services.AddSingleton<DocumentTypeRegistry>();
         services.AddScoped<TemplateLifecycle>();
         // Скомпилированные схемы и настроенный санитайзер — общие на приложение.

@@ -789,6 +789,12 @@ namespace RpdFos.Core.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("institute_id");
 
+                    b.Property<bool>("IsEditedManually")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("is_edited_manually");
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(255)

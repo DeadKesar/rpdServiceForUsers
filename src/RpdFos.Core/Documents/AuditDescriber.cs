@@ -26,7 +26,7 @@ public static class AuditDescriber
         AuditEvents.RpdSnapshotRefreshed, AuditEvents.BankRenumbered, AuditEvents.ApprovalStarted, AuditEvents.SignatureApproved,
         AuditEvents.SignatureRejected, AuditEvents.SignatoryAssigned, AuditEvents.DisciplineAssigned, AuditEvents.DisciplineUnassigned,
         AuditEvents.EmployeeCreated, AuditEvents.EmployeeUpdated, AuditEvents.EmployeeDeactivated, AuditEvents.EmployeeReactivated,
-        AuditEvents.EmployeeReplaced, AuditEvents.MatrixRowLinked, AuditEvents.MatrixRowUnlinked
+        AuditEvents.EmployeeReplaced, AuditEvents.DepartmentUpdated, AuditEvents.MatrixRowLinked, AuditEvents.MatrixRowUnlinked
     ];
 
     public static string Title(string eventType) => eventType switch
@@ -52,6 +52,7 @@ public static class AuditDescriber
         AuditEvents.EmployeeDeactivated => "Запись справочника отключена",
         AuditEvents.EmployeeReactivated => "Запись справочника возвращена",
         AuditEvents.EmployeeReplaced => "Запись справочника заменена преемником",
+        AuditEvents.DepartmentUpdated => "Исправлено название кафедры",
         AuditEvents.MatrixRowLinked => "Строка матрицы привязана к дисциплине",
         AuditEvents.MatrixRowUnlinked => "Привязка строки матрицы отменена",
         _ => eventType
@@ -105,6 +106,7 @@ public static class AuditDescriber
             AuditEvents.EmployeeCreated => Entry(details: EmployeeDetails(p, created: true)),
             AuditEvents.EmployeeUpdated or AuditEvents.EmployeeDeactivated or AuditEvents.EmployeeReactivated
                 or AuditEvents.EmployeeReplaced => Entry(details: EmployeeDetails(p, created: false)),
+            AuditEvents.DepartmentUpdated => Entry(details: DepartmentDetails(p)),
             AuditEvents.MatrixRowLinked => Entry(
                 p?["status"]?.ToString() == MatrixRowStatuses.Ignored ? "Строка матрицы отмечена «Не учитывать»" : null,
                 details: [$"Строка: «{Text("row")}»", $"Добавлено связей с компетенциями: {CountOf(p, "added")}"]),
@@ -134,6 +136,19 @@ public static class AuditDescriber
             var now = after[key]?.ToString();
             if (was == now) continue;
             lines.Add(key.EndsWith("_id", StringComparison.Ordinal) ? $"{label}: изменено" : $"{label}: было «{Value(key, was)}», стало «{Value(key, now)}»");
+        }
+        return [.. lines];
+    }
+
+    // Кафедра: только то, что изменилось, — название и краткое название.
+    private static string[] DepartmentDetails(JsonNode? p)
+    {
+        var lines = new List<string>();
+        foreach (var (key, label) in new[] { ("name", "Название"), ("short_name", "Краткое название") })
+        {
+            var was = p?["before"]?[key]?.ToString();
+            var now = p?["after"]?[key]?.ToString();
+            if (was != now) lines.Add($"{label}: было «{was ?? "—"}», стало «{now ?? "—"}»");
         }
         return [.. lines];
     }

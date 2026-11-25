@@ -175,6 +175,37 @@ public class ImportTests(ImportDatabaseFixture app, ITestOutputHelper output)
         Assert.Contains(ImportIssue.Deserialize(sixth.ErrorsLog), i => i.Message.EndsWith($"оставлено «{variant}»"));
         await WithDbAsync(async db =>
             Assert.Equal(variant, (await db.Departments.SingleAsync(d => d.ShortName == "ИТиВС")).Name));
+
+        // Администратор исправил название (этап 8, B2): с этого момента импорт его не переписывает — ни план того же года
+        // набора, ни более нового; в отчёте — предупреждение «в плане одно написание, в справочнике исправлено вручную».
+        await WithDbAsync(async db =>
+        {
+            var itvs = await db.Departments.SingleAsync(d => d.ShortName == "ИТиВС");
+            var (_, problem) = await new DepartmentDirectory(db, TimeProvider.System).UpdateAsync(itvs.Id, original, itvs.ShortName, methodist, default);
+            Assert.Null(problem);
+            await db.SaveChangesAsync();
+        });
+        foreach (var yearShift in new[] { 1, 2 })
+        {
+            var rerun = await ImportAsync(methodist, ReadFixtures(), r => r with
+            {
+                Plan = r.Plan! with
+                {
+                    Year = r.Plan.Year + yearShift,
+                    Departments = r.Plan.Departments.Select(d => d.Code == "9" ? d with { Code = "99", Name = variant } : d).ToList()
+                },
+                Disciplines = r.Disciplines.Select(d => d.DepartmentCode == "9" ? d with { DepartmentCode = "99" } : d).ToList()
+            });
+            Assert.Contains(ImportIssue.Deserialize(rerun.ErrorsLog), i =>
+                i.Severity == ImportIssue.Warning && i.Message.Contains("исправлено вручную") && i.Message.Contains(variant));
+            await WithDbAsync(async db =>
+            {
+                var itvs = await db.Departments.SingleAsync(d => d.ShortName == "ИТиВС");
+                Assert.Equal((original, true), (itvs.Name, itvs.IsEditedManually));
+                // Дисциплины нового плана по-прежнему ссылаются на эту кафедру.
+                Assert.True(await db.Disciplines.AnyAsync(d => d.CurriculumPlanId == rerun.CreatedCurriculumPlanId && d.DepartmentId == itvs.Id));
+            });
+        }
     }
 
     // Проверки строк после первого импорта: кафедры, направление, ФГОС, дисциплины, матрица, подписанты.

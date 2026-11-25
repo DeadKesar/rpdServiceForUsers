@@ -1,0 +1,108 @@
+@page "/departments"
+@attribute [Authorize(Roles = "admin")]
+@using System.Net.Http.Json
+@using Microsoft.AspNetCore.Authorization
+@inject HttpClient Http
+
+<PageTitle>Кафедры</PageTitle>
+
+@* S-51 «Справочники», FR-ADM-06 (этап 8, B2): кафедры приходят из учебных планов; администратор исправляет название и
+   краткое название — например опечатку из плана. Исправленную кафедру импорт плана не переписывает. *@
+<h1>Кафедры</h1>
+
+<p class="text-muted">
+    Номер кафедры и институт берутся из учебного плана и файла должностей. Исправленное название получают новые
+    документы; в уже созданных остаётся то, что было при создании.
+</p>
+
+@if (message is not null)
+{
+    <div class="alert @(messageIsError ? "alert-danger" : "alert-success")" role="status">@message</div>
+}
+
+@if (items is null)
+{
+    <p>Загрузка…</p>
+}
+else
+{
+    <table class="table table-sm align-middle">
+        <thead>
+            <tr><th>Номер</th><th>Название</th><th>Краткое название</th><th>Институт</th><th></th></tr>
+        </thead>
+        <tbody>
+            @foreach (var d in items)
+            {
+                @if (editing == d.Id)
+                {
+                    <tr>
+                        <td>@d.Code</td>
+                        <td><input class="form-control form-control-sm" @bind="name" maxlength="255" aria-label="Название кафедры" /></td>
+                        <td><input class="form-control form-control-sm" @bind="shortName" maxlength="50" aria-label="Краткое название кафедры" /></td>
+                        <td>@d.Institute</td>
+                        <td class="text-nowrap">
+                            <button class="btn btn-sm btn-primary" @onclick="() => SaveAsync(d.Id)" disabled="@busy">Сохранить</button>
+                            <button class="btn btn-sm btn-outline-secondary" @onclick="() => editing = null" disabled="@busy">Отмена</button>
+                        </td>
+                    </tr>
+                }
+                else
+                {
+                    <tr>
+                        <td>@d.Code</td>
+                        <td>
+                            @d.Name
+                            @if (d.IsEditedManually)
+                            {
+                                <span class="badge text-bg-light border" title="Исправлено вручную: импорт плана не переписывает">исправлено</span>
+                            }
+                        </td>
+                        <td>@d.ShortName</td>
+                        <td>@d.Institute</td>
+                        <td><button class="btn btn-sm btn-outline-primary" @onclick="() => Edit(d)">Изменить</button></td>
+                    </tr>
+                }
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    private List<Item>? items;
+    private Guid? editing;
+    private string name = "", shortName = "";
+    private bool busy, messageIsError;
+    private string? message;
+
+    protected override async Task OnInitializedAsync() => items = await Http.GetFromJsonAsync<List<Item>>("api/admin/departments");
+
+    private void Edit(Item d)
+    {
+        (editing, name, shortName, message) = (d.Id, d.Name, d.ShortName, null);
+    }
+
+    private async Task SaveAsync(Guid id)
+    {
+        busy = true;
+        try
+        {
+            var response = await Http.PutAsJsonAsync($"api/admin/departments/{id}", new { name, shortName });
+            if (response.IsSuccessStatusCode)
+            {
+                var saved = (await response.Content.ReadFromJsonAsync<Item>())!;
+                items = [.. items!.Select(x => x.Id == id ? saved : x).OrderBy(x => x.Name, StringComparer.CurrentCultureIgnoreCase)];
+                (editing, messageIsError, message) = (null, false, $"Кафедра «{saved.Name}» сохранена.");
+                return;
+            }
+            var problem = await response.Content.ReadFromJsonAsync<Problem>();
+            (messageIsError, message) = (true, problem?.Detail is { } detail ? $"{problem.Title}. {detail}" : problem?.Title ?? "Не сохранено.");
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private sealed record Item(Guid Id, string Code, string Name, string ShortName, string? Institute, bool IsEditedManually);
+    private sealed record Problem(string? Title, string? Detail);
+}
