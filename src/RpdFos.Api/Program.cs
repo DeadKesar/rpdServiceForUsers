@@ -3,6 +3,7 @@ using Hangfire;
 using Hangfire.PostgreSql;
 using Hangfire.PostgreSql.Factories;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -70,9 +71,16 @@ builder.Services.AddOpenIddict()
         o.AllowAuthorizationCodeFlow()
          .AllowRefreshTokenFlow();
 
-        // Ключи подписи и шифрования для разработки; на сервере (этап 7) — настоящие сертификаты.
-        o.AddDevelopmentEncryptionCertificate()
-         .AddDevelopmentSigningCertificate();
+        // Ключи разработки — только в Development и Testing; на стенде — сертификаты из файлов, без них хост не стартует (этап 8, B4).
+        if (HostingSetup.UsesDevelopmentKeys(builder.Environment))
+            o.AddDevelopmentEncryptionCertificate()
+             .AddDevelopmentSigningCertificate();
+        else
+        {
+            var (signing, encryption) = HostingSetup.LoadCertificates(builder.Configuration, TimeProvider.System);
+            o.AddSigningCertificate(signing)
+             .AddEncryptionCertificate(encryption);
+        }
 
         o.UseAspNetCore()
          .EnableAuthorizationEndpointPassthrough()
@@ -121,6 +129,17 @@ builder.Services.AddAuthorizationBuilder()
         .RequireRole(AppRoles.Admin));
 
 builder.Services.AddRazorPages(); // страница входа /Account/Login
+
+// Вне разработки хост стоит за nginx (этап 8, B4): адрес и схему запроса передают его заголовки;
+// ключи Data Protection лежат на томе — иначе после перезапуска контейнера перестают действовать вход и ссылки из писем.
+var dataProtection = builder.Services.AddDataProtection().SetApplicationName(HostingSetup.DataProtectionApplicationName);
+if (!HostingSetup.UsesDevelopmentKeys(builder.Environment))
+{
+    HostingSetup.RequirePublicUrl(builder.Configuration);
+    dataProtection.PersistKeysToFileSystem(new DirectoryInfo(HostingSetup.RequireKeysPath(builder.Configuration)));
+}
+if (!builder.Environment.IsDevelopment())
+    builder.Services.Configure<ForwardedHeadersOptions>(HostingSetup.ConfigureForwardedHeaders);
 
 // Единая обработка ошибок: ответы в формате ProblemDetails с русскими заголовками, конфликт версий -> 409.
 builder.Services.AddProblemDetails(o => o.CustomizeProblemDetails = ProblemTitles.Apply);
@@ -204,13 +223,18 @@ if (app.Configuration.GetValue<bool>("Database:AutoMigrate"))
     await AuthSeed.RunAsync(scope.ServiceProvider, app.Configuration, app.Logger);
 }
 
+// Первым: всё остальное (OpenIddict, ссылки в письмах) должно видеть внешний адрес и https, а не адрес nginx.
+if (!app.Environment.IsDevelopment())
+    app.UseForwardedHeaders();
+
 app.UseExceptionHandler();
 app.UseStatusCodePages();
 
 if (app.Environment.IsDevelopment())
+{
     app.UseWebAssemblyDebugging();
-
-app.UseHttpsRedirection();
+    app.UseHttpsRedirection(); // вне разработки HTTPS завершает nginx
+}
 app.UseBlazorFrameworkFiles(); // веб-клиент Blazor раздаётся этим же хостом: один адрес, CORS не нужен
 app.UseStaticFiles(ClientShell.CreateStaticFileOptions()); // index.html — без кэша браузера, остальное как обычно
 
@@ -218,8 +242,11 @@ app.UseRouting();
 app.UseAuthentication();
 app.UseAuthorization();
 
-app.MapOpenApi();                                                              // /openapi/v1.json
-app.UseSwaggerUI(o => o.SwaggerEndpoint("/openapi/v1.json", "RpdFos API v1")); // /swagger
+if (app.Environment.IsDevelopment()) // описание API — только разработчику (этап 8, B4)
+{
+    app.MapOpenApi();                                                              // /openapi/v1.json
+    app.UseSwaggerUI(o => o.SwaggerEndpoint("/openapi/v1.json", "RpdFos API v1")); // /swagger
+}
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 app.MapRazorPages();
 app.MapCarter();

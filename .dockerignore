@@ -1,0 +1,16 @@
+**/bin/
+**/obj/
+.git/
+.vs/
+.idea/
+.claude/
+out/
+docs/
+tests/
+tools/
+deploy/
+**/storage/
+**/.env
+**/appsettings.Local.json
+**/launchSettings.json
+*.md
