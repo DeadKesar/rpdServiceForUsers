@@ -60,20 +60,21 @@ services:
       Converter__Url: http://converter:3000
       # Без текста каждого запроса к базе: журнал круглосуточного стенда остаётся читаемым.
       Logging__LogLevel__Microsoft.EntityFrameworkCore.Database.Command: Warning
-      # Почта стенда выключена до шага B6.
+      # Почта по умолчанию — свой сервер стенда (служба mail): во внутренней сети, без входа и без шифрования.
+      # Корпоративный сервер подключается только этими настройками (инструкция, раздел «Почта»).
       Mail__Enabled: ${MAIL_ENABLED:-false}
-      Mail__Host: ${MAIL_HOST:-localhost}
-      Mail__Port: ${MAIL_PORT:-25}
+      Mail__Host: ${MAIL_HOST:-mail}
+      Mail__Port: ${MAIL_PORT:-587}
       Mail__User: ${MAIL_USER:-}
       Mail__Password: ${MAIL_PASSWORD:-}
-      Mail__Security: ${MAIL_SECURITY:-Auto}
+      Mail__Security: ${MAIL_SECURITY:-None}
       Mail__From: ${MAIL_FROM:-АС РПД и ФОС <rpdfos@rpdfos.local>}
       Mail__PublicUrl: https://${STAND_HOST}
     volumes:
       # Ключи Data Protection (keys) и сформированные файлы (generated).
       - appdata:/var/lib/rpdfos
       - ./certs/auth:/run/rpdfos/certs:ro
-    networks: [front, back]
+    networks: [front, back, mailnet]
     depends_on:
       db:
         condition: service_healthy
@@ -110,6 +111,31 @@ services:
       timeout: 10s
       retries: 5
 
+  # Почтовый сервер стенда — только на отправку (Postfix в образе boky/postfix, MIT). Портов наружу нет; письма принимает
+  # только от хоста API: сервер сидит в сети mailnet вдвоём с ним, а принимает из частных адресов (mynetworks) и от
+  # отправителей только своего домена. Входящую почту из интернета он не слушает: порт не опубликован.
+  # Доставляет сам на серверы получателей (порт 25 исходящий) или через ретранслятор MAIL_RELAY.
+  mail:
+    <<: *service
+    image: boky/postfix:5.2.1-alpine
+    environment:
+      TZ: Europe/Moscow
+      # Домен адреса отправителя (MAIL_FROM): письма от других доменов сервер не принимает.
+      ALLOWED_SENDER_DOMAINS: ${MAIL_DOMAIN:-rpdfos.local}
+      # Имя сервера в приветствии: для антиспама оно должно совпадать с обратной записью адреса стенда.
+      POSTFIX_myhostname: ${MAIL_HOSTNAME:-${STAND_HOST}}
+      # Ретранслятор «[сервер]:порт» и вход на нём; пусто — доставка напрямую.
+      RELAYHOST: ${MAIL_RELAY:-}
+      RELAYHOST_USERNAME: ${MAIL_RELAY_USER:-}
+      RELAYHOST_PASSWORD: ${MAIL_RELAY_PASSWORD:-}
+      # Любое значение включает подпись DKIM, ключ — на томе maildkim (инструкция, раздел «Почта»).
+      DKIM_AUTOGENERATE: ${MAIL_DKIM:-}
+    volumes:
+      # Очередь неотправленных писем и ключи DKIM (rspamd) переживают пересоздание контейнера.
+      - mailqueue:/var/spool/postfix
+      - maildkim:/var/lib/rspamd/dkim
+    networks: [mailnet]
+
   # Выпуск сертификатов: docker compose run --rm certs. Образ тот же, что у прокси: в нём есть openssl,
   # на компьютер ничего не ставится. В обычный запуск служба не входит.
   certs:
@@ -131,7 +157,11 @@ networks:
   # База и конвертер: без выхода в интернет и без портов наружу.
   back:
     internal: true
+  # Хост и почтовый сервер стенда, больше никого. Сеть не внутренняя: почтовому серверу нужен выход на порт 25 получателей.
+  mailnet:
 
 volumes:
   dbdata:
   appdata:
+  mailqueue:
+  maildkim:

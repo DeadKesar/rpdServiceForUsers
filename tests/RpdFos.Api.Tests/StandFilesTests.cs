@@ -55,13 +55,38 @@ public sealed partial class StandFilesTests
     [Fact]
     public void Services_restart_and_use_moscow_time()
     {
-        foreach (var name in new[] { "proxy", "api", "db", "converter" })
+        foreach (var name in new[] { "proxy", "api", "db", "converter", "mail" })
         {
-            var service = Regex.Match(Compose.ReplaceLineEndings("\n"), $@"(?ms)^  {name}:\n(.*?)(?=^  \S|^\S|\z)").Groups[1].Value;
+            var service = Service(name);
             Assert.Contains("<<: *service", service);
             Assert.Contains("TZ: Europe/Moscow", service);
         }
         Assert.Contains("restart: unless-stopped", Compose);
+    }
+
+    private static string Service(string name) =>
+        Regex.Match(Compose.ReplaceLineEndings("\n"), $@"(?ms)^  {name}:\n(.*?)(?=^  \S|^\S|\z)").Groups[1].Value;
+
+    /// <summary>Почтовый сервер стенда (B6): сидит в сети вдвоём с хостом, принимает письма только своего домена.</summary>
+    [Fact]
+    public void Mail_server_is_reachable_only_from_the_host()
+    {
+        var mail = Service("mail");
+        Assert.DoesNotContain("ports:", mail);
+        Assert.Matches(@"networks: \[mailnet\]", mail);
+        Assert.Contains("ALLOWED_SENDER_DOMAINS:", mail);
+        // Образ закреплён версией: «latest» подменил бы почтовый сервер при обновлении.
+        Assert.Matches(@"image: boky/postfix:\d+\.\d+\.\d+", mail);
+
+        // Кроме почтового сервера, в сети mailnet — только хост API: у базы и конвертера выхода в неё нет.
+        var members = new[] { "proxy", "api", "db", "converter" }.Where(n => Service(n).Contains("mailnet"));
+        Assert.Equal(["api"], members);
+        Assert.DoesNotMatch(@"(?m)^  mailnet:\s*\n\s+internal: true", Compose.ReplaceLineEndings("\n"));
+
+        // Хост по умолчанию отдаёт письма своему серверу, без входа и без шифрования внутри сети.
+        var api = Service("api");
+        Assert.Contains("Mail__Host: ${MAIL_HOST:-mail}", api);
+        Assert.Contains("Mail__Security: ${MAIL_SECURITY:-None}", api);
     }
 
     [Fact]
