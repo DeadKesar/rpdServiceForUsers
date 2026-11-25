@@ -300,6 +300,11 @@ dotnet ef migrations add <Имя> -p src/RpdFos.Core -s src/RpdFos.Api
 доработки `rework-reminders` (очередь `generation`), отправка писем `notification-mail` раз в минуту (очередь `mail`).
 Панель задач — https://localhost:5081/hangfire, только для администратора: вход — через страницу входа системы.
 
+## Стенд
+
+Установка стенда апробации (Docker Compose: nginx с HTTPS, хост, база, конвертер) — `deploy/`, инструкция —
+[docs/runbooks/Этап8_стенд.md](docs/runbooks/Этап8_стенд.md). Настройки — `deploy/.env` (вне git, образец — `deploy/.env.example`).
+
 ## Документация
 
 - [CLAUDE.md](CLAUDE.md) — соглашения проекта.

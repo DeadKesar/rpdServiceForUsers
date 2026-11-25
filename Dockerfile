@@ -14,8 +14,13 @@ COPY src/RpdFos.Api/RpdFos.Api.csproj src/RpdFos.Api/
 RUN dotnet restore src/RpdFos.Api/RpdFos.Api.csproj
 
 COPY src/ src/
-# Клиент (Blazor WebAssembly) публикуется вместе с хостом: его файлы попадают в wwwroot хоста.
 RUN dotnet publish src/RpdFos.Api/RpdFos.Api.csproj -c Release --no-restore -o /app
+# Клиент (Blazor WebAssembly) публикуется отдельно, и его файлы заменяют wwwroot хоста. При публикации через хост SDK не
+# заменяет заготовки index.html (имя скрипта Blazor с хешем, importmap), и страница открывается пустой. Если заготовка
+# осталась, сборка образа останавливается (этап 8, B5).
+RUN dotnet publish src/RpdFos.Web/RpdFos.Web.csproj -c Release --no-restore -o /web \
+ && rm -rf /app/wwwroot && mv /web/wwwroot /app/wwwroot \
+ && ! grep -q '{fingerprint}' /app/wwwroot/index.html
 
 # --- Выполнение ---
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS final

@@ -1,0 +1,60 @@
+# Прокси стенда (этап 8, B5): завершает HTTPS и передаёт запросы хосту API.
+# Шаблон: при запуске контейнера вместо STAND_HOST подставляется значение из .env.
+
+# Журнал без строки запроса: в ней коды входа и токены ссылок из писем. Подключается в каждом сервере:
+# на общем уровне он добавился бы к журналу из nginx.conf, где строка запроса есть.
+log_format stand '$remote_addr [$time_local] "$request_method $uri" $status $body_bytes_sent $request_time';
+
+server_tokens off;
+
+# TLS не ниже 1.2 (NFR-SEC-01).
+ssl_protocols TLSv1.2 TLSv1.3;
+ssl_session_cache shared:tls:5m;
+ssl_session_timeout 1d;
+ssl_certificate     /etc/nginx/certs/stand.crt;
+ssl_certificate_key /etc/nginx/certs/stand.key;
+
+# Имя хоста API уточняется при работе: после обновления у контейнера другой адрес, прокси перезапускать не нужно.
+resolver 127.0.0.11 valid=10s ipv6=off;
+
+# HTTP и обращения по другому имени или адресу — на адрес стенда: вход работает только по нему.
+server {
+    listen 80 default_server;
+    listen 443 ssl default_server;
+    server_name _;
+    access_log /var/log/nginx/access.log stand;
+    return 301 https://${STAND_HOST}$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name ${STAND_HOST};
+    access_log /var/log/nginx/access.log stand;
+
+    # Импорт — три файла одним запросом, до 20 МБ каждый (NFR-SEC-05), и обёртка формы. Точный предел файла проверяет хост.
+    client_max_body_size 64m;
+
+    # Коды и токены OIDC идут в адресе и заголовках: буферов по умолчанию может не хватить.
+    large_client_header_buffers 4 16k;
+    proxy_buffer_size 16k;
+    proxy_buffers 8 16k;
+    proxy_busy_buffers_size 32k;
+
+    # Печать: хост ждёт конвертер до 120 с (Converter:TimeoutSeconds), прокси — с запасом.
+    proxy_connect_timeout 10s;
+    proxy_send_timeout 180s;
+    proxy_read_timeout 180s;
+
+    location / {
+        set $api http://api:8080;
+        proxy_pass $api;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        # Заголовки перезаписываются, а не дополняются: хост доверяет им без списка прокси.
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-Host $host;
+    }
+}

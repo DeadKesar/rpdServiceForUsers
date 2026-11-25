@@ -1,0 +1,137 @@
+# Стенд апробации (этап 8, B5). Установка — docs/runbooks/Этап8_стенд.md.
+# Наружу открыты только 80 и 443 (nginx); база и конвертер — во внутренней сети без выхода в интернет (NFR-SEC-09).
+# Значения — в deploy/.env (вне git, образец — .env.example); без обязательного значения compose не стартует и называет его.
+name: rpdfos-stand
+
+x-service: &service
+  # Компьютер работает круглосуточно: после перезагрузки службы поднимаются сами.
+  restart: unless-stopped
+  # Журналы контейнеров не должны занять весь диск.
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "5"
+
+services:
+  # TLS и проксирование. Клиент Blazor раздаёт хост API (отступление от «Развёртывания» в проекте).
+  proxy:
+    <<: *service
+    image: nginx:1.30.8
+    environment:
+      TZ: Europe/Moscow
+      STAND_HOST: ${STAND_HOST:?задайте STAND_HOST в deploy/.env — имя или адрес стенда}
+      # Подставляются только переменные стенда, переменные самого nginx остаются как есть.
+      NGINX_ENVSUBST_FILTER: ^STAND_
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/templates:/etc/nginx/templates:ro
+      - ./certs/stand:/etc/nginx/certs:ro
+    networks: [front]
+    depends_on:
+      - api
+    healthcheck:
+      # Перенаправление 301 — nginx жив; состояние хоста проверяет его собственная проверка.
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1/"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  # Хост API: он же клиент Blazor, сервер авторизации и фоновые задачи. Порт наружу не публикуется:
+  # заголовкам прокси хост верит без списка доверенных адресов.
+  api:
+    <<: *service
+    image: rpdfos-api:stand
+    build:
+      context: ..
+    environment:
+      TZ: Europe/Moscow   # по поясу сервера идут напоминания, дайджест и очистка файлов
+      ConnectionStrings__Default: Host=db;Port=5432;Database=rpdfos;Username=rpdfos;Password=${DB_PASSWORD:?задайте DB_PASSWORD в deploy/.env — пароль базы}
+      Database__AutoMigrate: "true"
+      Auth__PublicUrl: https://${STAND_HOST}
+      Auth__SigningCertificatePath: /run/rpdfos/certs/signing.pfx
+      Auth__EncryptionCertificatePath: /run/rpdfos/certs/encryption.pfx
+      Auth__CertificatePassword: ${CERT_PASSWORD:?задайте CERT_PASSWORD в deploy/.env — пароль сертификатов}
+      # После первого входа администратора обе строки в .env очищаются (см. инструкцию).
+      Seed__AdminEmail: ${ADMIN_EMAIL:-}
+      Seed__AdminPassword: ${ADMIN_PASSWORD:-}
+      Converter__Url: http://converter:3000
+      # Без текста каждого запроса к базе: журнал круглосуточного стенда остаётся читаемым.
+      Logging__LogLevel__Microsoft.EntityFrameworkCore.Database.Command: Warning
+      # Почта стенда выключена до шага B6.
+      Mail__Enabled: ${MAIL_ENABLED:-false}
+      Mail__Host: ${MAIL_HOST:-localhost}
+      Mail__Port: ${MAIL_PORT:-25}
+      Mail__User: ${MAIL_USER:-}
+      Mail__Password: ${MAIL_PASSWORD:-}
+      Mail__Security: ${MAIL_SECURITY:-Auto}
+      Mail__From: ${MAIL_FROM:-АС РПД и ФОС <rpdfos@rpdfos.local>}
+      Mail__PublicUrl: https://${STAND_HOST}
+    volumes:
+      # Ключи Data Protection (keys) и сформированные файлы (generated).
+      - appdata:/var/lib/rpdfos
+      - ./certs/auth:/run/rpdfos/certs:ro
+    networks: [front, back]
+    depends_on:
+      db:
+        condition: service_healthy
+      converter:
+        condition: service_started
+
+  db:
+    <<: *service
+    image: postgres:17-alpine
+    environment:
+      TZ: Europe/Moscow
+      POSTGRES_USER: rpdfos
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: rpdfos
+    volumes:
+      - dbdata:/var/lib/postgresql/data
+    networks: [back]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rpdfos -d rpdfos"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # Конвертер DOCX -> PDF: тот же образ и та же версия, что в разработке.
+  converter:
+    <<: *service
+    image: gotenberg/gotenberg:8.38.1
+    environment:
+      TZ: Europe/Moscow
+    networks: [back]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # Выпуск сертификатов: docker compose run --rm certs. Образ тот же, что у прокси: в нём есть openssl,
+  # на компьютер ничего не ставится. В обычный запуск служба не входит.
+  certs:
+    image: nginx:1.30.8
+    profiles: [tools]
+    entrypoint: ["sh", "/scripts/certs.sh"]
+    network_mode: none
+    environment:
+      STAND_HOST: ${STAND_HOST}
+      STAND_IP: ${STAND_IP:-}
+      CERT_PASSWORD: ${CERT_PASSWORD}
+    volumes:
+      - ./certs:/certs
+      - ./scripts:/scripts:ro
+
+networks:
+  # Прокси и хост; у хоста есть выход наружу — он нужен почте.
+  front:
+  # База и конвертер: без выхода в интернет и без портов наружу.
+  back:
+    internal: true
+
+volumes:
+  dbdata:
+  appdata:
