@@ -81,13 +81,23 @@ loop() {
     # День последней копии: после перезагрузки ночью копию не делаем второй раз, а после пропущенной ночи — сразу.
     last=$(scheduled | tail -n 1 | cut -c8-15)
     retry=0
+    down=0
     log "служба копирования: ежедневно в $AT, хранится $KEEP копий, папка $DIR"
     while true; do
         today=$(date +%Y%m%d)
         now_s=$(date +'%H %M %S' | awk '{ print $1 * 3600 + $2 * 60 + $3 }')
         epoch=$(date +%s)
+        # База недоступна — ждём её: копия будет сразу, как она ответит. Сообщение одно, а не каждые 30 с.
+        if ! tables=$(table_count "$DB" 2> /tmp/psql.err); then
+            [ "$down" -eq 1 ] || log "база недоступна, жду: $(head -n 1 /tmp/psql.err)"
+            down=1
+            sleep 30
+            continue
+        fi
+        [ "$down" -eq 0 ] || log "база снова доступна"
+        down=0
         # Пока хост не применил миграции, база пуста: такую копию не делаем.
-        if [ "$(table_count "$DB")" -eq 0 ]; then
+        if [ "$tables" -eq 0 ]; then
             sleep 30
             continue
         fi

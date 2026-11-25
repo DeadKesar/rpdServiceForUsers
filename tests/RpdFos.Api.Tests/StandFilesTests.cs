@@ -119,6 +119,9 @@ public sealed partial class StandFilesTests
         Assert.Contains("KEEP=\"${BACKUP_KEEP:-30}\"", script);
         Assert.Matches(@"make_backup rpdfos; then\s+last=\$today\s+prune", script.ReplaceLineEndings("\n"));
         Assert.Contains("--replace", script);
+        // Недоступная база — ожидание с одним сообщением, а не пустое число таблиц в сравнении.
+        Assert.Matches(@"if ! tables=\$\(table_count ""\$DB"" 2> /tmp/psql.err\); then", script);
+        Assert.DoesNotContain("[ \"$(table_count \"$DB\")\" -eq 0 ]", script);
         // Копия — в формате custom, сначала во временный файл.
         Assert.Contains("pg_dump -Fc", script);
         Assert.Contains(".partial", script);

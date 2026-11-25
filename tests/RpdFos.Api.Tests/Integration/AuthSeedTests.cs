@@ -1,8 +1,12 @@
+using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using OpenIddict.Abstractions;
 using RpdFos.Api.Infrastructure;
+using RpdFos.Core.Data.Entities;
+using RpdFos.Core.Directory;
 using Xunit;
 
 namespace RpdFos.Api.Tests.Integration;
@@ -44,4 +48,37 @@ public class AuthSeedTests(DatabaseFixture app)
         }
     }
 
+    /// <summary>Стенд (этап 8, B8): строки первого администратора из .env убирают после входа — предупреждать при каждом запуске не о чем.</summary>
+    [Fact]
+    public async Task No_warning_about_first_admin_when_admin_exists()
+    {
+        await using var scope = app.Services.CreateAsyncScope();
+        var users = scope.ServiceProvider.GetRequiredService<UserManager<AppUser>>();
+        var email = $"seed-{Guid.NewGuid():N}@example.test";
+        var admin = new AppUser { UserName = email, Email = email, EmailConfirmed = true, FullName = "Засев Проверка" };
+        Assert.True((await users.CreateAsync(admin)).Succeeded);
+        Assert.True((await users.AddToRoleAsync(admin, AppRoles.Admin)).Succeeded);
+        var logger = new WarningLogger();
+        try
+        {
+            var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["Auth:PublicUrl"] = "https://localhost" }).Build();
+            await AuthSeed.RunAsync(scope.ServiceProvider, config, logger);
+        }
+        finally
+        {
+            await users.DeleteAsync(admin);
+        }
+        Assert.DoesNotContain(logger.Warnings, w => w.Contains("Seed:AdminEmail"));
+    }
+
+    private sealed class WarningLogger : ILogger
+    {
+        public List<string> Warnings { get; } = [];
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel level) => true;
+        public void Log<TState>(LogLevel level, EventId id, TState state, Exception? error, Func<TState, Exception?, string> formatter)
+        {
+            if (level >= LogLevel.Warning) Warnings.Add(formatter(state, error));
+        }
+    }
 }

@@ -82,15 +82,18 @@ public static class AuthSeed
             logger.LogWarning("Учётная запись {Email} не связана со справочником сотрудников: {Problem}", accountEmail, problem);
 
         // 4. Первый администратор — из user-secrets (в репозиторий пароль не попадает).
+        var users = services.GetRequiredService<UserManager<AppUser>>();
         var email = config["Seed:AdminEmail"];
         var password = config["Seed:AdminPassword"];
         if (string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(password))
         {
-            logger.LogWarning("Первый администратор не создан: задайте Seed:AdminEmail и Seed:AdminPassword в user-secrets.");
+            // На стенде обе строки после первого входа убирают: предупреждение — только когда входить действительно некому.
+            if ((await users.GetUsersInRoleAsync(AppRoles.Admin)).Count == 0)
+                logger.LogWarning("Администратора нет: задайте Seed:AdminEmail и Seed:AdminPassword " +
+                    "(в разработке — user-secrets, на стенде — ADMIN_EMAIL и ADMIN_PASSWORD в .env).");
             return;
         }
 
-        var users = services.GetRequiredService<UserManager<AppUser>>();
         var admin = await users.FindByEmailAsync(email);
         if (admin is null)
         {
