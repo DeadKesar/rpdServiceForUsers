@@ -55,7 +55,7 @@ public sealed partial class StandFilesTests
     [Fact]
     public void Services_restart_and_use_moscow_time()
     {
-        foreach (var name in new[] { "proxy", "api", "db", "converter", "mail" })
+        foreach (var name in new[] { "proxy", "api", "db", "converter", "mail", "backup" })
         {
             var service = Service(name);
             Assert.Contains("<<: *service", service);
@@ -87,6 +87,43 @@ public sealed partial class StandFilesTests
         var api = Service("api");
         Assert.Contains("Mail__Host: ${MAIL_HOST:-mail}", api);
         Assert.Contains("Mail__Security: ${MAIL_SECURITY:-None}", api);
+    }
+
+    /// <summary>Резервные копии (B7, NFR-REL-05): служба ходит только в базу, копий по умолчанию 30, ночью, папка — настройкой.</summary>
+    [Fact]
+    public void Backup_service_keeps_thirty_copies_nightly_in_a_configurable_folder()
+    {
+        var backup = Service("backup");
+        Assert.DoesNotContain("ports:", backup);
+        // Только внутренняя сеть: у службы нет выхода в интернет и нет доступа к почте.
+        Assert.Matches(@"networks: \[back\]", backup);
+        Assert.Contains("BACKUP_KEEP: ${BACKUP_KEEP:-30}", backup);
+        Assert.Contains("BACKUP_TIME: ${BACKUP_TIME:-03:00}", backup);
+        Assert.Contains("${BACKUP_DIR:-./backups}:/backups", backup);
+        // Тот же мажор PostgreSQL, что у базы: pg_dump старше сервера отказывается работать.
+        Assert.Equal(Regex.Match(Service("db"), @"image: (\S+)").Groups[1].Value, Regex.Match(backup, @"image: (\S+)").Groups[1].Value);
+        // Служба стартует после базы и сообщает, что копии идут.
+        Assert.Matches(@"condition: service_healthy", backup);
+        Assert.Contains("healthcheck:", backup);
+        // Копии не попадают в git.
+        Assert.Contains("deploy/backups/", File.ReadAllText(Path.Combine(Root(), ".gitignore")));
+    }
+
+    /// <summary>Сценарий копий (B7): хранение — последние N после удачной новой, восстановление не стирает базу без «--replace».</summary>
+    [Fact]
+    public void Backup_script_prunes_after_success_and_protects_existing_data()
+    {
+        var script = File.ReadAllText(Path.Combine(Deploy, "scripts", "backup.sh"));
+        Assert.DoesNotContain('\r', script);
+        // Хранится BACKUP_KEEP (по умолчанию 30), прореживание — только после удачной копии.
+        Assert.Contains("KEEP=\"${BACKUP_KEEP:-30}\"", script);
+        Assert.Matches(@"make_backup rpdfos; then\s+last=\$today\s+prune", script.ReplaceLineEndings("\n"));
+        Assert.Contains("--replace", script);
+        // Копия — в формате custom, сначала во временный файл.
+        Assert.Contains("pg_dump -Fc", script);
+        Assert.Contains(".partial", script);
+        // Восстановление идёт во временную базу, подмена — после успеха.
+        Assert.Matches(@"(?s)pg_restore -d ""\$tmp"".*?DROP DATABASE IF EXISTS \$DB.*?RENAME TO \$DB", script.Replace("\r", ""));
     }
 
     [Fact]

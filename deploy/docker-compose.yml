@@ -136,6 +136,43 @@ services:
       - maildkim:/var/lib/rspamd/dkim
     networks: [mailnet]
 
+  # Резервные копии базы (NFR-REL-05): ежедневно ночью pg_dump в папку компьютера, хранятся BACKUP_KEEP последних.
+  # В базе лежат и исходные файлы, и шаблоны оформления с рисунками, поэтому копии базы достаточно; сформированные файлы
+  # не копируются — их формируют заново. Восстановление и проверка: docker compose run --rm backup restore | verify.
+  backup:
+    <<: *service
+    image: postgres:17-alpine
+    entrypoint: ["sh", "/scripts/backup.sh"]
+    command: ["loop"]
+    environment:
+      TZ: Europe/Moscow   # время копии — по московскому поясу
+      PGHOST: db
+      PGUSER: rpdfos
+      PGDATABASE: rpdfos
+      PGPASSWORD: ${DB_PASSWORD:?задайте DB_PASSWORD в deploy/.env — пароль базы}
+      BACKUP_TIME: ${BACKUP_TIME:-03:00}
+      BACKUP_KEEP: ${BACKUP_KEEP:-30}
+    volumes:
+      # Папка копий на компьютере — лучше на другом диске, чем том базы (инструкция, раздел «Резервные копии»).
+      - ${BACKUP_DIR:-./backups}:/backups
+      - ./scripts:/scripts:ro
+    # Образ postgres объявляет том для данных сервера; службе он не нужен, а без этой строки при каждом пересоздании
+    # контейнера оставался бы безымянный пустой том.
+    tmpfs:
+      - /var/lib/postgresql/data
+    networks: [back]
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "sh", "/scripts/backup.sh", "check"]
+      interval: 1h
+      timeout: 10s
+      retries: 1
+      # Без начального периода первая проверка наступила бы через час, и «up --wait» ждал бы его (нужен Docker 25+).
+      start_period: 30s
+      start_interval: 5s
+
   # Выпуск сертификатов: docker compose run --rm certs. Образ тот же, что у прокси: в нём есть openssl,
   # на компьютер ничего не ставится. В обычный запуск служба не входит.
   certs:
