@@ -79,6 +79,64 @@ public sealed class ManualsTests : IDisposable
     public void Methodist_manual_has_section(string anchor) =>
         Assert.Contains(Manual.Load(Path.Combine(Manuals(), "methodist.md")).Headings, h => h.Anchor == anchor);
 
+    // Руководство системного программиста (B11): все настройки файлов описаны, разделы на месте.
+    [Fact]
+    public void Sysadmin_manual_describes_every_setting() =>
+        Assert.Empty(SettingsCoverage.Check(Path.GetDirectoryName(Path.GetDirectoryName(Manuals()))!));
+
+    [Theory]
+    [InlineData("Mail:DigestHour")]                 // appsettings.json, вложенный раздел
+    [InlineData("Jobs:Enabled")]                    // appsettings.Testing.json
+    [InlineData("Auth:PublicUrl")]                  // appsettings.Development.json и compose
+    [InlineData("ConnectionStrings:Default")]
+    [InlineData("STAND_HOST")]                      // образец .env
+    [InlineData("BACKUP_KEEP")]
+    [InlineData("Auth:SigningCertificatePath")]     // только в compose стенда
+    [InlineData("Seed:AdminEmail")]
+    [InlineData("DataProtection:KeysPath")]         // только в Dockerfile
+    [InlineData("ASPNETCORE_ENVIRONMENT")]
+    [InlineData("Imports:MaxFileBytes")]            // только в коде
+    [InlineData("Converter:TimeoutSeconds")]
+    public void Settings_are_collected_from_every_source(string key) =>
+        Assert.Contains(SettingsCoverage.Collect(Path.GetDirectoryName(Path.GetDirectoryName(Manuals()))!), s => s.Key == key);
+
+    [Fact]
+    public void Settings_check_names_an_undescribed_setting()
+    {
+        var root = Directory.CreateDirectory(Path.Combine(folder, "repo")).FullName;
+        Directory.CreateDirectory(Path.Combine(root, "src", "RpdFos.Api"));
+        Directory.CreateDirectory(Path.Combine(root, "deploy"));
+        Directory.CreateDirectory(Path.Combine(root, "docs", "manuals"));
+        File.WriteAllText(Path.Combine(root, "src", "RpdFos.Api", "appsettings.json"), "{\"Mail\":{\"Host\":\"x\",\"Port\":1}}");
+        File.WriteAllText(Path.Combine(root, "deploy", ".env.example"), "# комментарий\nSTAND_HOST=\nDB_PASSWORD=\n");
+        File.WriteAllText(Path.Combine(root, "docs", "manuals", "sysadmin.md"), "# С\n\n`Mail:Host`, `STAND_HOST`, Mail:Port без кавычек\n");
+
+        Assert.Equal(
+            ["sysadmin.md: настройка `Mail:Port` (appsettings.json) не описана.",
+             "sysadmin.md: настройка `DB_PASSWORD` (deploy/.env.example) не описана."],
+            SettingsCoverage.Check(root));
+    }
+
+    [Theory]
+    [InlineData("components")]
+    [InlineData("install")]
+    [InlineData("update")]
+    [InlineData("transfer")]
+    [InlineData("corporate-mail")]
+    [InlineData("settings")]
+    [InlineData("backup")]
+    [InlineData("restore")]
+    [InlineData("diagnostics")]
+    [InlineData("database")]
+    [InlineData("api")]
+    [InlineData("admin")]
+    [InlineData("admin-users")]
+    [InlineData("admin-employees")]
+    [InlineData("admin-departments")]
+    [InlineData("admin-audit")]
+    public void Sysadmin_manual_has_section(string anchor) =>
+        Assert.Contains(Manual.Load(Path.Combine(Manuals(), "sysadmin.md")).Headings, h => h.Anchor == anchor);
+
     [Fact]
     public void Correct_manual_passes()
     {

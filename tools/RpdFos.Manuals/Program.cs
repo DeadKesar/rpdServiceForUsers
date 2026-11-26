@@ -11,13 +11,14 @@ if (root is null)
 }
 
 var folder = Path.Combine(root, "docs", "manuals");
-var problems = Manual.Check(folder);
+var problems = Manual.Check(folder).Concat(SettingsCoverage.Check(root)).ToList();
 foreach (var problem in problems) Console.Error.WriteLine(problem);
 if (problems.Count > 0) return 1;
 
 var manuals = Manual.LoadAll(folder);
 foreach (var manual in manuals)
     Console.WriteLine($"{manual.Name}: заголовков {manual.Headings.Count}, снимков {manual.Images.Count}; ссылки и якоря в порядке.");
+Console.WriteLine($"{SettingsCoverage.ManualName}: описаны все настройки файлов ({SettingsCoverage.Collect(root).Count}).");
 if (args.Contains("--check")) return 0;
 
 using var converter = new HttpClient

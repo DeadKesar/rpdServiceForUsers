@@ -143,5 +143,10 @@ public sealed class ManualPdf(HttpClient converter)
         figure img { box-sizing: border-box; max-width: 100%; max-height: 120mm; border: 1px solid #bbb; }
         figcaption { font-size: 9.5pt; margin-top: 1.5mm; }
         code { font: 9.5pt 'Liberation Mono', Consolas, monospace; }
+        /* Длинные значения (адреса, строки подключения) переносятся в любом месте: иначе таблица шире страницы, и Chromium
+           уменьшает при печати всю страницу. Ключ в первом столбце не режется — по нему ищут. */
+        td code { font-size: 8.5pt; overflow-wrap: anywhere; }
+        td:first-child code { overflow-wrap: normal; }
+        pre { white-space: pre-wrap; overflow-wrap: anywhere; }
         """;
 }
