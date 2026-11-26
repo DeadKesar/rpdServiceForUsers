@@ -56,6 +56,29 @@ public sealed class ManualsTests : IDisposable
     public void Teacher_manual_has_section(string anchor) =>
         Assert.Contains(Manual.Load(Path.Combine(Manuals(), "teacher.md")).Headings, h => h.Anchor == anchor);
 
+    // Разделы руководства методиста (B10): страницы роли и действия с документом; на них поведёт «?» (B12).
+    [Theory]
+    [InlineData("import")]
+    [InlineData("import-messages")]
+    [InlineData("matrix-rows")]
+    [InlineData("assignments")]
+    [InlineData("templates")]
+    [InlineData("template-bookmarks")]
+    [InlineData("template-defaults")]
+    [InlineData("template-revision")]
+    [InlineData("review")]
+    [InlineData("comments")]
+    [InlineData("plan-fields")]
+    [InlineData("cross-check")]
+    [InlineData("accept-document")]
+    [InlineData("assign-approvers")]
+    [InlineData("history")]
+    [InlineData("correction")]
+    [InlineData("archive")]
+    [InlineData("transfer")]
+    public void Methodist_manual_has_section(string anchor) =>
+        Assert.Contains(Manual.Load(Path.Combine(Manuals(), "methodist.md")).Headings, h => h.Anchor == anchor);
+
     [Fact]
     public void Correct_manual_passes()
     {
